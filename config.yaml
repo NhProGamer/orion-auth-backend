@@ -1,0 +1,50 @@
+server:
+  host: "0.0.0.0"
+  port: 8080
+  mode: "debug" # debug, release, test
+
+database:
+  host: "localhost"
+  port: 5432
+  user: "orionauth"
+  password: "orionauth"
+  name: "orionauth"
+  sslmode: "disable"
+  max_open_conns: 25
+  max_idle_conns: 10
+  conn_max_lifetime: "5m"
+
+auth:
+  access_token_ttl: "1h"
+  refresh_token_ttl: "24h"
+  session_ttl: "720h" # 30 days
+  auth_code_ttl: "60s"
+  device_code_ttl: "10m"
+  password_min_length: 8
+  max_failed_attempts: 5
+  lockout_duration: "15m"
+
+argon2:
+  memory: 65536 # 64MB
+  iterations: 3
+  parallelism: 4
+  salt_length: 16
+  key_length: 32
+
+cors:
+  allowed_origins:
+    - "http://localhost:3000"
+  allowed_methods:
+    - "GET"
+    - "POST"
+    - "PATCH"
+    - "PUT"
+    - "DELETE"
+    - "OPTIONS"
+  allowed_headers:
+    - "Authorization"
+    - "Content-Type"
+    - "X-Request-ID"
+  max_age: 3600
+
+issuer: "http://localhost:8080"
