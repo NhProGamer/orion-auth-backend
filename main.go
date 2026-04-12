@@ -13,10 +13,12 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"OrionAuth/client"
 	"OrionAuth/config"
 	"OrionAuth/crypto"
 	"OrionAuth/database"
 	"OrionAuth/middleware"
+	"OrionAuth/oauth"
 	"OrionAuth/session"
 	"OrionAuth/user"
 )
@@ -46,17 +48,23 @@ func main() {
 	// Repositories
 	userRepo := user.NewRepository(db)
 	sessionRepo := session.NewRepository(db)
+	clientRepo := client.NewRepository(db)
+	oauthRepo := oauth.NewRepository(db)
 
 	// Services
 	userService := user.NewService(userRepo, hasher, cfg.Auth)
 	sessionService := session.NewService(sessionRepo, cfg.Auth)
+	clientService := client.NewService(clientRepo, hasher)
+	oauthService := oauth.NewService(oauthRepo, userService, sessionService, hasher, cfg.Auth)
 
 	// Handlers
 	userHandler := user.NewHandler(userService)
 	sessionHandler := session.NewHandler(sessionService)
+	clientHandler := client.NewHandler(clientService)
+	oauthHandler := oauth.NewHandler(oauthService)
 
 	// Router
-	router := setupRouter(cfg, db, userHandler, sessionHandler)
+	router := setupRouter(cfg, db, hasher, userHandler, sessionHandler, clientHandler, oauthHandler)
 
 	// Server
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
@@ -93,7 +101,15 @@ func main() {
 	slog.Info("server stopped")
 }
 
-func setupRouter(cfg *config.Config, db *gorm.DB, userHandler *user.Handler, sessionHandler *session.Handler) *gin.Engine {
+func setupRouter(
+	cfg *config.Config,
+	db *gorm.DB,
+	hasher *crypto.Argon2Hasher,
+	userHandler *user.Handler,
+	sessionHandler *session.Handler,
+	clientHandler *client.Handler,
+	oauthHandler *oauth.Handler,
+) *gin.Engine {
 	gin.SetMode(cfg.Server.Mode)
 	router := gin.New()
 	router.Use(gin.Recovery())
@@ -104,15 +120,24 @@ func setupRouter(cfg *config.Config, db *gorm.DB, userHandler *user.Handler, ses
 	router.GET("/health", healthCheck)
 	router.GET("/ready", readinessCheck(db))
 
+	// OAuth2/OIDC endpoints (root level)
+	clientAuthMiddleware := middleware.ClientAuth(db, hasher)
+	oauthHandler.RegisterRoutes(router, clientAuthMiddleware, cfg.Issuer)
+
 	// Public API routes (no auth required)
 	public := router.Group("/api/v1")
-	userHandler.RegisterRoutes(public, nil) // register + login only
+	userHandler.RegisterRoutes(public, nil)
 
 	// Authenticated API routes
 	authenticated := router.Group("/api/v1")
 	authenticated.Use(middleware.BearerAuth(db))
-	userHandler.RegisterRoutes(nil, authenticated) // profile routes
+	userHandler.RegisterRoutes(nil, authenticated)
 	sessionHandler.RegisterRoutes(authenticated)
+
+	// Admin API routes (authenticated, will add RBAC in Phase 5)
+	admin := router.Group("/api/v1/admin")
+	admin.Use(middleware.BearerAuth(db))
+	clientHandler.RegisterRoutes(admin)
 
 	return router
 }
