@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"OrionAuth/audit"
 	"OrionAuth/client"
 	"OrionAuth/config"
 	"OrionAuth/crypto"
@@ -22,6 +23,7 @@ import (
 	"OrionAuth/middleware"
 	"OrionAuth/oauth"
 	"OrionAuth/oidc"
+	"OrionAuth/rbac"
 	"OrionAuth/session"
 	"OrionAuth/user"
 )
@@ -49,12 +51,16 @@ func main() {
 	hasher := crypto.NewArgon2Hasher(cfg.Argon2)
 	emailSender := email.NewSMTPSender(cfg.SMTP, cfg.Issuer)
 
+	// Rate limiter: 20 burst, 5 req/s sustained for auth endpoints
+	authRateLimiter := middleware.NewRateLimiter(20, 5)
+
 	// Repositories
 	userRepo := user.NewRepository(db)
 	sessionRepo := session.NewRepository(db)
 	clientRepo := client.NewRepository(db)
 	oauthRepo := oauth.NewRepository(db)
 	mfaRepo := mfa.NewRepository(db)
+	rbacRepo := rbac.NewRepository(db)
 
 	// Services
 	userService := user.NewService(userRepo, hasher, cfg.Auth)
@@ -64,6 +70,8 @@ func main() {
 	oauthService := oauth.NewService(oauthRepo, userService, sessionService, hasher, cfg.Auth)
 	oidcService := oidc.NewService(db, userService, cfg.Issuer)
 	mfaService := mfa.NewService(mfaRepo, hasher)
+	rbacService := rbac.NewService(rbacRepo)
+	auditService := audit.NewService(db)
 
 	// Initialize signing keys
 	if err := oidcService.EnsureSigningKey(); err != nil {
@@ -82,9 +90,11 @@ func main() {
 	oauthHandler := oauth.NewHandler(oauthService)
 	oidcHandler := oidc.NewHandler(oidcService)
 	mfaHandler := mfa.NewHandler(mfaService, userService)
+	rbacHandler := rbac.NewHandler(rbacService)
+	auditHandler := audit.NewHandler(auditService)
 
 	// Router
-	router := setupRouter(cfg, db, hasher, userHandler, sessionHandler, clientHandler, oauthHandler, oidcHandler, mfaHandler)
+	router := setupRouter(cfg, db, hasher, authRateLimiter, rbacService, userHandler, sessionHandler, clientHandler, oauthHandler, oidcHandler, mfaHandler, rbacHandler, auditHandler)
 
 	// Server
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
@@ -125,12 +135,16 @@ func setupRouter(
 	cfg *config.Config,
 	db *gorm.DB,
 	hasher *crypto.Argon2Hasher,
+	authRL *middleware.RateLimiter,
+	rbacService *rbac.Service,
 	userHandler *user.Handler,
 	sessionHandler *session.Handler,
 	clientHandler *client.Handler,
 	oauthHandler *oauth.Handler,
 	oidcHandler *oidc.Handler,
 	mfaHandler *mfa.Handler,
+	rbacHandler *rbac.Handler,
+	auditHandler *audit.Handler,
 ) *gin.Engine {
 	gin.SetMode(cfg.Server.Mode)
 	router := gin.New()
@@ -142,7 +156,7 @@ func setupRouter(
 	router.GET("/health", healthCheck)
 	router.GET("/ready", readinessCheck(db))
 
-	// OAuth2 endpoints (root level)
+	// OAuth2 endpoints (root level, rate limited)
 	clientAuthMiddleware := middleware.ClientAuth(db, hasher)
 	oauthHandler.RegisterRoutes(router, clientAuthMiddleware, cfg.Issuer)
 
@@ -150,8 +164,9 @@ func setupRouter(
 	bearerAuthMiddleware := middleware.BearerAuth(db)
 	oidcHandler.RegisterRoutes(router, bearerAuthMiddleware)
 
-	// Public API routes (no auth required)
+	// Public API routes (rate limited)
 	public := router.Group("/api/v1")
+	public.Use(authRL.Middleware())
 	userHandler.RegisterRoutes(public, nil)
 
 	// Authenticated API routes
@@ -161,11 +176,29 @@ func setupRouter(
 	sessionHandler.RegisterRoutes(authenticated)
 	mfaHandler.RegisterRoutes(authenticated)
 
-	// Admin API routes (authenticated, will add RBAC in Phase 5)
-	admin := router.Group("/api/v1/admin")
-	admin.Use(bearerAuthMiddleware)
-	clientHandler.RegisterRoutes(admin)
-	oidcHandler.RegisterAdminRoutes(admin)
+	// Admin API routes (authenticated + RBAC)
+	adminBase := router.Group("/api/v1/admin")
+	adminBase.Use(bearerAuthMiddleware)
+
+	// Client management (requires clients:read or clients:write)
+	clientAdmin := adminBase.Group("")
+	clientAdmin.Use(rbac.RequireAnyPermission(rbacService, "clients:read", "clients:write"))
+	clientHandler.RegisterRoutes(clientAdmin)
+
+	// RBAC management (requires roles:read or roles:write)
+	rbacAdmin := adminBase.Group("")
+	rbacAdmin.Use(rbac.RequireAnyPermission(rbacService, "roles:read", "roles:write"))
+	rbacHandler.RegisterRoutes(rbacAdmin)
+
+	// Key management (requires keys:read or keys:write)
+	keyAdmin := adminBase.Group("")
+	keyAdmin.Use(rbac.RequireAnyPermission(rbacService, "keys:read", "keys:write"))
+	oidcHandler.RegisterAdminRoutes(keyAdmin)
+
+	// Audit logs (requires audit:read)
+	auditAdmin := adminBase.Group("")
+	auditAdmin.Use(rbac.RequirePermission(rbacService, "audit:read"))
+	auditHandler.RegisterRoutes(auditAdmin)
 
 	return router
 }
