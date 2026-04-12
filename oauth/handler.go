@@ -12,13 +12,16 @@ import (
 
 type Handler struct {
 	service *Service
+	issuer  string
 }
 
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
-func (h *Handler) RegisterRoutes(router *gin.Engine, clientAuth gin.HandlerFunc) {
+func (h *Handler) RegisterRoutes(router *gin.Engine, clientAuth gin.HandlerFunc, issuer string) {
+	h.issuer = issuer
+
 	// Authorization endpoints (no client auth middleware, client is identified by params)
 	router.GET("/authorize", h.Authorize)
 	router.POST("/authorize/login", h.AuthorizeLogin)
@@ -26,6 +29,10 @@ func (h *Handler) RegisterRoutes(router *gin.Engine, clientAuth gin.HandlerFunc)
 
 	// Token endpoint (client auth required)
 	router.POST("/token", clientAuth, h.Token)
+
+	// Introspection and revocation (client auth required)
+	router.POST("/introspect", clientAuth, h.Introspect)
+	router.POST("/revoke", clientAuth, h.Revoke)
 }
 
 // Authorize initiates the authorization request (API-driven).
@@ -179,4 +186,43 @@ func (h *Handler) handleRefreshTokenGrant(c *gin.Context, client *model.OAuthCli
 	}
 
 	pkg.OK(c, resp)
+}
+
+// Introspect handles POST /introspect (RFC 7662).
+func (h *Handler) Introspect(c *gin.Context) {
+	_, ok := middleware.GetOAuthClient(c)
+	if !ok {
+		pkg.HandleError(c, pkg.ErrInvalidClient("client authentication required"))
+		return
+	}
+
+	token := c.PostForm("token")
+	tokenTypeHint := c.PostForm("token_type_hint")
+
+	resp, err := h.service.Introspect(token, tokenTypeHint, h.issuer)
+	if err != nil {
+		pkg.HandleError(c, err)
+		return
+	}
+
+	pkg.OK(c, resp)
+}
+
+// Revoke handles POST /revoke (RFC 7009).
+func (h *Handler) Revoke(c *gin.Context) {
+	client, ok := middleware.GetOAuthClient(c)
+	if !ok {
+		pkg.HandleError(c, pkg.ErrInvalidClient("client authentication required"))
+		return
+	}
+
+	token := c.PostForm("token")
+	tokenTypeHint := c.PostForm("token_type_hint")
+
+	if err := h.service.Revoke(token, tokenTypeHint, client); err != nil {
+		pkg.HandleError(c, err)
+		return
+	}
+
+	pkg.OK(c, gin.H{})
 }
