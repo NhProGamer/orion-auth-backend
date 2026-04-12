@@ -17,6 +17,8 @@ import (
 	"OrionAuth/config"
 	"OrionAuth/crypto"
 	"OrionAuth/database"
+	"OrionAuth/email"
+	"OrionAuth/mfa"
 	"OrionAuth/middleware"
 	"OrionAuth/oauth"
 	"OrionAuth/oidc"
@@ -45,19 +47,23 @@ func main() {
 
 	// Dependencies
 	hasher := crypto.NewArgon2Hasher(cfg.Argon2)
+	emailSender := email.NewSMTPSender(cfg.SMTP, cfg.Issuer)
 
 	// Repositories
 	userRepo := user.NewRepository(db)
 	sessionRepo := session.NewRepository(db)
 	clientRepo := client.NewRepository(db)
 	oauthRepo := oauth.NewRepository(db)
+	mfaRepo := mfa.NewRepository(db)
 
 	// Services
 	userService := user.NewService(userRepo, hasher, cfg.Auth)
+	userService.SetEmailSender(emailSender)
 	sessionService := session.NewService(sessionRepo, cfg.Auth)
 	clientService := client.NewService(clientRepo, hasher)
 	oauthService := oauth.NewService(oauthRepo, userService, sessionService, hasher, cfg.Auth)
 	oidcService := oidc.NewService(db, userService, cfg.Issuer)
+	mfaService := mfa.NewService(mfaRepo, hasher)
 
 	// Initialize signing keys
 	if err := oidcService.EnsureSigningKey(); err != nil {
@@ -65,8 +71,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Connect OIDC ID token generator to OAuth2 service
+	// Connect cross-service dependencies
 	oauthService.SetIDTokenGenerator(oidc.NewIDTokenAdapter(oidcService))
+	oauthService.SetMFAValidator(mfaService)
 
 	// Handlers
 	userHandler := user.NewHandler(userService)
@@ -74,9 +81,10 @@ func main() {
 	clientHandler := client.NewHandler(clientService)
 	oauthHandler := oauth.NewHandler(oauthService)
 	oidcHandler := oidc.NewHandler(oidcService)
+	mfaHandler := mfa.NewHandler(mfaService, userService)
 
 	// Router
-	router := setupRouter(cfg, db, hasher, userHandler, sessionHandler, clientHandler, oauthHandler, oidcHandler)
+	router := setupRouter(cfg, db, hasher, userHandler, sessionHandler, clientHandler, oauthHandler, oidcHandler, mfaHandler)
 
 	// Server
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
@@ -122,6 +130,7 @@ func setupRouter(
 	clientHandler *client.Handler,
 	oauthHandler *oauth.Handler,
 	oidcHandler *oidc.Handler,
+	mfaHandler *mfa.Handler,
 ) *gin.Engine {
 	gin.SetMode(cfg.Server.Mode)
 	router := gin.New()
@@ -150,6 +159,7 @@ func setupRouter(
 	authenticated.Use(bearerAuthMiddleware)
 	userHandler.RegisterRoutes(nil, authenticated)
 	sessionHandler.RegisterRoutes(authenticated)
+	mfaHandler.RegisterRoutes(authenticated)
 
 	// Admin API routes (authenticated, will add RBAC in Phase 5)
 	admin := router.Group("/api/v1/admin")
