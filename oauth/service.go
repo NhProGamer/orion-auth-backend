@@ -18,12 +18,29 @@ import (
 	"OrionAuth/user"
 )
 
+// IDTokenGenerator is an interface to avoid circular imports with the oidc package.
+type IDTokenGenerator interface {
+	GenerateIDToken(claims IDTokenClaims) (string, error)
+}
+
+// IDTokenClaims mirrors oidc.IDTokenClaims to avoid circular imports.
+type IDTokenClaims struct {
+	UserID   uuid.UUID
+	ClientID uuid.UUID
+	Scopes   []string
+	Nonce    string
+	AuthTime time.Time
+	ATHash   string
+	TTL      time.Duration
+}
+
 type Service struct {
 	repo           *Repository
 	userService    *user.Service
 	sessionService *session.Service
 	hasher         *crypto.Argon2Hasher
 	cfg            config.AuthConfig
+	idTokenGen     IDTokenGenerator
 }
 
 func NewService(
@@ -42,12 +59,18 @@ func NewService(
 	}
 }
 
+// SetIDTokenGenerator sets the OIDC ID token generator (called after init to break circular dep).
+func (s *Service) SetIDTokenGenerator(gen IDTokenGenerator) {
+	s.idTokenGen = gen
+}
+
 // TokenResponse is the standard OAuth2 token response.
 type TokenResponse struct {
 	AccessToken  string `json:"access_token"`
 	TokenType    string `json:"token_type"`
 	ExpiresIn    int    `json:"expires_in"`
 	RefreshToken string `json:"refresh_token,omitempty"`
+	IDToken      string `json:"id_token,omitempty"`
 	Scope        string `json:"scope,omitempty"`
 }
 
@@ -368,7 +391,14 @@ func (s *Service) ExchangeAuthorizationCode(client *model.OAuthClient, code, red
 		}
 
 		// Issue tokens
-		resp, err = s.issueTokens(tx, client, &authCode.UserID, authCode.SessionID, authCode.Scopes)
+		var nonce string
+		if authCode.Nonce != nil {
+			nonce = *authCode.Nonce
+		}
+		resp, err = s.issueTokensWithOpts(tx, client, &authCode.UserID, authCode.SessionID, authCode.Scopes, issueOpts{
+			nonce:    nonce,
+			authTime: authCode.CreatedAt,
+		})
 		return err
 	})
 
@@ -486,7 +516,16 @@ func (s *Service) ExchangeRefreshToken(client *model.OAuthClient, refreshTokenRa
 
 // --- Helpers ---
 
+type issueOpts struct {
+	nonce    string
+	authTime time.Time
+}
+
 func (s *Service) issueTokens(tx *Repository, client *model.OAuthClient, userID *uuid.UUID, sessionID *uuid.UUID, scopes pq.StringArray) (*TokenResponse, error) {
+	return s.issueTokensWithOpts(tx, client, userID, sessionID, scopes, issueOpts{authTime: time.Now()})
+}
+
+func (s *Service) issueTokensWithOpts(tx *Repository, client *model.OAuthClient, userID *uuid.UUID, sessionID *uuid.UUID, scopes pq.StringArray, opts issueOpts) (*TokenResponse, error) {
 	// Generate access token
 	rawAT, atHash, err := crypto.GenerateOpaqueToken()
 	if err != nil {
@@ -529,13 +568,53 @@ func (s *Service) issueTokens(tx *Repository, client *model.OAuthClient, userID 
 		return nil, pkg.ErrServerError("failed to store access token")
 	}
 
-	return &TokenResponse{
+	resp := &TokenResponse{
 		AccessToken:  rawAT,
 		TokenType:    "Bearer",
 		ExpiresIn:    client.AccessTokenTTL,
 		RefreshToken: rawRT,
 		Scope:        joinScopes(scopes),
-	}, nil
+	}
+
+	// Generate ID token if openid scope is present
+	if s.idTokenGen != nil && containsScope(scopes, "openid") && userID != nil {
+		atHashValue := computeATHash(rawAT)
+		authTime := opts.authTime
+		if authTime.IsZero() {
+			authTime = time.Now()
+		}
+
+		idToken, err := s.idTokenGen.GenerateIDToken(IDTokenClaims{
+			UserID:   *userID,
+			ClientID: client.ID,
+			Scopes:   scopes,
+			Nonce:    opts.nonce,
+			AuthTime: authTime,
+			ATHash:   atHashValue,
+			TTL:      time.Duration(client.IDTokenTTL) * time.Second,
+		})
+		if err != nil {
+			slog.Warn("failed to generate ID token", "error", err)
+		} else {
+			resp.IDToken = idToken
+		}
+	}
+
+	return resp, nil
+}
+
+func containsScope(scopes []string, target string) bool {
+	for _, s := range scopes {
+		if s == target {
+			return true
+		}
+	}
+	return false
+}
+
+func computeATHash(accessToken string) string {
+	h := sha256.Sum256([]byte(accessToken))
+	return base64.RawURLEncoding.EncodeToString(h[:16])
 }
 
 func verifyPKCE(codeVerifier, codeChallenge string) bool {
