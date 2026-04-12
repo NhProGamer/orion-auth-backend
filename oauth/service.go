@@ -23,6 +23,12 @@ type IDTokenGenerator interface {
 	GenerateIDToken(claims IDTokenClaims) (string, error)
 }
 
+// MFAValidator is an interface to avoid circular imports with the mfa package.
+type MFAValidator interface {
+	HasMFA(userID uuid.UUID) (bool, error)
+	ValidateCode(userID uuid.UUID, code string) (bool, error)
+}
+
 // IDTokenClaims mirrors oidc.IDTokenClaims to avoid circular imports.
 type IDTokenClaims struct {
 	UserID   uuid.UUID
@@ -41,6 +47,7 @@ type Service struct {
 	hasher         *crypto.Argon2Hasher
 	cfg            config.AuthConfig
 	idTokenGen     IDTokenGenerator
+	mfaValidator   MFAValidator
 }
 
 func NewService(
@@ -62,6 +69,11 @@ func NewService(
 // SetIDTokenGenerator sets the OIDC ID token generator (called after init to break circular dep).
 func (s *Service) SetIDTokenGenerator(gen IDTokenGenerator) {
 	s.idTokenGen = gen
+}
+
+// SetMFAValidator sets the MFA validator (called after init to break circular dep).
+func (s *Service) SetMFAValidator(v MFAValidator) {
+	s.mfaValidator = v
 }
 
 // TokenResponse is the standard OAuth2 token response.
@@ -202,10 +214,82 @@ func (s *Service) AuthorizeLogin(input AuthorizeLoginInput, ipAddress, userAgent
 		needsConsent = !client.IsFirstParty
 	}
 
+	// Check if user has MFA enabled
+	var needsMFA bool
+	if s.mfaValidator != nil {
+		hasMFA, _ := s.mfaValidator.HasMFA(u.ID)
+		needsMFA = hasMFA
+	}
+
 	req.UserID = &u.ID
-	req.Authenticated = true
-	if !needsConsent {
+	if needsMFA {
+		// Don't mark as authenticated yet — MFA step required
+	} else {
+		req.Authenticated = true
+	}
+	if !needsConsent && req.Authenticated {
 		req.ConsentGiven = true
+	}
+
+	if err := s.repo.UpdateAuthRequest(req); err != nil {
+		return nil, pkg.ErrServerError("failed to update authorization request")
+	}
+
+	return &AuthorizeLoginResponse{
+		RequestID:       req.ID,
+		Authenticated:   !needsMFA,
+		RequiresConsent: needsConsent,
+		RequiresMFA:     needsMFA,
+		Scopes:          req.Scopes,
+	}, nil
+}
+
+// --- MFA Step ---
+
+type AuthorizeMFAInput struct {
+	RequestID uuid.UUID `json:"request_id" binding:"required"`
+	Code      string    `json:"code" binding:"required"`
+}
+
+func (s *Service) AuthorizeMFA(input AuthorizeMFAInput) (*AuthorizeLoginResponse, error) {
+	req, err := s.repo.FindAuthRequest(input.RequestID)
+	if err != nil || req == nil {
+		return nil, pkg.ErrInvalidRequest("invalid or expired authorization request")
+	}
+	if req.IsExpired() {
+		return nil, pkg.ErrInvalidRequest("authorization request expired")
+	}
+	if req.UserID == nil {
+		return nil, pkg.ErrInvalidRequest("must authenticate first")
+	}
+	if req.Authenticated {
+		return nil, pkg.ErrInvalidRequest("MFA already completed")
+	}
+
+	if s.mfaValidator == nil {
+		return nil, pkg.ErrServerError("MFA validator not configured")
+	}
+
+	valid, err := s.mfaValidator.ValidateCode(*req.UserID, input.Code)
+	if err != nil || !valid {
+		return nil, pkg.ErrAccessDenied("invalid MFA code")
+	}
+
+	req.Authenticated = true
+
+	// Check consent
+	var needsConsent bool
+	consent, _ := s.repo.FindActiveConsent(*req.UserID, req.ClientID)
+	if consent != nil && consent.CoversScopes(req.Scopes) {
+		needsConsent = false
+		req.ConsentGiven = true
+	} else {
+		var client model.OAuthClient
+		s.repo.db.Where("id = ?", req.ClientID).First(&client)
+		needsConsent = !client.IsFirstParty
+		if !needsConsent {
+			req.ConsentGiven = true
+		}
 	}
 
 	if err := s.repo.UpdateAuthRequest(req); err != nil {
@@ -216,7 +300,7 @@ func (s *Service) AuthorizeLogin(input AuthorizeLoginInput, ipAddress, userAgent
 		RequestID:       req.ID,
 		Authenticated:   true,
 		RequiresConsent: needsConsent,
-		RequiresMFA:     false, // MFA will be Phase 4
+		RequiresMFA:     false,
 		Scopes:          req.Scopes,
 	}, nil
 }

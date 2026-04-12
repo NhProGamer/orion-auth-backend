@@ -25,6 +25,7 @@ func (h *Handler) RegisterRoutes(router *gin.Engine, clientAuth gin.HandlerFunc,
 	// Authorization endpoints (no client auth middleware, client is identified by params)
 	router.GET("/authorize", h.Authorize)
 	router.POST("/authorize/login", h.AuthorizeLogin)
+	router.POST("/authorize/mfa", h.AuthorizeMFA)
 	router.POST("/authorize/consent", h.AuthorizeConsent)
 
 	// Token endpoint (client auth required)
@@ -83,6 +84,34 @@ func (h *Handler) AuthorizeLogin(c *gin.Context) {
 	}
 
 	// If no consent needed, auto-complete and return the code
+	if !resp.RequiresConsent {
+		codeResp, err := h.service.CompleteAuthorizeFirstParty(resp.RequestID, c.ClientIP(), c.GetHeader("User-Agent"))
+		if err != nil {
+			pkg.HandleError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, codeResp)
+		return
+	}
+
+	pkg.OK(c, resp)
+}
+
+// AuthorizeMFA handles the MFA verification step.
+func (h *Handler) AuthorizeMFA(c *gin.Context) {
+	var input AuthorizeMFAInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		pkg.HandleError(c, pkg.ErrInvalidRequest("invalid request body: "+err.Error()))
+		return
+	}
+
+	resp, err := h.service.AuthorizeMFA(input)
+	if err != nil {
+		pkg.HandleError(c, err)
+		return
+	}
+
+	// If no consent needed, auto-complete
 	if !resp.RequiresConsent {
 		codeResp, err := h.service.CompleteAuthorizeFirstParty(resp.RequestID, c.ClientIP(), c.GetHeader("User-Agent"))
 		if err != nil {
