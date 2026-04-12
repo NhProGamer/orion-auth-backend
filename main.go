@@ -19,6 +19,7 @@ import (
 	"OrionAuth/database"
 	"OrionAuth/middleware"
 	"OrionAuth/oauth"
+	"OrionAuth/oidc"
 	"OrionAuth/session"
 	"OrionAuth/user"
 )
@@ -56,15 +57,26 @@ func main() {
 	sessionService := session.NewService(sessionRepo, cfg.Auth)
 	clientService := client.NewService(clientRepo, hasher)
 	oauthService := oauth.NewService(oauthRepo, userService, sessionService, hasher, cfg.Auth)
+	oidcService := oidc.NewService(db, userService, cfg.Issuer)
+
+	// Initialize signing keys
+	if err := oidcService.EnsureSigningKey(); err != nil {
+		slog.Error("failed to initialize signing key", "error", err)
+		os.Exit(1)
+	}
+
+	// Connect OIDC ID token generator to OAuth2 service
+	oauthService.SetIDTokenGenerator(oidc.NewIDTokenAdapter(oidcService))
 
 	// Handlers
 	userHandler := user.NewHandler(userService)
 	sessionHandler := session.NewHandler(sessionService)
 	clientHandler := client.NewHandler(clientService)
 	oauthHandler := oauth.NewHandler(oauthService)
+	oidcHandler := oidc.NewHandler(oidcService)
 
 	// Router
-	router := setupRouter(cfg, db, hasher, userHandler, sessionHandler, clientHandler, oauthHandler)
+	router := setupRouter(cfg, db, hasher, userHandler, sessionHandler, clientHandler, oauthHandler, oidcHandler)
 
 	// Server
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
@@ -109,6 +121,7 @@ func setupRouter(
 	sessionHandler *session.Handler,
 	clientHandler *client.Handler,
 	oauthHandler *oauth.Handler,
+	oidcHandler *oidc.Handler,
 ) *gin.Engine {
 	gin.SetMode(cfg.Server.Mode)
 	router := gin.New()
@@ -120,9 +133,13 @@ func setupRouter(
 	router.GET("/health", healthCheck)
 	router.GET("/ready", readinessCheck(db))
 
-	// OAuth2/OIDC endpoints (root level)
+	// OAuth2 endpoints (root level)
 	clientAuthMiddleware := middleware.ClientAuth(db, hasher)
 	oauthHandler.RegisterRoutes(router, clientAuthMiddleware, cfg.Issuer)
+
+	// OIDC endpoints (root level)
+	bearerAuthMiddleware := middleware.BearerAuth(db)
+	oidcHandler.RegisterRoutes(router, bearerAuthMiddleware)
 
 	// Public API routes (no auth required)
 	public := router.Group("/api/v1")
@@ -130,14 +147,15 @@ func setupRouter(
 
 	// Authenticated API routes
 	authenticated := router.Group("/api/v1")
-	authenticated.Use(middleware.BearerAuth(db))
+	authenticated.Use(bearerAuthMiddleware)
 	userHandler.RegisterRoutes(nil, authenticated)
 	sessionHandler.RegisterRoutes(authenticated)
 
 	// Admin API routes (authenticated, will add RBAC in Phase 5)
 	admin := router.Group("/api/v1/admin")
-	admin.Use(middleware.BearerAuth(db))
+	admin.Use(bearerAuthMiddleware)
 	clientHandler.RegisterRoutes(admin)
+	oidcHandler.RegisterAdminRoutes(admin)
 
 	return router
 }
