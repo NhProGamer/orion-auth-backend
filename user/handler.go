@@ -18,12 +18,16 @@ func NewHandler(service *Service) *Handler {
 }
 
 func (h *Handler) RegisterRoutes(public, authenticated *gin.RouterGroup) {
-	public.POST("/auth/register", h.Register)
-	public.POST("/auth/login", h.Login)
+	if public != nil {
+		public.POST("/auth/register", h.Register)
+		public.POST("/auth/login", h.Login)
+	}
 
-	authenticated.GET("/me", h.GetProfile)
-	authenticated.PATCH("/me", h.UpdateProfile)
-	authenticated.PUT("/me/password", h.ChangePassword)
+	if authenticated != nil {
+		authenticated.GET("/me", h.GetProfile)
+		authenticated.PATCH("/me", h.UpdateProfile)
+		authenticated.PUT("/me/password", h.ChangePassword)
+	}
 }
 
 func (h *Handler) Register(c *gin.Context) {
