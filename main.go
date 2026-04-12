@@ -19,6 +19,7 @@ import (
 	"OrionAuth/crypto"
 	"OrionAuth/database"
 	"OrionAuth/email"
+	"OrionAuth/federation"
 	"OrionAuth/mfa"
 	"OrionAuth/middleware"
 	"OrionAuth/oauth"
@@ -61,6 +62,7 @@ func main() {
 	oauthRepo := oauth.NewRepository(db)
 	mfaRepo := mfa.NewRepository(db)
 	rbacRepo := rbac.NewRepository(db)
+	fedRepo := federation.NewRepository(db)
 
 	// Services
 	userService := user.NewService(userRepo, hasher, cfg.Auth)
@@ -72,6 +74,7 @@ func main() {
 	mfaService := mfa.NewService(mfaRepo, hasher)
 	rbacService := rbac.NewService(rbacRepo)
 	auditService := audit.NewService(db)
+	fedService := federation.NewService(fedRepo, cfg.Issuer)
 
 	// Initialize signing keys
 	if err := oidcService.EnsureSigningKey(); err != nil {
@@ -92,9 +95,10 @@ func main() {
 	mfaHandler := mfa.NewHandler(mfaService, userService)
 	rbacHandler := rbac.NewHandler(rbacService)
 	auditHandler := audit.NewHandler(auditService)
+	fedHandler := federation.NewHandler(fedService)
 
 	// Router
-	router := setupRouter(cfg, db, hasher, authRateLimiter, rbacService, userHandler, sessionHandler, clientHandler, oauthHandler, oidcHandler, mfaHandler, rbacHandler, auditHandler)
+	router := setupRouter(cfg, db, hasher, authRateLimiter, rbacService, userHandler, sessionHandler, clientHandler, oauthHandler, oidcHandler, mfaHandler, rbacHandler, auditHandler, fedHandler)
 
 	// Server
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
@@ -145,6 +149,7 @@ func setupRouter(
 	mfaHandler *mfa.Handler,
 	rbacHandler *rbac.Handler,
 	auditHandler *audit.Handler,
+	fedHandler *federation.Handler,
 ) *gin.Engine {
 	gin.SetMode(cfg.Server.Mode)
 	router := gin.New()
@@ -168,6 +173,7 @@ func setupRouter(
 	public := router.Group("/api/v1")
 	public.Use(authRL.Middleware())
 	userHandler.RegisterRoutes(public, nil)
+	fedHandler.RegisterPublicRoutes(public)
 
 	// Authenticated API routes
 	authenticated := router.Group("/api/v1")
@@ -175,6 +181,7 @@ func setupRouter(
 	userHandler.RegisterRoutes(nil, authenticated)
 	sessionHandler.RegisterRoutes(authenticated)
 	mfaHandler.RegisterRoutes(authenticated)
+	fedHandler.RegisterAuthenticatedRoutes(authenticated)
 
 	// Admin API routes (authenticated + RBAC)
 	adminBase := router.Group("/api/v1/admin")
@@ -194,6 +201,11 @@ func setupRouter(
 	keyAdmin := adminBase.Group("")
 	keyAdmin.Use(rbac.RequireAnyPermission(rbacService, "keys:read", "keys:write"))
 	oidcHandler.RegisterAdminRoutes(keyAdmin)
+
+	// Federation management (requires federation:read or federation:write)
+	fedAdmin := adminBase.Group("")
+	fedAdmin.Use(rbac.RequireAnyPermission(rbacService, "federation:read", "federation:write"))
+	fedHandler.RegisterAdminRoutes(fedAdmin)
 
 	// Audit logs (requires audit:read)
 	auditAdmin := adminBase.Group("")
