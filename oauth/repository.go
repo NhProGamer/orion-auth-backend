@@ -158,6 +158,34 @@ func (r *Repository) UpdateConsent(consent *model.Consent) error {
 	return r.db.Save(consent).Error
 }
 
+// --- Device Codes ---
+
+func (r *Repository) CreateDeviceCode(dc *model.DeviceCode) error {
+	return r.db.Create(dc).Error
+}
+
+func (r *Repository) FindDeviceCode(codeHash string) (*model.DeviceCode, error) {
+	var dc model.DeviceCode
+	err := r.db.Where("device_code_hash = ?", codeHash).First(&dc).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &dc, err
+}
+
+func (r *Repository) FindDeviceCodeByUserCode(userCode string) (*model.DeviceCode, error) {
+	var dc model.DeviceCode
+	err := r.db.Where("user_code = ?", userCode).First(&dc).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &dc, err
+}
+
+func (r *Repository) UpdateDeviceCode(dc *model.DeviceCode) error {
+	return r.db.Save(dc).Error
+}
+
 // --- Transactions ---
 
 func (r *Repository) Transaction(fn func(tx *Repository) error) error {

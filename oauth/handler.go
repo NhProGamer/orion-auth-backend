@@ -8,6 +8,7 @@ import (
 	"OrionAuth/middleware"
 	"OrionAuth/model"
 	"OrionAuth/pkg"
+	"OrionAuth/user"
 )
 
 type Handler struct {
@@ -30,6 +31,11 @@ func (h *Handler) RegisterRoutes(router *gin.Engine, clientAuth gin.HandlerFunc,
 
 	// Token endpoint (client auth required)
 	router.POST("/token", clientAuth, h.Token)
+
+	// Device code flow
+	router.POST("/device_authorization", clientAuth, h.DeviceAuthorization)
+	router.POST("/device/verify", h.DeviceVerify)
+	router.POST("/device/approve", h.DeviceApprove)
 
 	// Introspection and revocation (client auth required)
 	router.POST("/introspect", clientAuth, h.Introspect)
@@ -159,6 +165,8 @@ func (h *Handler) Token(c *gin.Context) {
 		h.handleClientCredentialsGrant(c, client)
 	case "refresh_token":
 		h.handleRefreshTokenGrant(c, client)
+	case "urn:ietf:params:oauth:grant-type:device_code":
+		h.handleDeviceCodeGrant(c, client)
 	default:
 		pkg.HandleError(c, pkg.ErrUnsupportedGrantType("unsupported grant_type: "+grantType))
 	}
@@ -254,4 +262,98 @@ func (h *Handler) Revoke(c *gin.Context) {
 	}
 
 	pkg.OK(c, gin.H{})
+}
+
+// --- Device Code Flow ---
+
+// DeviceAuthorization handles POST /device_authorization (RFC 8628).
+func (h *Handler) DeviceAuthorization(c *gin.Context) {
+	client, ok := middleware.GetOAuthClient(c)
+	if !ok {
+		pkg.HandleError(c, pkg.ErrInvalidClient("client authentication required"))
+		return
+	}
+
+	scope := c.PostForm("scope")
+	resp, err := h.service.InitDeviceAuthorization(client, scope, h.issuer)
+	if err != nil {
+		pkg.HandleError(c, err)
+		return
+	}
+
+	pkg.OK(c, resp)
+}
+
+// DeviceVerify handles POST /device/verify — user enters user_code.
+func (h *Handler) DeviceVerify(c *gin.Context) {
+	var input DeviceVerifyInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		pkg.HandleError(c, pkg.ErrInvalidRequest("invalid request body: "+err.Error()))
+		return
+	}
+
+	resp, err := h.service.DeviceVerify(input.UserCode)
+	if err != nil {
+		pkg.HandleError(c, err)
+		return
+	}
+
+	pkg.OK(c, resp)
+}
+
+// DeviceApprove handles POST /device/approve — authenticated user approves/denies.
+func (h *Handler) DeviceApprove(c *gin.Context) {
+	// This endpoint requires the user to be authenticated
+	// The consuming app should pass user credentials or a session token
+	var input struct {
+		UserCode string `json:"user_code" binding:"required"`
+		Approved bool   `json:"approved"`
+		Email    string `json:"email" binding:"required"`
+		Password string `json:"password" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		pkg.HandleError(c, pkg.ErrInvalidRequest("invalid request body: "+err.Error()))
+		return
+	}
+
+	// Authenticate the user
+	u, err := h.service.userService.Authenticate(user.LoginInput{
+		Email:    input.Email,
+		Password: input.Password,
+	})
+	if err != nil {
+		pkg.HandleError(c, err)
+		return
+	}
+
+	err = h.service.DeviceApprove(DeviceApproveInput{
+		UserCode: input.UserCode,
+		Approved: input.Approved,
+	}, u.ID, c.ClientIP(), c.GetHeader("User-Agent"))
+	if err != nil {
+		pkg.HandleError(c, err)
+		return
+	}
+
+	msg := "device authorization denied"
+	if input.Approved {
+		msg = "device authorization approved"
+	}
+	pkg.OK(c, gin.H{"message": msg})
+}
+
+func (h *Handler) handleDeviceCodeGrant(c *gin.Context, client *model.OAuthClient) {
+	deviceCode := c.PostForm("device_code")
+	if deviceCode == "" {
+		pkg.HandleError(c, pkg.ErrInvalidRequest("missing device_code"))
+		return
+	}
+
+	resp, err := h.service.ExchangeDeviceCode(client, deviceCode)
+	if err != nil {
+		pkg.HandleError(c, err)
+		return
+	}
+
+	pkg.OK(c, resp)
 }
