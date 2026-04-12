@@ -99,8 +99,8 @@ type InitAuthorizeResponse struct {
 
 func (s *Service) InitAuthorize(client *model.OAuthClient, redirectURI, responseType, scope, state, nonce, codeChallenge, codeChallengeMethod string) (*InitAuthorizeResponse, error) {
 	// Validate response_type
-	if responseType != "code" {
-		return nil, pkg.ErrUnsupportedResponseType("only 'code' response_type is supported")
+	if responseType != "code" && responseType != "token" {
+		return nil, pkg.ErrUnsupportedResponseType("supported response_types: code, token")
 	}
 
 	// Validate redirect_uri
@@ -312,8 +312,12 @@ type AuthorizeConsentInput struct {
 
 type AuthorizeConsentResponse struct {
 	RedirectURI string `json:"redirect_uri"`
-	Code        string `json:"code"`
+	Code        string `json:"code,omitempty"`
 	State       string `json:"state,omitempty"`
+	// Implicit flow fields
+	AccessToken string `json:"access_token,omitempty"`
+	TokenType   string `json:"token_type,omitempty"`
+	ExpiresIn   int    `json:"expires_in,omitempty"`
 }
 
 func (s *Service) AuthorizeConsent(input AuthorizeConsentInput, ipAddress, userAgent string) (*AuthorizeConsentResponse, error) {
@@ -383,7 +387,15 @@ func (s *Service) completeAuthorize(req *model.AuthorizationRequest, ipAddress, 
 		return nil, pkg.ErrServerError("failed to create session")
 	}
 
-	// Generate authorization code
+	// Clean up auth request
+	_ = s.repo.DeleteAuthRequest(req.ID)
+
+	// Implicit flow: response_type=token → return access token directly
+	if req.ResponseType == "token" {
+		return s.completeImplicit(req, &sess.ID)
+	}
+
+	// Authorization code flow
 	rawCode, codeHash, err := crypto.GenerateOpaqueToken()
 	if err != nil {
 		return nil, pkg.ErrServerError("failed to generate authorization code")
@@ -410,9 +422,6 @@ func (s *Service) completeAuthorize(req *model.AuthorizationRequest, ipAddress, 
 		return nil, pkg.ErrServerError("failed to create authorization code")
 	}
 
-	// Clean up auth request
-	_ = s.repo.DeleteAuthRequest(req.ID)
-
 	resp := &AuthorizeConsentResponse{
 		RedirectURI: req.RedirectURI,
 		Code:        rawCode,
@@ -422,6 +431,46 @@ func (s *Service) completeAuthorize(req *model.AuthorizationRequest, ipAddress, 
 	}
 
 	slog.Info("authorization code issued", "client_id", req.ClientID, "user_id", req.UserID)
+	return resp, nil
+}
+
+// completeImplicit handles the implicit flow (deprecated, no refresh token).
+func (s *Service) completeImplicit(req *model.AuthorizationRequest, sessionID *uuid.UUID) (*AuthorizeConsentResponse, error) {
+	// Look up client for TTL
+	client, err := s.repo.findClient(req.ClientID.String())
+	if err != nil {
+		return nil, pkg.ErrServerError("failed to find client")
+	}
+
+	rawAT, atHash, err := crypto.GenerateOpaqueToken()
+	if err != nil {
+		return nil, pkg.ErrServerError("failed to generate access token")
+	}
+
+	accessToken := &model.AccessToken{
+		ID:        atHash,
+		ClientID:  req.ClientID,
+		UserID:    req.UserID,
+		SessionID: sessionID,
+		Scopes:    req.Scopes,
+		ExpiresAt: time.Now().Add(time.Duration(client.AccessTokenTTL) * time.Second),
+	}
+
+	if err := s.repo.CreateAccessToken(accessToken); err != nil {
+		return nil, pkg.ErrServerError("failed to store access token")
+	}
+
+	resp := &AuthorizeConsentResponse{
+		RedirectURI: req.RedirectURI,
+		AccessToken: rawAT,
+		TokenType:   "Bearer",
+		ExpiresIn:   client.AccessTokenTTL,
+	}
+	if req.State != nil {
+		resp.State = *req.State
+	}
+
+	slog.Info("implicit token issued (deprecated flow)", "client_id", req.ClientID, "user_id", req.UserID)
 	return resp, nil
 }
 
