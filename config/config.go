@@ -14,6 +14,7 @@ type Config struct {
 	Auth     AuthConfig     `mapstructure:"auth"`
 	Argon2   Argon2Config   `mapstructure:"argon2"`
 	CORS     CORSConfig     `mapstructure:"cors"`
+	SMTP     SMTPConfig     `mapstructure:"smtp"`
 	Issuer   string         `mapstructure:"issuer"`
 }
 
@@ -61,6 +62,16 @@ type Argon2Config struct {
 	Parallelism uint8  `mapstructure:"parallelism"`
 	SaltLength  uint32 `mapstructure:"salt_length"`
 	KeyLength   uint32 `mapstructure:"key_length"`
+}
+
+type SMTPConfig struct {
+	Host     string `mapstructure:"host"`
+	Port     int    `mapstructure:"port"`
+	Username string `mapstructure:"username"`
+	Password string `mapstructure:"password"`
+	From     string `mapstructure:"from"`
+	FromName string `mapstructure:"from_name"`
+	TLS      bool   `mapstructure:"tls"`
 }
 
 type CORSConfig struct {

@@ -47,4 +47,13 @@ cors:
     - "X-Request-ID"
   max_age: 3600
 
+smtp:
+  host: "localhost"
+  port: 1025
+  username: ""
+  password: ""
+  from: "noreply@orionauth.local"
+  from_name: "OrionAuth"
+  tls: false
+
 issuer: "http://localhost:8080"
