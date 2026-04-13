@@ -1,6 +1,12 @@
 on:
   release:
     types: [published]
+  workflow_dispatch:        # ← déclenchement manuel depuis l'UI Forgejo
+    inputs:
+      tag:
+        description: 'Tag à utiliser pour l image'
+        required: false
+        default: 'latest'
 
 jobs:
   build-and-push:
@@ -12,12 +18,14 @@ jobs:
         with:
           registry: git.nhsoul.fr
           username: ${{ github.actor }}
-          password: ${{ secrets.REGISTRY_TOKEN }}   # ← token avec packages:write
+          password: ${{ secrets.REGISTRY_TOKEN }}
 
       - uses: docker/build-push-action@v5
         with:
           context: .
           push: true
+          provenance: false
+          sbom: false
           tags: |
-            git.nhsoul.fr/nhpro/orion-auth-backend:${{ github.ref_name }}
+            git.nhsoul.fr/nhpro/orion-auth-backend:${{ github.event.release.tag_name || inputs.tag || 'latest' }}
             git.nhsoul.fr/nhpro/orion-auth-backend:latest
