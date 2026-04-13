@@ -1,5 +1,9 @@
 FROM golang:1.25-alpine AS builder
 
+LABEL org.opencontainers.image.source="https://git.nhsoul.fr/nhpro/orion-auth-backend"
+LABEL org.opencontainers.image.url="https://git.nhsoul.fr/nhpro/orion-auth-backend"
+LABEL org.opencontainers.image.description="OrionAuth Backend"
+
 RUN apk add --no-cache git ca-certificates
 
 WORKDIR /src
