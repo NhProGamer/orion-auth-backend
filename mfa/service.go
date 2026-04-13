@@ -7,13 +7,13 @@ import (
 	"github.com/lib/pq"
 	"github.com/pquerna/otp/totp"
 
-	"OrionAuth/crypto"
-	"OrionAuth/model"
-	"OrionAuth/pkg"
+	"orion-auth-backend/crypto"
+	"orion-auth-backend/model"
+	"orion-auth-backend/pkg"
 )
 
 const (
-	totpIssuer     = "OrionAuth"
+	totpIssuer     = "orion-auth-backend"
 	backupCodeCount = 10
 )
 

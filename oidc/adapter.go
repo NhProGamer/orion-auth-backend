@@ -1,7 +1,7 @@
 package oidc
 
 import (
-	"OrionAuth/oauth"
+	"orion-auth-backend/oauth"
 )
 
 // IDTokenAdapter adapts oidc.Service to the oauth.IDTokenGenerator interface.

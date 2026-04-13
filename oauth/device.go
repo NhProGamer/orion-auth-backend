@@ -9,10 +9,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 
-	"OrionAuth/crypto"
-	"OrionAuth/model"
-	"OrionAuth/pkg"
-	"OrionAuth/session"
+	"orion-auth-backend/crypto"
+	"orion-auth-backend/model"
+	"orion-auth-backend/pkg"
+	"orion-auth-backend/session"
 )
 
 const userCodeAlphabet = "BCDFGHJKLMNPQRSTVWXZ" // 20 chars, no vowels, no ambiguous

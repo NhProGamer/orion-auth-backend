@@ -3,9 +3,9 @@ package mfa
 import (
 	"github.com/gin-gonic/gin"
 
-	"OrionAuth/middleware"
-	"OrionAuth/pkg"
-	"OrionAuth/user"
+	"orion-auth-backend/middleware"
+	"orion-auth-backend/pkg"
+	"orion-auth-backend/user"
 )
 
 type Handler struct {

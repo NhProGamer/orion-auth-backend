@@ -6,7 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"OrionAuth/pkg"
+	"orion-auth-backend/pkg"
 )
 
 type tokenBucket struct {

@@ -3,9 +3,9 @@ package oauth
 import (
 	"log/slog"
 
-	"OrionAuth/crypto"
-	"OrionAuth/model"
-	"OrionAuth/pkg"
+	"orion-auth-backend/crypto"
+	"orion-auth-backend/model"
+	"orion-auth-backend/pkg"
 )
 
 // Revoke handles token revocation per RFC 7009.

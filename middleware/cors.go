@@ -7,7 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"OrionAuth/config"
+	"orion-auth-backend/config"
 )
 
 // CORS returns a middleware that handles Cross-Origin Resource Sharing.

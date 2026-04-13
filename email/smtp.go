@@ -6,7 +6,7 @@ import (
 
 	"github.com/wneessen/go-mail"
 
-	"OrionAuth/config"
+	"orion-auth-backend/config"
 )
 
 type SMTPSender struct {

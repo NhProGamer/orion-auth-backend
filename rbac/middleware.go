@@ -3,8 +3,8 @@ package rbac
 import (
 	"github.com/gin-gonic/gin"
 
-	"OrionAuth/middleware"
-	"OrionAuth/pkg"
+	"orion-auth-backend/middleware"
+	"orion-auth-backend/pkg"
 )
 
 // RequirePermission returns a Gin middleware that checks if the user has the given permission.

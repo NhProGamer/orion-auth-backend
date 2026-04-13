@@ -13,20 +13,20 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"OrionAuth/audit"
-	"OrionAuth/client"
-	"OrionAuth/config"
-	"OrionAuth/crypto"
-	"OrionAuth/database"
-	"OrionAuth/email"
-	"OrionAuth/federation"
-	"OrionAuth/mfa"
-	"OrionAuth/middleware"
-	"OrionAuth/oauth"
-	"OrionAuth/oidc"
-	"OrionAuth/rbac"
-	"OrionAuth/session"
-	"OrionAuth/user"
+	"orion-auth-backend/audit"
+	"orion-auth-backend/client"
+	"orion-auth-backend/config"
+	"orion-auth-backend/crypto"
+	"orion-auth-backend/database"
+	"orion-auth-backend/email"
+	"orion-auth-backend/federation"
+	"orion-auth-backend/mfa"
+	"orion-auth-backend/middleware"
+	"orion-auth-backend/oauth"
+	"orion-auth-backend/oidc"
+	"orion-auth-backend/rbac"
+	"orion-auth-backend/session"
+	"orion-auth-backend/user"
 )
 
 func main() {
@@ -112,7 +112,7 @@ func main() {
 
 	// Graceful shutdown
 	go func() {
-		slog.Info("OrionAuth listening", "addr", addr, "issuer", cfg.Issuer)
+		slog.Info("orion-auth-backend listening", "addr", addr, "issuer", cfg.Issuer)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server error", "error", err)
 			os.Exit(1)
@@ -218,7 +218,7 @@ func setupRouter(
 func healthCheck(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "ok",
-		"service": "OrionAuth",
+		"service": "orion-auth-backend",
 	})
 }
 

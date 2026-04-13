@@ -7,8 +7,8 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
-	"OrionAuth/model"
-	"OrionAuth/pkg"
+	"orion-auth-backend/model"
+	"orion-auth-backend/pkg"
 )
 
 type Repository struct {

@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
-	"OrionAuth/model"
+	"orion-auth-backend/model"
 )
 
 type Service struct {

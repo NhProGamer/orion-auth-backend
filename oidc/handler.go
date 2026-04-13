@@ -3,8 +3,8 @@ package oidc
 import (
 	"github.com/gin-gonic/gin"
 
-	"OrionAuth/middleware"
-	"OrionAuth/pkg"
+	"orion-auth-backend/middleware"
+	"orion-auth-backend/pkg"
 )
 
 type Handler struct {

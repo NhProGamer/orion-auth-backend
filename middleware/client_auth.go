@@ -8,9 +8,9 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
-	"OrionAuth/crypto"
-	"OrionAuth/model"
-	"OrionAuth/pkg"
+	"orion-auth-backend/crypto"
+	"orion-auth-backend/model"
+	"orion-auth-backend/pkg"
 )
 
 const ContextOAuthClient = "oauth_client"

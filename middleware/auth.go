@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
-	"OrionAuth/pkg"
+	"orion-auth-backend/pkg"
 )
 
 const (

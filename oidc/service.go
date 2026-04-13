@@ -14,9 +14,9 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
-	appCrypto "OrionAuth/crypto"
-	"OrionAuth/model"
-	"OrionAuth/user"
+	appCrypto "orion-auth-backend/crypto"
+	"orion-auth-backend/model"
+	"orion-auth-backend/user"
 )
 
 type Service struct {

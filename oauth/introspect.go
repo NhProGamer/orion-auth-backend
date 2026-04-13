@@ -3,9 +3,9 @@ package oauth
 import (
 	"time"
 
-	"OrionAuth/crypto"
-	"OrionAuth/model"
-	"OrionAuth/pkg"
+	"orion-auth-backend/crypto"
+	"orion-auth-backend/model"
+	"orion-auth-backend/pkg"
 )
 
 // IntrospectResponse represents the RFC 7662 introspection response.

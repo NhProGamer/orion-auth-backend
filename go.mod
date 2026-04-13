@@ -1,4 +1,4 @@
-module OrionAuth
+module orion-auth-backend
 
 go 1.25.0
 

@@ -4,7 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
-	"OrionAuth/pkg"
+	"orion-auth-backend/pkg"
 )
 
 type Handler struct {

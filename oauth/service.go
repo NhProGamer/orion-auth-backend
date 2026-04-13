@@ -10,12 +10,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 
-	"OrionAuth/config"
-	"OrionAuth/crypto"
-	"OrionAuth/model"
-	"OrionAuth/pkg"
-	"OrionAuth/session"
-	"OrionAuth/user"
+	"orion-auth-backend/config"
+	"orion-auth-backend/crypto"
+	"orion-auth-backend/model"
+	"orion-auth-backend/pkg"
+	"orion-auth-backend/session"
+	"orion-auth-backend/user"
 )
 
 // IDTokenGenerator is an interface to avoid circular imports with the oidc package.

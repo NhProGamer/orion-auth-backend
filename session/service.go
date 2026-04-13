@@ -6,9 +6,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"OrionAuth/config"
-	"OrionAuth/model"
-	"OrionAuth/pkg"
+	"orion-auth-backend/config"
+	"orion-auth-backend/model"
+	"orion-auth-backend/pkg"
 )
 
 type Service struct {

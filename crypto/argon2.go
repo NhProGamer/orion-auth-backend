@@ -10,7 +10,7 @@ import (
 
 	"golang.org/x/crypto/argon2"
 
-	"OrionAuth/config"
+	"orion-auth-backend/config"
 )
 
 var (

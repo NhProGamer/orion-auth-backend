@@ -10,8 +10,8 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	"OrionAuth/config"
-	"OrionAuth/migrations"
+	"orion-auth-backend/config"
+	"orion-auth-backend/migrations"
 )
 
 func Connect(cfg *config.DatabaseConfig) (*gorm.DB, error) {
