@@ -22,6 +22,7 @@ RUN apk add --no-cache ca-certificates tzdata
 RUN adduser -D -u 1000 orionauth
 
 COPY --from=builder /orionauth /usr/local/bin/orionauth
+COPY --from=builder /src/config.yaml /etc/orionauth/config.yaml
 
 USER orionauth
 
