@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lib/pq"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
@@ -78,8 +79,8 @@ func main() {
 	auditService := audit.NewService(db)
 	fedService := federation.NewService(fedRepo, cfg.Issuer)
 
-	// Seed admin user on first launch
-	seedAdminUser(db, userService, rbacService)
+	// Seed defaults on first launch
+	seedDefaults(db, userService, rbacService)
 
 	// Initialize signing keys
 	if err := oidcService.EnsureSigningKey(); err != nil {
@@ -220,7 +221,15 @@ func setupRouter(
 	return router
 }
 
-const adminRoleID = "00000000-0000-0000-0000-000000000001"
+const (
+	adminRoleID    = "00000000-0000-0000-0000-000000000001"
+	adminClientID  = "00000000-0000-0000-0000-000000000002"
+)
+
+func seedDefaults(db *gorm.DB, userService *user.Service, rbacService *rbac.Service) {
+	seedAdminUser(db, userService, rbacService)
+	seedAdminClient(db)
+}
 
 func seedAdminUser(db *gorm.DB, userService *user.Service, rbacService *rbac.Service) {
 	var count int64
@@ -261,6 +270,46 @@ func seedAdminUser(db *gorm.DB, userService *user.Service, rbacService *rbac.Ser
 	slog.Warn("Email:    " + adminEmail)
 	slog.Warn("Password: " + password)
 	slog.Warn("CHANGE THIS PASSWORD IMMEDIATELY")
+	slog.Warn("========================================")
+}
+
+func seedAdminClient(db *gorm.DB) {
+	clientID := uuid.MustParse(adminClientID)
+
+	var count int64
+	if err := db.Model(&model.OAuthClient{}).Where("id = ?", clientID).Count(&count).Error; err != nil {
+		slog.Error("failed to check admin client", "error", err)
+		return
+	}
+	if count > 0 {
+		return
+	}
+
+	adminClient := &model.OAuthClient{
+		Name:            "Admin UI",
+		RedirectURIs:    pq.StringArray{"http://localhost:3000/callback"},
+		GrantTypes:      pq.StringArray{"authorization_code", "refresh_token"},
+		ResponseTypes:   pq.StringArray{"code"},
+		Scopes:          pq.StringArray{"openid", "profile", "email"},
+		TokenAuthMethod: "none",
+		IsPublic:        true,
+		IsFirstParty:    true,
+		AccessTokenTTL:  3600,
+		RefreshTokenTTL: 86400,
+		IDTokenTTL:      3600,
+		Active:          true,
+	}
+	adminClient.ID = clientID
+
+	if err := db.Create(adminClient).Error; err != nil {
+		slog.Error("failed to create admin OAuth client", "error", err)
+		return
+	}
+
+	slog.Warn("========================================")
+	slog.Warn("DEFAULT ADMIN UI CLIENT CREATED")
+	slog.Warn("Client ID: " + adminClientID)
+	slog.Warn("Public client (no secret, PKCE required)")
 	slog.Warn("========================================")
 }
 
