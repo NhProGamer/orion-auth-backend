@@ -11,8 +11,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 
+	"orion-auth-backend/model"
 	"orion-auth-backend/audit"
 	"orion-auth-backend/client"
 	"orion-auth-backend/config"
@@ -75,6 +77,9 @@ func main() {
 	rbacService := rbac.NewService(rbacRepo)
 	auditService := audit.NewService(db)
 	fedService := federation.NewService(fedRepo, cfg.Issuer)
+
+	// Seed admin user on first launch
+	seedAdminUser(db, userService, rbacService)
 
 	// Initialize signing keys
 	if err := oidcService.EnsureSigningKey(); err != nil {
@@ -213,6 +218,50 @@ func setupRouter(
 	auditHandler.RegisterRoutes(auditAdmin)
 
 	return router
+}
+
+const adminRoleID = "00000000-0000-0000-0000-000000000001"
+
+func seedAdminUser(db *gorm.DB, userService *user.Service, rbacService *rbac.Service) {
+	var count int64
+	if err := db.Model(&model.User{}).Count(&count).Error; err != nil {
+		slog.Error("failed to check existing users", "error", err)
+		return
+	}
+	if count > 0 {
+		return
+	}
+
+	password, err := crypto.GenerateRandomString(16)
+	if err != nil {
+		slog.Error("failed to generate admin password", "error", err)
+		return
+	}
+
+	adminEmail := "admin@orionauth.local"
+	adminName := "Admin"
+	admin, err := userService.Register(user.RegisterInput{
+		Email:       adminEmail,
+		Password:    password,
+		DisplayName: &adminName,
+	})
+	if err != nil {
+		slog.Error("failed to create admin user", "error", err)
+		return
+	}
+
+	roleID, _ := uuid.Parse(adminRoleID)
+	if err := rbacService.AssignRole(admin.ID, roleID); err != nil {
+		slog.Error("failed to assign admin role", "error", err)
+		return
+	}
+
+	slog.Warn("========================================")
+	slog.Warn("DEFAULT ADMIN USER CREATED")
+	slog.Warn("Email:    " + adminEmail)
+	slog.Warn("Password: " + password)
+	slog.Warn("CHANGE THIS PASSWORD IMMEDIATELY")
+	slog.Warn("========================================")
 }
 
 func healthCheck(c *gin.Context) {
