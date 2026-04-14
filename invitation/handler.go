@@ -20,6 +20,13 @@ func NewHandler(service *Service) *Handler {
 
 func (h *Handler) RegisterPublicRoutes(public *gin.RouterGroup) {
 	public.POST("/auth/register/invite", h.RegisterWithInvite)
+	public.GET("/auth/settings", h.PublicSettings)
+}
+
+func (h *Handler) PublicSettings(c *gin.Context) {
+	pkg.OK(c, gin.H{
+		"registration_enabled": h.service.IsRegistrationEnabled(),
+	})
 }
 
 func (h *Handler) RegisterAdminRoutes(admin *gin.RouterGroup) {
