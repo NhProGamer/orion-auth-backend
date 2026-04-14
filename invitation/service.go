@@ -115,6 +115,10 @@ func (s *Service) RegisterWithInvite(input RegisterInviteInput) (*model.User, er
 		return nil, err
 	}
 
+	// Mark email as verified (invitation was sent to this email)
+	newUser.EmailVerified = true
+	_, _ = s.userService.AdminUpdate(newUser.ID, user.AdminUpdateInput{EmailVerified: &newUser.EmailVerified})
+
 	// Assign pre-configured roles
 	for _, roleIDStr := range inv.RoleIDs {
 		roleID, err := uuid.Parse(roleIDStr)
