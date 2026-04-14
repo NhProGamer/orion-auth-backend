@@ -193,6 +193,11 @@ func setupRouter(
 	adminBase := router.Group("/api/v1/admin")
 	adminBase.Use(bearerAuthMiddleware)
 
+	// User management (requires users:read or users:write)
+	userAdmin := adminBase.Group("")
+	userAdmin.Use(rbac.RequireAnyPermission(rbacService, "users:read", "users:write"))
+	userHandler.RegisterAdminRoutes(userAdmin)
+
 	// Client management (requires clients:read or clients:write)
 	clientAdmin := adminBase.Group("")
 	clientAdmin.Use(rbac.RequireAnyPermission(rbacService, "clients:read", "clients:write"))

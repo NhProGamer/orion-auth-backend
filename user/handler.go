@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	"orion-auth-backend/middleware"
 	"orion-auth-backend/pkg"
@@ -31,6 +32,44 @@ func (h *Handler) RegisterRoutes(public, authenticated *gin.RouterGroup) {
 		authenticated.PATCH("/me", h.UpdateProfile)
 		authenticated.PUT("/me/password", h.ChangePassword)
 	}
+}
+
+func (h *Handler) RegisterAdminRoutes(admin *gin.RouterGroup) {
+	admin.GET("/users", h.AdminListUsers)
+	admin.GET("/users/:id", h.AdminGetUser)
+}
+
+func (h *Handler) AdminListUsers(c *gin.Context) {
+	page, perPage := pkg.ParsePagination(c)
+
+	users, total, err := h.service.List(page, perPage)
+	if err != nil {
+		pkg.HandleError(c, pkg.ErrInternal("failed to list users"))
+		return
+	}
+
+	profiles := make([]map[string]any, len(users))
+	for i := range users {
+		profiles[i] = users[i].PublicProfile()
+	}
+
+	pkg.Paginated(c, profiles, total, page, perPage)
+}
+
+func (h *Handler) AdminGetUser(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		pkg.HandleError(c, pkg.ErrBadRequest("invalid user ID"))
+		return
+	}
+
+	user, err := h.service.GetByID(id)
+	if err != nil {
+		pkg.HandleError(c, err)
+		return
+	}
+
+	pkg.OK(c, gin.H{"user": user.PublicProfile()})
 }
 
 func (h *Handler) Register(c *gin.Context) {

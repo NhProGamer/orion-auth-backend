@@ -125,6 +125,10 @@ func (s *Service) Authenticate(input LoginInput) (*model.User, error) {
 	return user, nil
 }
 
+func (s *Service) List(page, perPage int) ([]model.User, int64, error) {
+	return s.repo.List(page, perPage)
+}
+
 func (s *Service) GetByID(id uuid.UUID) (*model.User, error) {
 	user, err := s.repo.FindByID(id)
 	if err != nil {
