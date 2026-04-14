@@ -80,7 +80,7 @@ func main() {
 	fedService := federation.NewService(fedRepo, cfg.Issuer)
 
 	// Seed defaults on first launch
-	seedDefaults(db, userService, rbacService)
+	seedDefaults(db, userService, rbacService, cfg.Issuer)
 
 	// Initialize signing keys
 	if err := oidcService.EnsureSigningKey(); err != nil {
@@ -226,9 +226,9 @@ const (
 	adminClientID  = "00000000-0000-0000-0000-000000000002"
 )
 
-func seedDefaults(db *gorm.DB, userService *user.Service, rbacService *rbac.Service) {
+func seedDefaults(db *gorm.DB, userService *user.Service, rbacService *rbac.Service, issuer string) {
 	seedAdminUser(db, userService, rbacService)
-	seedAdminClient(db)
+	seedAdminClient(db, issuer)
 }
 
 func seedAdminUser(db *gorm.DB, userService *user.Service, rbacService *rbac.Service) {
@@ -273,7 +273,7 @@ func seedAdminUser(db *gorm.DB, userService *user.Service, rbacService *rbac.Ser
 	slog.Warn("========================================")
 }
 
-func seedAdminClient(db *gorm.DB) {
+func seedAdminClient(db *gorm.DB, issuer string) {
 	clientID := uuid.MustParse(adminClientID)
 
 	var count int64
@@ -287,7 +287,7 @@ func seedAdminClient(db *gorm.DB) {
 
 	adminClient := &model.OAuthClient{
 		Name:            "Admin UI",
-		RedirectURIs:    pq.StringArray{"http://localhost:3000/callback"},
+		RedirectURIs:    pq.StringArray{issuer + "/admin/callback"},
 		GrantTypes:      pq.StringArray{"authorization_code", "refresh_token"},
 		ResponseTypes:   pq.StringArray{"code"},
 		Scopes:          pq.StringArray{"openid", "profile", "email"},
