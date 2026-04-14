@@ -50,6 +50,20 @@ func (s *SMTPSender) SendPasswordResetEmail(to, token string) error {
 	return s.send(to, subject, body)
 }
 
+func (s *SMTPSender) SendInvitationEmail(to, token string) error {
+	subject := "You've been invited"
+	body := fmt.Sprintf(
+		`<h2>You've Been Invited</h2>
+<p>You have been invited to create an account.</p>
+<p>Click the link below to complete your registration:</p>
+<p><a href="%s/ui/register?invite=%s">Create your account</a></p>
+<p>This invitation expires in 7 days.</p>`,
+		s.issuer, token,
+	)
+
+	return s.send(to, subject, body)
+}
+
 func (s *SMTPSender) send(to, subject, htmlBody string) error {
 	m := mail.NewMsg()
 	if err := m.FromFormat(s.cfg.FromName, s.cfg.From); err != nil {

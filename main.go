@@ -23,6 +23,7 @@ import (
 	"orion-auth-backend/database"
 	"orion-auth-backend/email"
 	"orion-auth-backend/federation"
+	"orion-auth-backend/invitation"
 	"orion-auth-backend/mfa"
 	"orion-auth-backend/middleware"
 	"orion-auth-backend/oauth"
@@ -78,6 +79,8 @@ func main() {
 	rbacService := rbac.NewService(rbacRepo)
 	auditService := audit.NewService(db)
 	fedService := federation.NewService(fedRepo, cfg.Issuer)
+	invRepo := invitation.NewRepository(db)
+	invService := invitation.NewService(invRepo, userService, rbacService, emailSender, cfg.Issuer)
 
 	// Seed defaults on first launch
 	seedDefaults(db, userService, rbacService, cfg.Issuer)
@@ -94,6 +97,7 @@ func main() {
 
 	// Handlers
 	userHandler := user.NewHandler(userService)
+	userHandler.SetRegistrationChecker(invService)
 	sessionHandler := session.NewHandler(sessionService)
 	clientHandler := client.NewHandler(clientService)
 	oauthHandler := oauth.NewHandler(oauthService)
@@ -102,9 +106,10 @@ func main() {
 	rbacHandler := rbac.NewHandler(rbacService)
 	auditHandler := audit.NewHandler(auditService)
 	fedHandler := federation.NewHandler(fedService)
+	invHandler := invitation.NewHandler(invService)
 
 	// Router
-	router := setupRouter(cfg, db, hasher, authRateLimiter, rbacService, userHandler, sessionHandler, clientHandler, oauthHandler, oidcHandler, mfaHandler, rbacHandler, auditHandler, fedHandler)
+	router := setupRouter(cfg, db, hasher, authRateLimiter, rbacService, userHandler, sessionHandler, clientHandler, oauthHandler, oidcHandler, mfaHandler, rbacHandler, auditHandler, fedHandler, invHandler)
 
 	// Server
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
@@ -156,6 +161,7 @@ func setupRouter(
 	rbacHandler *rbac.Handler,
 	auditHandler *audit.Handler,
 	fedHandler *federation.Handler,
+	invHandler *invitation.Handler,
 ) *gin.Engine {
 	gin.SetMode(cfg.Server.Mode)
 	router := gin.New()
@@ -179,6 +185,7 @@ func setupRouter(
 	public := router.Group("/api/v1")
 	public.Use(authRL.Middleware())
 	userHandler.RegisterRoutes(public, nil)
+	invHandler.RegisterPublicRoutes(public)
 	fedHandler.RegisterPublicRoutes(public)
 
 	// Authenticated API routes
@@ -197,6 +204,7 @@ func setupRouter(
 	userAdmin := adminBase.Group("")
 	userAdmin.Use(rbac.RequireAnyPermission(rbacService, "users:read", "users:write"))
 	userHandler.RegisterAdminRoutes(userAdmin)
+	invHandler.RegisterAdminRoutes(userAdmin)
 
 	// Client management (requires clients:read or clients:write)
 	clientAdmin := adminBase.Group("")

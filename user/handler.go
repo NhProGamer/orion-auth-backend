@@ -10,12 +10,21 @@ import (
 	"orion-auth-backend/pkg"
 )
 
+type RegistrationChecker interface {
+	IsRegistrationEnabled() bool
+}
+
 type Handler struct {
-	service *Service
+	service      *Service
+	regChecker   RegistrationChecker
 }
 
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
+}
+
+func (h *Handler) SetRegistrationChecker(checker RegistrationChecker) {
+	h.regChecker = checker
 }
 
 func (h *Handler) RegisterRoutes(public, authenticated *gin.RouterGroup) {
@@ -112,6 +121,11 @@ func (h *Handler) AdminDeleteUser(c *gin.Context) {
 }
 
 func (h *Handler) Register(c *gin.Context) {
+	if h.regChecker != nil && !h.regChecker.IsRegistrationEnabled() {
+		pkg.HandleError(c, pkg.ErrForbidden("public registration is disabled"))
+		return
+	}
+
 	var input RegisterInput
 	if err := c.ShouldBindJSON(&input); err != nil {
 		pkg.HandleError(c, pkg.ErrBadRequest("invalid request body: "+err.Error()))
