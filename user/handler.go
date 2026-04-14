@@ -37,6 +37,8 @@ func (h *Handler) RegisterRoutes(public, authenticated *gin.RouterGroup) {
 func (h *Handler) RegisterAdminRoutes(admin *gin.RouterGroup) {
 	admin.GET("/users", h.AdminListUsers)
 	admin.GET("/users/:id", h.AdminGetUser)
+	admin.PATCH("/users/:id", h.AdminUpdateUser)
+	admin.DELETE("/users/:id", h.AdminDeleteUser)
 }
 
 func (h *Handler) AdminListUsers(c *gin.Context) {
@@ -69,7 +71,44 @@ func (h *Handler) AdminGetUser(c *gin.Context) {
 		return
 	}
 
-	pkg.OK(c, gin.H{"user": user.PublicProfile()})
+	pkg.OK(c, gin.H{"user": user.AdminView()})
+}
+
+func (h *Handler) AdminUpdateUser(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		pkg.HandleError(c, pkg.ErrBadRequest("invalid user ID"))
+		return
+	}
+
+	var input AdminUpdateInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		pkg.HandleError(c, pkg.ErrBadRequest("invalid request body: "+err.Error()))
+		return
+	}
+
+	user, err := h.service.AdminUpdate(id, input)
+	if err != nil {
+		pkg.HandleError(c, err)
+		return
+	}
+
+	pkg.OK(c, gin.H{"user": user.AdminView()})
+}
+
+func (h *Handler) AdminDeleteUser(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		pkg.HandleError(c, pkg.ErrBadRequest("invalid user ID"))
+		return
+	}
+
+	if err := h.service.Delete(id); err != nil {
+		pkg.HandleError(c, err)
+		return
+	}
+
+	pkg.OK(c, gin.H{"message": "user deleted"})
 }
 
 func (h *Handler) Register(c *gin.Context) {

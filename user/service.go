@@ -129,6 +129,59 @@ func (s *Service) List(page, perPage int) ([]model.User, int64, error) {
 	return s.repo.List(page, perPage)
 }
 
+type AdminUpdateInput struct {
+	Email         *string `json:"email"`
+	DisplayName   *string `json:"display_name"`
+	Active        *bool   `json:"active"`
+	EmailVerified *bool   `json:"email_verified"`
+}
+
+func (s *Service) AdminUpdate(id uuid.UUID, input AdminUpdateInput) (*model.User, error) {
+	user, err := s.GetByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	if input.Email != nil {
+		email := strings.ToLower(strings.TrimSpace(*input.Email))
+		existing, err := s.repo.FindByEmail(email)
+		if err != nil {
+			return nil, pkg.ErrInternal("failed to check email")
+		}
+		if existing != nil && existing.ID != id {
+			return nil, pkg.ErrConflict("email already in use")
+		}
+		user.Email = email
+	}
+	if input.DisplayName != nil {
+		user.DisplayName = input.DisplayName
+	}
+	if input.Active != nil {
+		user.Active = *input.Active
+	}
+	if input.EmailVerified != nil {
+		user.EmailVerified = *input.EmailVerified
+	}
+
+	if err := s.repo.Update(user); err != nil {
+		return nil, pkg.ErrInternal("failed to update user")
+	}
+	return user, nil
+}
+
+func (s *Service) Delete(id uuid.UUID) error {
+	_, err := s.GetByID(id)
+	if err != nil {
+		return err
+	}
+	if err := s.repo.Delete(id); err != nil {
+		slog.Error("failed to delete user", "error", err)
+		return pkg.ErrInternal("failed to delete user")
+	}
+	slog.Info("user deleted", "user_id", id)
+	return nil
+}
+
 func (s *Service) GetByID(id uuid.UUID) (*model.User, error) {
 	user, err := s.repo.FindByID(id)
 	if err != nil {

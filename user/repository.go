@@ -58,6 +58,10 @@ func (r *Repository) List(page, perPage int) ([]model.User, int64, error) {
 	return users, total, err
 }
 
+func (r *Repository) Delete(id uuid.UUID) error {
+	return r.db.Delete(&model.User{}, "id = ?", id).Error
+}
+
 func (r *Repository) FindByResetToken(tokenHash string) (*model.User, error) {
 	var user model.User
 	err := r.db.Where("password_reset_token = ? AND password_reset_expires_at > NOW()", tokenHash).First(&user).Error
