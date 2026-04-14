@@ -251,7 +251,7 @@ type OpenIDConfiguration struct {
 func (s *Service) GetDiscovery() OpenIDConfiguration {
 	return OpenIDConfiguration{
 		Issuer:                           s.issuer,
-		AuthorizationEndpoint:            s.issuer + "/authorize",
+		AuthorizationEndpoint:            s.issuer + "/ui/authorize",
 		TokenEndpoint:                    s.issuer + "/token",
 		UserinfoEndpoint:                 s.issuer + "/userinfo",
 		JwksURI:                          s.issuer + "/.well-known/jwks.json",
