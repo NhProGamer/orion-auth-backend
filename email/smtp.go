@@ -1,13 +1,23 @@
 package email
 
 import (
+	"bytes"
 	"fmt"
+	"html/template"
 	"log/slog"
 
 	"github.com/wneessen/go-mail"
 
 	"orion-auth-backend/config"
+	"orion-auth-backend/email/templates"
 )
+
+var tmpl = template.Must(template.ParseFS(templates.FS, "*.gohtml"))
+
+type EmailData struct {
+	Issuer string
+	Token  string
+}
 
 type SMTPSender struct {
 	cfg    config.SMTPConfig
@@ -19,49 +29,27 @@ func NewSMTPSender(cfg config.SMTPConfig, issuer string) *SMTPSender {
 }
 
 func (s *SMTPSender) SendVerificationEmail(to, token string) error {
-	subject := "Verify your email address"
-	body := fmt.Sprintf(
-		`<h2>Email Verification</h2>
-<p>Please verify your email address by using the following token:</p>
-<p><strong>%s</strong></p>
-<p>Or make a POST request to:</p>
-<pre>POST %s/api/v1/auth/verify-email
-{"token": "%s"}</pre>
-<p>This token expires in 24 hours.</p>`,
-		token, s.issuer, token,
-	)
-
-	return s.send(to, subject, body)
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, "verification.gohtml", EmailData{Issuer: s.issuer, Token: token}); err != nil {
+		return fmt.Errorf("failed to render email template: %w", err)
+	}
+	return s.send(to, "Verify your email address", buf.String())
 }
 
 func (s *SMTPSender) SendPasswordResetEmail(to, token string) error {
-	subject := "Reset your password"
-	body := fmt.Sprintf(
-		`<h2>Password Reset</h2>
-<p>Use the following token to reset your password:</p>
-<p><strong>%s</strong></p>
-<p>Or make a POST request to:</p>
-<pre>POST %s/api/v1/auth/reset-password
-{"token": "%s", "new_password": "your_new_password"}</pre>
-<p>This token expires in 1 hour.</p>`,
-		token, s.issuer, token,
-	)
-
-	return s.send(to, subject, body)
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, "password_reset.gohtml", EmailData{Issuer: s.issuer, Token: token}); err != nil {
+		return fmt.Errorf("failed to render email template: %w", err)
+	}
+	return s.send(to, "Reset your password", buf.String())
 }
 
 func (s *SMTPSender) SendInvitationEmail(to, token string) error {
-	subject := "You've been invited"
-	body := fmt.Sprintf(
-		`<h2>You've Been Invited</h2>
-<p>You have been invited to create an account.</p>
-<p>Click the link below to complete your registration:</p>
-<p><a href="%s/ui/register?invite=%s">Create your account</a></p>
-<p>This invitation expires in 7 days.</p>`,
-		s.issuer, token,
-	)
-
-	return s.send(to, subject, body)
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, "invitation.gohtml", EmailData{Issuer: s.issuer, Token: token}); err != nil {
+		return fmt.Errorf("failed to render email template: %w", err)
+	}
+	return s.send(to, "You've been invited", buf.String())
 }
 
 func (s *SMTPSender) send(to, subject, htmlBody string) error {
