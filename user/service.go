@@ -269,7 +269,7 @@ func (s *Service) SendVerificationEmail(userID uuid.UUID) error {
 			slog.Error("failed to send verification email", "error", err)
 		}
 	} else {
-		slog.Info("verification token generated (no email sender configured)", "token", token, "user_id", userID)
+		slog.Warn("no email sender configured, verification token not sent", "user_id", userID)
 	}
 
 	return nil
@@ -332,7 +332,7 @@ func (s *Service) ForgotPassword(input ForgotPasswordInput) error {
 			slog.Error("failed to send reset email", "error", err)
 		}
 	} else {
-		slog.Info("reset token generated (no email sender configured)", "token", token, "email", u.Email)
+		slog.Warn("no email sender configured, reset token not sent", "email", u.Email)
 	}
 
 	return nil

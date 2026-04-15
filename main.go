@@ -289,10 +289,16 @@ func seedAdminUser(db *gorm.DB, userService *user.Service, rbacService *rbac.Ser
 		return
 	}
 
+	credFile := "admin-credentials.txt"
+	content := fmt.Sprintf("Email:    %s\nPassword: %s\n", adminEmail, password)
+	if err := os.WriteFile(credFile, []byte(content), 0600); err != nil {
+		slog.Error("failed to write admin credentials file", "error", err)
+		return
+	}
+
 	slog.Warn("========================================")
 	slog.Warn("DEFAULT ADMIN USER CREATED")
-	slog.Warn("Email:    " + adminEmail)
-	slog.Warn("Password: " + password)
+	slog.Warn("Credentials written to " + credFile)
 	slog.Warn("CHANGE THIS PASSWORD IMMEDIATELY")
 	slog.Warn("========================================")
 }
