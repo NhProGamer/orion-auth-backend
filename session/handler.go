@@ -28,6 +28,16 @@ func (h *Handler) RegisterRoutes(authenticated *gin.RouterGroup) {
 	authenticated.DELETE("/me/sessions", h.RevokeAll)
 }
 
+// List godoc
+// @Summary      List active sessions for the current user
+// @Tags         Sessions
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]any
+// @Failure      401  {object}  pkg.AppError
+// @Failure      500  {object}  pkg.AppError
+// @Security     BearerAuth
+// @Router       /api/v1/me/sessions [get]
 func (h *Handler) List(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -61,6 +71,18 @@ func (h *Handler) List(c *gin.Context) {
 	pkg.OK(c, gin.H{"sessions": result})
 }
 
+// Revoke godoc
+// @Summary      Revoke a specific session
+// @Tags         Sessions
+// @Accept       json
+// @Produce      json
+// @Param        id   path     string  true  "Session ID (UUID)"
+// @Success      200  {object}  map[string]any
+// @Failure      400  {object}  pkg.AppError
+// @Failure      401  {object}  pkg.AppError
+// @Failure      404  {object}  pkg.AppError
+// @Security     BearerAuth
+// @Router       /api/v1/me/sessions/{id} [delete]
 func (h *Handler) Revoke(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -88,6 +110,16 @@ func (h *Handler) Revoke(c *gin.Context) {
 	pkg.OK(c, gin.H{"message": "session revoked"})
 }
 
+// RevokeAll godoc
+// @Summary      Revoke all sessions except the current one
+// @Tags         Sessions
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]any
+// @Failure      401  {object}  pkg.AppError
+// @Failure      500  {object}  pkg.AppError
+// @Security     BearerAuth
+// @Router       /api/v1/me/sessions [delete]
 func (h *Handler) RevokeAll(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {

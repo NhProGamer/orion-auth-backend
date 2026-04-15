@@ -30,6 +30,16 @@ func (h *Handler) RegisterRoutes(authenticated *gin.RouterGroup) {
 	authenticated.POST("/me/mfa/backup-codes", h.RegenerateBackupCodes)
 }
 
+// Enroll godoc
+// @Summary      Enroll in TOTP-based MFA
+// @Tags         MFA
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]any
+// @Failure      401  {object}  pkg.AppError
+// @Failure      409  {object}  pkg.AppError
+// @Security     BearerAuth
+// @Router       /api/v1/me/mfa/totp/enroll [post]
 func (h *Handler) Enroll(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -55,6 +65,17 @@ func (h *Handler) Enroll(c *gin.Context) {
 	})
 }
 
+// Verify godoc
+// @Summary      Verify TOTP code to activate MFA
+// @Tags         MFA
+// @Accept       json
+// @Produce      json
+// @Param        body  body     mfa.VerifyInput  true  "TOTP code"
+// @Success      200   {object}  map[string]any
+// @Failure      400   {object}  pkg.AppError
+// @Failure      401   {object}  pkg.AppError
+// @Security     BearerAuth
+// @Router       /api/v1/me/mfa/totp/verify [post]
 func (h *Handler) Verify(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -88,6 +109,17 @@ type DisableInput struct {
 	Code string `json:"code" binding:"required"`
 }
 
+// Disable godoc
+// @Summary      Disable TOTP-based MFA
+// @Tags         MFA
+// @Accept       json
+// @Produce      json
+// @Param        body  body     mfa.DisableInput  true  "TOTP code for confirmation"
+// @Success      200   {object}  map[string]any
+// @Failure      400   {object}  pkg.AppError
+// @Failure      401   {object}  pkg.AppError
+// @Security     BearerAuth
+// @Router       /api/v1/me/mfa/totp [delete]
 func (h *Handler) Disable(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -117,6 +149,17 @@ type BackupCodesInput struct {
 	Code string `json:"code" binding:"required"`
 }
 
+// RegenerateBackupCodes godoc
+// @Summary      Regenerate MFA backup codes
+// @Tags         MFA
+// @Accept       json
+// @Produce      json
+// @Param        body  body     mfa.BackupCodesInput  true  "TOTP code for confirmation"
+// @Success      200   {object}  map[string]any
+// @Failure      400   {object}  pkg.AppError
+// @Failure      401   {object}  pkg.AppError
+// @Security     BearerAuth
+// @Router       /api/v1/me/mfa/backup-codes [post]
 func (h *Handler) RegenerateBackupCodes(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {

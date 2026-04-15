@@ -21,6 +21,21 @@ func (h *Handler) RegisterRoutes(admin *gin.RouterGroup) {
 	admin.GET("/audit-logs", h.Query)
 }
 
+// Query returns paginated audit logs with optional filters.
+// @Summary Query audit logs
+// @Tags Admin - Audit
+// @Produce json
+// @Security BearerAuth
+// @Param user_id query string false "Filter by user ID"
+// @Param action query string false "Filter by action"
+// @Param from query string false "Start time (RFC3339)"
+// @Param to query string false "End time (RFC3339)"
+// @Param page query int false "Page number"
+// @Param per_page query int false "Items per page"
+// @Success 200 {object} pkg.PaginatedResponse
+// @Failure 401 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/admin/audit-logs [get]
 func (h *Handler) Query(c *gin.Context) {
 	page, perPage := pkg.ParsePagination(c)
 
