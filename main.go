@@ -177,6 +177,7 @@ func setupRouter(
 	gin.SetMode(cfg.Server.Mode)
 	router := gin.New()
 	router.Use(gin.Recovery())
+	router.Use(middleware.SecurityHeaders())
 	router.Use(middleware.RequestID())
 	router.Use(middleware.CORS(cfg.CORS))
 
