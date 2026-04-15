@@ -42,7 +42,7 @@ func BearerAuth(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") || parts[1] == "" {
 			pkg.HandleError(c, pkg.ErrUnauthorized("invalid authorization header format"))
 			c.Abort()
 			return
