@@ -91,7 +91,7 @@ func (s *Service) Query(input QueryInput) ([]model.AuditLog, int64, error) {
 		query = query.Where("created_at <= ?", *input.To)
 	}
 
-	query.Count(&total)
+	query.Session(&gorm.Session{}).Count(&total)
 
 	offset := (input.Page - 1) * input.PerPage
 	err := query.Order("created_at DESC").Offset(offset).Limit(input.PerPage).Find(&logs).Error
