@@ -22,6 +22,7 @@ jobs:
 
       - name: Convert to Markdown and push to wiki
         run: |
+          apk add --no-cache python3
           python3 scripts/swagger-to-wiki.py docs/swagger.json API-Documentation.md
           git config --global user.name "Forgejo Actions"
           git config --global user.email "actions@nhsoul.fr"
