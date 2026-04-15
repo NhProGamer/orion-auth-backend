@@ -26,26 +26,26 @@ func (h *Handler) SetAuditService(s *audit.Service) {
 	h.auditService = s
 }
 
-func (h *Handler) RegisterRoutes(router *gin.Engine, clientAuth gin.HandlerFunc, issuer string) {
+func (h *Handler) RegisterRoutes(router *gin.Engine, clientAuth, rateLimiter gin.HandlerFunc, issuer string) {
 	h.issuer = issuer
 
 	// Authorization endpoints (no client auth middleware, client is identified by params)
-	router.GET("/authorize", h.Authorize)
-	router.POST("/authorize/login", h.AuthorizeLogin)
-	router.POST("/authorize/mfa", h.AuthorizeMFA)
-	router.POST("/authorize/consent", h.AuthorizeConsent)
+	router.GET("/authorize", rateLimiter, h.Authorize)
+	router.POST("/authorize/login", rateLimiter, h.AuthorizeLogin)
+	router.POST("/authorize/mfa", rateLimiter, h.AuthorizeMFA)
+	router.POST("/authorize/consent", rateLimiter, h.AuthorizeConsent)
 
 	// Token endpoint (client auth required)
-	router.POST("/token", clientAuth, h.Token)
+	router.POST("/token", rateLimiter, clientAuth, h.Token)
 
 	// Device code flow
-	router.POST("/device_authorization", clientAuth, h.DeviceAuthorization)
-	router.POST("/device/verify", h.DeviceVerify)
-	router.POST("/device/approve", h.DeviceApprove)
+	router.POST("/device_authorization", rateLimiter, clientAuth, h.DeviceAuthorization)
+	router.POST("/device/verify", rateLimiter, h.DeviceVerify)
+	router.POST("/device/approve", rateLimiter, h.DeviceApprove)
 
 	// Introspection and revocation (client auth required)
-	router.POST("/introspect", clientAuth, h.Introspect)
-	router.POST("/revoke", clientAuth, h.Revoke)
+	router.POST("/introspect", rateLimiter, clientAuth, h.Introspect)
+	router.POST("/revoke", rateLimiter, clientAuth, h.Revoke)
 }
 
 // Authorize initiates the authorization request (API-driven).

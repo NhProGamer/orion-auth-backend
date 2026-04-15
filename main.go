@@ -186,12 +186,13 @@ func setupRouter(
 	router.GET("/ready", readinessCheck(db))
 
 	// OAuth2 endpoints (root level, rate limited)
+	oauthRL := middleware.NewRateLimiter(10, 3)
 	clientAuthMiddleware := middleware.ClientAuth(db, hasher)
-	oauthHandler.RegisterRoutes(router, clientAuthMiddleware, cfg.Issuer)
+	oauthHandler.RegisterRoutes(router, clientAuthMiddleware, oauthRL.Middleware(), cfg.Issuer)
 
 	// OIDC endpoints (root level)
 	bearerAuthMiddleware := middleware.BearerAuth(db)
-	oidcHandler.RegisterRoutes(router, bearerAuthMiddleware)
+	oidcHandler.RegisterRoutes(router, bearerAuthMiddleware, oauthRL.Middleware())
 
 	// Public API routes (rate limited)
 	public := router.Group("/api/v1")

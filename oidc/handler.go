@@ -15,11 +15,11 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
-func (h *Handler) RegisterRoutes(router *gin.Engine, bearerAuth gin.HandlerFunc) {
+func (h *Handler) RegisterRoutes(router *gin.Engine, bearerAuth, rateLimiter gin.HandlerFunc) {
 	router.GET("/.well-known/openid-configuration", h.Discovery)
 	router.GET("/.well-known/jwks.json", h.JWKS)
-	router.GET("/userinfo", bearerAuth, h.UserInfo)
-	router.POST("/userinfo", bearerAuth, h.UserInfo)
+	router.GET("/userinfo", rateLimiter, bearerAuth, h.UserInfo)
+	router.POST("/userinfo", rateLimiter, bearerAuth, h.UserInfo)
 }
 
 func (h *Handler) RegisterAdminRoutes(admin *gin.RouterGroup) {
