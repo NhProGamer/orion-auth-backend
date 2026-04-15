@@ -17,6 +17,10 @@ import (
 
 	"orion-auth-backend/model"
 	"orion-auth-backend/audit"
+
+	_ "orion-auth-backend/docs"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 	"orion-auth-backend/client"
 	"orion-auth-backend/config"
 	"orion-auth-backend/crypto"
@@ -33,6 +37,14 @@ import (
 	"orion-auth-backend/user"
 )
 
+// @title           Orion Auth Backend API
+// @version         1.0
+// @description     OAuth2/OIDC authentication server with user management, RBAC, MFA, and federation support.
+// @host            auth.nhsoul.fr
+// @BasePath        /
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
@@ -182,6 +194,11 @@ func setupRouter(
 	router.Use(middleware.SecurityHeaders())
 	router.Use(middleware.RequestID())
 	router.Use(middleware.CORS(cfg.CORS))
+
+	// Swagger UI (dev only)
+	if cfg.Server.Mode == "debug" {
+		router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	}
 
 	// Health endpoints
 	router.GET("/health", healthCheck)
@@ -347,6 +364,12 @@ func seedAdminClient(db *gorm.DB, issuer string) {
 	slog.Warn("========================================")
 }
 
+// healthCheck godoc
+// @Summary      Health check
+// @Tags         Health
+// @Produce      json
+// @Success      200  {object}  map[string]string
+// @Router       /health [get]
 func healthCheck(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "ok",
