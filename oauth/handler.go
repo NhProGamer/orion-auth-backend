@@ -49,6 +49,21 @@ func (h *Handler) RegisterRoutes(router *gin.Engine, clientAuth, rateLimiter gin
 }
 
 // Authorize initiates the authorization request (API-driven).
+// @Summary Initiate OAuth2 authorization request
+// @Tags OAuth2
+// @Accept json
+// @Produce json
+// @Param client_id query string true "Client ID"
+// @Param redirect_uri query string true "Redirect URI"
+// @Param response_type query string true "Response type"
+// @Param scope query string false "Requested scopes"
+// @Param state query string false "State parameter"
+// @Param nonce query string false "Nonce for ID token"
+// @Param code_challenge query string false "PKCE code challenge"
+// @Param code_challenge_method query string false "PKCE code challenge method"
+// @Success 200 {object} map[string]any
+// @Failure 400 {object} map[string]any
+// @Router /authorize [get]
 func (h *Handler) Authorize(c *gin.Context) {
 	clientID := c.Query("client_id")
 	if clientID == "" {
@@ -82,6 +97,15 @@ func (h *Handler) Authorize(c *gin.Context) {
 }
 
 // AuthorizeLogin handles the login step of the authorize flow.
+// @Summary Submit login credentials for OAuth2 authorization
+// @Tags OAuth2
+// @Accept json
+// @Produce json
+// @Param input body oauth.AuthorizeLoginInput true "Login credentials"
+// @Success 200 {object} map[string]any
+// @Failure 400 {object} map[string]any
+// @Failure 401 {object} map[string]any
+// @Router /authorize/login [post]
 func (h *Handler) AuthorizeLogin(c *gin.Context) {
 	var input AuthorizeLoginInput
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -123,6 +147,15 @@ func (h *Handler) AuthorizeLogin(c *gin.Context) {
 }
 
 // AuthorizeMFA handles the MFA verification step.
+// @Summary Submit MFA code for OAuth2 authorization
+// @Tags OAuth2
+// @Accept json
+// @Produce json
+// @Param input body oauth.AuthorizeMFAInput true "MFA verification input"
+// @Success 200 {object} map[string]any
+// @Failure 400 {object} map[string]any
+// @Failure 401 {object} map[string]any
+// @Router /authorize/mfa [post]
 func (h *Handler) AuthorizeMFA(c *gin.Context) {
 	var input AuthorizeMFAInput
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -151,6 +184,14 @@ func (h *Handler) AuthorizeMFA(c *gin.Context) {
 }
 
 // AuthorizeConsent handles the consent step.
+// @Summary Submit user consent for OAuth2 authorization
+// @Tags OAuth2
+// @Accept json
+// @Produce json
+// @Param input body oauth.AuthorizeConsentInput true "Consent input"
+// @Success 200 {object} map[string]any
+// @Failure 400 {object} map[string]any
+// @Router /authorize/consent [post]
 func (h *Handler) AuthorizeConsent(c *gin.Context) {
 	var input AuthorizeConsentInput
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -174,6 +215,20 @@ func (h *Handler) AuthorizeConsent(c *gin.Context) {
 }
 
 // Token handles the POST /token endpoint for all grant types.
+// @Summary Exchange credentials for tokens
+// @Tags OAuth2
+// @Accept x-www-form-urlencoded
+// @Produce json
+// @Param grant_type formData string true "Grant type"
+// @Param code formData string false "Authorization code"
+// @Param redirect_uri formData string false "Redirect URI"
+// @Param code_verifier formData string false "PKCE code verifier"
+// @Param refresh_token formData string false "Refresh token"
+// @Param scope formData string false "Requested scopes"
+// @Success 200 {object} map[string]any
+// @Failure 400 {object} map[string]any
+// @Failure 401 {object} map[string]any
+// @Router /token [post]
 func (h *Handler) Token(c *gin.Context) {
 	client, ok := middleware.GetOAuthClient(c)
 	if !ok {
@@ -251,6 +306,16 @@ func (h *Handler) handleRefreshTokenGrant(c *gin.Context, client *model.OAuthCli
 }
 
 // Introspect handles POST /introspect (RFC 7662).
+// @Summary Introspect a token
+// @Tags OAuth2
+// @Accept x-www-form-urlencoded
+// @Produce json
+// @Param token formData string true "Token to introspect"
+// @Param token_type_hint formData string false "Token type hint"
+// @Success 200 {object} map[string]any
+// @Failure 400 {object} map[string]any
+// @Failure 401 {object} map[string]any
+// @Router /introspect [post]
 func (h *Handler) Introspect(c *gin.Context) {
 	client, ok := middleware.GetOAuthClient(c)
 	if !ok {
@@ -271,6 +336,16 @@ func (h *Handler) Introspect(c *gin.Context) {
 }
 
 // Revoke handles POST /revoke (RFC 7009).
+// @Summary Revoke a token
+// @Tags OAuth2
+// @Accept x-www-form-urlencoded
+// @Produce json
+// @Param token formData string true "Token to revoke"
+// @Param token_type_hint formData string false "Token type hint"
+// @Success 200 {object} map[string]any
+// @Failure 400 {object} map[string]any
+// @Failure 401 {object} map[string]any
+// @Router /revoke [post]
 func (h *Handler) Revoke(c *gin.Context) {
 	client, ok := middleware.GetOAuthClient(c)
 	if !ok {
@@ -298,6 +373,15 @@ func (h *Handler) Revoke(c *gin.Context) {
 // --- Device Code Flow ---
 
 // DeviceAuthorization handles POST /device_authorization (RFC 8628).
+// @Summary Initiate device authorization flow
+// @Tags OAuth2
+// @Accept x-www-form-urlencoded
+// @Produce json
+// @Param scope formData string false "Requested scopes"
+// @Success 200 {object} map[string]any
+// @Failure 400 {object} map[string]any
+// @Failure 401 {object} map[string]any
+// @Router /device_authorization [post]
 func (h *Handler) DeviceAuthorization(c *gin.Context) {
 	client, ok := middleware.GetOAuthClient(c)
 	if !ok {
@@ -315,7 +399,15 @@ func (h *Handler) DeviceAuthorization(c *gin.Context) {
 	pkg.OK(c, resp)
 }
 
-// DeviceVerify handles POST /device/verify — user enters user_code.
+// DeviceVerify handles POST /device/verify -- user enters user_code.
+// @Summary Verify a device user code
+// @Tags OAuth2
+// @Accept json
+// @Produce json
+// @Param input body oauth.DeviceVerifyInput true "Device verification input"
+// @Success 200 {object} map[string]any
+// @Failure 400 {object} map[string]any
+// @Router /device/verify [post]
 func (h *Handler) DeviceVerify(c *gin.Context) {
 	var input DeviceVerifyInput
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -332,7 +424,16 @@ func (h *Handler) DeviceVerify(c *gin.Context) {
 	pkg.OK(c, resp)
 }
 
-// DeviceApprove handles POST /device/approve — authenticated user approves/denies.
+// DeviceApprove handles POST /device/approve -- authenticated user approves/denies.
+// @Summary Approve or deny a device authorization request
+// @Tags OAuth2
+// @Accept json
+// @Produce json
+// @Param input body object true "Device approval input (user_code, approved, email, password)"
+// @Success 200 {object} map[string]any
+// @Failure 400 {object} map[string]any
+// @Failure 401 {object} map[string]any
+// @Router /device/approve [post]
 func (h *Handler) DeviceApprove(c *gin.Context) {
 	// This endpoint requires the user to be authenticated
 	// The consuming app should pass user credentials or a session token

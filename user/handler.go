@@ -56,6 +56,18 @@ func (h *Handler) RegisterAdminRoutes(admin *gin.RouterGroup) {
 	admin.DELETE("/users/:id", h.AdminDeleteUser)
 }
 
+// AdminListUsers godoc
+// @Summary      List all users
+// @Tags         Admin - Users
+// @Accept       json
+// @Produce      json
+// @Param        page     query    int  false  "Page number"
+// @Param        per_page query    int  false  "Items per page"
+// @Success      200  {object}  pkg.PaginatedResponse
+// @Failure      401  {object}  pkg.AppError
+// @Failure      500  {object}  pkg.AppError
+// @Security     BearerAuth
+// @Router       /api/v1/admin/users [get]
 func (h *Handler) AdminListUsers(c *gin.Context) {
 	page, perPage := pkg.ParsePagination(c)
 
@@ -73,6 +85,18 @@ func (h *Handler) AdminListUsers(c *gin.Context) {
 	pkg.Paginated(c, profiles, total, page, perPage)
 }
 
+// AdminGetUser godoc
+// @Summary      Get a user by ID
+// @Tags         Admin - Users
+// @Accept       json
+// @Produce      json
+// @Param        id   path     string  true  "User ID (UUID)"
+// @Success      200  {object}  map[string]any
+// @Failure      400  {object}  pkg.AppError
+// @Failure      401  {object}  pkg.AppError
+// @Failure      404  {object}  pkg.AppError
+// @Security     BearerAuth
+// @Router       /api/v1/admin/users/{id} [get]
 func (h *Handler) AdminGetUser(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -89,6 +113,19 @@ func (h *Handler) AdminGetUser(c *gin.Context) {
 	pkg.OK(c, gin.H{"user": user.AdminView()})
 }
 
+// AdminUpdateUser godoc
+// @Summary      Update a user by ID
+// @Tags         Admin - Users
+// @Accept       json
+// @Produce      json
+// @Param        id    path     string              true  "User ID (UUID)"
+// @Param        body  body     user.AdminUpdateInput  true  "Fields to update"
+// @Success      200   {object}  map[string]any
+// @Failure      400   {object}  pkg.AppError
+// @Failure      401   {object}  pkg.AppError
+// @Failure      404   {object}  pkg.AppError
+// @Security     BearerAuth
+// @Router       /api/v1/admin/users/{id} [patch]
 func (h *Handler) AdminUpdateUser(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -117,6 +154,18 @@ func (h *Handler) AdminUpdateUser(c *gin.Context) {
 	pkg.OK(c, gin.H{"user": user.AdminView()})
 }
 
+// AdminDeleteUser godoc
+// @Summary      Delete a user by ID
+// @Tags         Admin - Users
+// @Accept       json
+// @Produce      json
+// @Param        id   path     string  true  "User ID (UUID)"
+// @Success      200  {object}  map[string]any
+// @Failure      400  {object}  pkg.AppError
+// @Failure      401  {object}  pkg.AppError
+// @Failure      404  {object}  pkg.AppError
+// @Security     BearerAuth
+// @Router       /api/v1/admin/users/{id} [delete]
 func (h *Handler) AdminDeleteUser(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -138,6 +187,17 @@ func (h *Handler) AdminDeleteUser(c *gin.Context) {
 	pkg.OK(c, gin.H{"message": "user deleted"})
 }
 
+// Register godoc
+// @Summary      Register a new user
+// @Tags         Auth
+// @Accept       json
+// @Produce      json
+// @Param        body  body     user.RegisterInput  true  "Registration payload"
+// @Success      201   {object}  map[string]any
+// @Failure      400   {object}  pkg.AppError
+// @Failure      403   {object}  pkg.AppError
+// @Failure      409   {object}  pkg.AppError
+// @Router       /api/v1/auth/register [post]
 func (h *Handler) Register(c *gin.Context) {
 	if h.regChecker != nil && !h.regChecker.IsRegistrationEnabled() {
 		pkg.HandleError(c, pkg.ErrForbidden("public registration is disabled"))
@@ -168,6 +228,16 @@ func (h *Handler) Register(c *gin.Context) {
 	})
 }
 
+// Login godoc
+// @Summary      Authenticate a user
+// @Tags         Auth
+// @Accept       json
+// @Produce      json
+// @Param        body  body     user.LoginInput  true  "Login credentials"
+// @Success      200   {object}  map[string]any
+// @Failure      400   {object}  pkg.AppError
+// @Failure      401   {object}  pkg.AppError
+// @Router       /api/v1/auth/login [post]
 func (h *Handler) Login(c *gin.Context) {
 	var input LoginInput
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -201,6 +271,16 @@ func (h *Handler) Login(c *gin.Context) {
 	})
 }
 
+// GetProfile godoc
+// @Summary      Get the current user's profile
+// @Tags         Profile
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]any
+// @Failure      401  {object}  pkg.AppError
+// @Failure      404  {object}  pkg.AppError
+// @Security     BearerAuth
+// @Router       /api/v1/me [get]
 func (h *Handler) GetProfile(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -217,6 +297,17 @@ func (h *Handler) GetProfile(c *gin.Context) {
 	pkg.OK(c, gin.H{"user": user.PublicProfile()})
 }
 
+// UpdateProfile godoc
+// @Summary      Update the current user's profile
+// @Tags         Profile
+// @Accept       json
+// @Produce      json
+// @Param        body  body     user.UpdateProfileInput  true  "Profile fields to update"
+// @Success      200   {object}  map[string]any
+// @Failure      400   {object}  pkg.AppError
+// @Failure      401   {object}  pkg.AppError
+// @Security     BearerAuth
+// @Router       /api/v1/me [patch]
 func (h *Handler) UpdateProfile(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -239,6 +330,17 @@ func (h *Handler) UpdateProfile(c *gin.Context) {
 	pkg.OK(c, gin.H{"user": user.PublicProfile()})
 }
 
+// ChangePassword godoc
+// @Summary      Change the current user's password
+// @Tags         Profile
+// @Accept       json
+// @Produce      json
+// @Param        body  body     user.ChangePasswordInput  true  "Old and new password"
+// @Success      200   {object}  map[string]any
+// @Failure      400   {object}  pkg.AppError
+// @Failure      401   {object}  pkg.AppError
+// @Security     BearerAuth
+// @Router       /api/v1/me/password [put]
 func (h *Handler) ChangePassword(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -264,6 +366,15 @@ func (h *Handler) ChangePassword(c *gin.Context) {
 	pkg.OK(c, gin.H{"message": "password changed successfully"})
 }
 
+// ForgotPassword godoc
+// @Summary      Request a password reset email
+// @Tags         Auth
+// @Accept       json
+// @Produce      json
+// @Param        body  body     user.ForgotPasswordInput  true  "Email address"
+// @Success      200   {object}  map[string]any
+// @Failure      400   {object}  pkg.AppError
+// @Router       /api/v1/auth/forgot-password [post]
 func (h *Handler) ForgotPassword(c *gin.Context) {
 	var input ForgotPasswordInput
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -276,6 +387,15 @@ func (h *Handler) ForgotPassword(c *gin.Context) {
 	pkg.OK(c, gin.H{"message": "if the email exists, a reset link has been sent"})
 }
 
+// ResetPassword godoc
+// @Summary      Reset password using a token
+// @Tags         Auth
+// @Accept       json
+// @Produce      json
+// @Param        body  body     user.ResetPasswordInput  true  "Reset token and new password"
+// @Success      200   {object}  map[string]any
+// @Failure      400   {object}  pkg.AppError
+// @Router       /api/v1/auth/reset-password [post]
 func (h *Handler) ResetPassword(c *gin.Context) {
 	var input ResetPasswordInput
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -295,6 +415,15 @@ func (h *Handler) ResetPassword(c *gin.Context) {
 	pkg.OK(c, gin.H{"message": "password reset successfully"})
 }
 
+// VerifyEmail godoc
+// @Summary      Verify email address using a token
+// @Tags         Auth
+// @Accept       json
+// @Produce      json
+// @Param        body  body     user.VerifyEmailInput  true  "Verification token"
+// @Success      200   {object}  map[string]any
+// @Failure      400   {object}  pkg.AppError
+// @Router       /api/v1/auth/verify-email [post]
 func (h *Handler) VerifyEmail(c *gin.Context) {
 	var input VerifyEmailInput
 	if err := c.ShouldBindJSON(&input); err != nil {
