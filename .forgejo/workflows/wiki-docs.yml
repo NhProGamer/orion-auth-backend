@@ -8,7 +8,11 @@ jobs:
     container:
       image: golang:1.25-alpine
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        run: |
+          apk add --no-cache git
+          git clone https://oauth2:${{ secrets.WIKI_TOKEN }}@git.nhsoul.fr/nhpro/orion-auth-backend.git .
+          git checkout ${{ github.sha }}
 
       - name: Install swag
         run: go install github.com/swaggo/swag/cmd/swag@latest
@@ -18,7 +22,7 @@ jobs:
 
       - name: Convert to Markdown and push to wiki
         run: |
-          apk add --no-cache python3 py3-pip git
+          apk add --no-cache python3 py3-pip
           pip3 install openapi-to-md --break-system-packages
           openapi-to-md docs/swagger.json > API-Documentation.md
           git config --global user.name "Forgejo Actions"
