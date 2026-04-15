@@ -95,6 +95,13 @@ func (h *Handler) UpdateRole(c *gin.Context) {
 		pkg.HandleError(c, err)
 		return
 	}
+
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionRoleUpdated, map[string]any{
+			"role_id": id,
+		})
+	}
+
 	pkg.OK(c, gin.H{"role": role})
 }
 

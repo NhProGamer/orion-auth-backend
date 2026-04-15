@@ -307,5 +307,9 @@ func (h *Handler) VerifyEmail(c *gin.Context) {
 		return
 	}
 
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionEmailVerified, nil)
+	}
+
 	pkg.OK(c, gin.H{"message": "email verified successfully"})
 }
