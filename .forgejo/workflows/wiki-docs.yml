@@ -1,0 +1,31 @@
+on:
+  push:
+    branches: [master]
+
+jobs:
+  update-wiki:
+    runs-on: docker
+    container:
+      image: golang:1.25-alpine
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install swag
+        run: go install github.com/swaggo/swag/cmd/swag@latest
+
+      - name: Generate docs
+        run: swag init -g main.go -o docs/
+
+      - name: Convert to Markdown and push to wiki
+        run: |
+          apk add --no-cache python3 py3-pip git
+          pip3 install openapi-to-md --break-system-packages
+          openapi-to-md docs/swagger.json > API-Documentation.md
+          git config --global user.name "Forgejo Actions"
+          git config --global user.email "actions@nhsoul.fr"
+          git clone https://oauth2:${{ secrets.WIKI_TOKEN }}@git.nhsoul.fr/nhpro/orion-auth-backend.wiki.git wiki
+          cp API-Documentation.md wiki/
+          cd wiki
+          git add -A
+          git diff --cached --quiet || git commit -m "docs: update API documentation"
+          git push
