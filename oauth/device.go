@@ -185,6 +185,9 @@ func (s *Service) ExchangeDeviceCode(client *model.OAuthClient, deviceCodeRaw st
 	case "denied":
 		return nil, pkg.ErrAccessDenied("user denied the authorization request")
 	case "authorized":
+		if dc.UserID == nil || dc.SessionID == nil {
+			return nil, pkg.ErrInvalidGrant("device code not properly authorized")
+		}
 		// Issue tokens
 		var resp *TokenResponse
 		err := s.repo.Transaction(func(tx *Repository) error {
