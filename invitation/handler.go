@@ -62,6 +62,13 @@ func (h *Handler) Create(c *gin.Context) {
 		return
 	}
 
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionInvitationCreated, map[string]any{
+			"invitation_id": inv.ID,
+			"email":         input.Email,
+		})
+	}
+
 	c.JSON(http.StatusCreated, gin.H{"invitation": inv})
 }
 
@@ -137,6 +144,12 @@ func (h *Handler) UpdateSettings(c *gin.Context) {
 		if err := h.service.UpdateSetting("registration_enabled", val); err != nil {
 			pkg.HandleError(c, err)
 			return
+		}
+
+		if h.auditService != nil {
+			h.auditService.LogFromContext(c, audit.ActionSettingsUpdated, map[string]any{
+				"registration_enabled": *input.RegistrationEnabled,
+			})
 		}
 	}
 
