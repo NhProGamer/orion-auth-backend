@@ -42,6 +42,15 @@ func (h *Handler) RegisterAdminRoutes(admin *gin.RouterGroup) {
 	admin.DELETE("/federation/:id", h.DeleteProvider)
 }
 
+// InitSocialLogin godoc
+// @Summary      Initiate social login via a federation provider
+// @Tags         Federation
+// @Produce      json
+// @Param        provider path string true "Provider name"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} map[string]any
+// @Failure      404 {object} map[string]any
+// @Router       /api/v1/auth/federation/{provider} [get]
 func (h *Handler) InitSocialLogin(c *gin.Context) {
 	providerName := c.Param("provider")
 
@@ -54,6 +63,17 @@ func (h *Handler) InitSocialLogin(c *gin.Context) {
 	pkg.OK(c, gin.H{"authorization_url": authURL})
 }
 
+// Callback godoc
+// @Summary      Handle federation provider callback
+// @Tags         Federation
+// @Accept       json
+// @Produce      json
+// @Param        provider path string true "Provider name"
+// @Param        body body federation.CallbackInput true "Callback payload"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} map[string]any
+// @Failure      500 {object} map[string]any
+// @Router       /api/v1/auth/federation/{provider}/callback [post]
 func (h *Handler) Callback(c *gin.Context) {
 	providerName := c.Param("provider")
 
@@ -78,6 +98,15 @@ func (h *Handler) Callback(c *gin.Context) {
 	pkg.OK(c, result)
 }
 
+// ListLinkedAccounts godoc
+// @Summary      List linked federation accounts for the current user
+// @Tags         Federation
+// @Produce      json
+// @Success      200 {object} map[string]any
+// @Failure      401 {object} map[string]any
+// @Failure      500 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/me/linked-accounts [get]
 func (h *Handler) ListLinkedAccounts(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -94,6 +123,16 @@ func (h *Handler) ListLinkedAccounts(c *gin.Context) {
 	pkg.OK(c, gin.H{"linked_accounts": links})
 }
 
+// UnlinkAccount godoc
+// @Summary      Unlink a federation account
+// @Tags         Federation
+// @Produce      json
+// @Param        id path string true "Linked account ID"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} map[string]any
+// @Failure      401 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/me/linked-accounts/{id} [delete]
 func (h *Handler) UnlinkAccount(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -117,6 +156,17 @@ func (h *Handler) UnlinkAccount(c *gin.Context) {
 
 // --- Admin ---
 
+// CreateProvider godoc
+// @Summary      Create a federation provider
+// @Tags         Admin - Federation
+// @Accept       json
+// @Produce      json
+// @Param        body body federation.CreateProviderInput true "Provider creation payload"
+// @Success      201 {object} map[string]any
+// @Failure      400 {object} map[string]any
+// @Failure      500 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/admin/federation [post]
 func (h *Handler) CreateProvider(c *gin.Context) {
 	var input CreateProviderInput
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -139,6 +189,14 @@ func (h *Handler) CreateProvider(c *gin.Context) {
 	pkg.Created(c, gin.H{"provider": p})
 }
 
+// ListProviders godoc
+// @Summary      List all federation providers
+// @Tags         Admin - Federation
+// @Produce      json
+// @Success      200 {object} map[string]any
+// @Failure      500 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/admin/federation [get]
 func (h *Handler) ListProviders(c *gin.Context) {
 	providers, err := h.service.ListProviders()
 	if err != nil {
@@ -148,6 +206,18 @@ func (h *Handler) ListProviders(c *gin.Context) {
 	pkg.OK(c, gin.H{"providers": providers})
 }
 
+// UpdateProvider godoc
+// @Summary      Update a federation provider
+// @Tags         Admin - Federation
+// @Accept       json
+// @Produce      json
+// @Param        id path string true "Provider ID"
+// @Param        body body federation.UpdateProviderInput true "Provider update payload"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} map[string]any
+// @Failure      404 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/admin/federation/{id} [patch]
 func (h *Handler) UpdateProvider(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -174,6 +244,16 @@ func (h *Handler) UpdateProvider(c *gin.Context) {
 	pkg.OK(c, gin.H{"provider": p})
 }
 
+// DeleteProvider godoc
+// @Summary      Delete a federation provider
+// @Tags         Admin - Federation
+// @Produce      json
+// @Param        id path string true "Provider ID"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} map[string]any
+// @Failure      404 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/admin/federation/{id} [delete]
 func (h *Handler) DeleteProvider(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {

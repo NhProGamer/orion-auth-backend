@@ -30,6 +30,17 @@ func (h *Handler) RegisterRoutes(admin *gin.RouterGroup) {
 	admin.POST("/clients/:id/rotate-secret", h.RotateSecret)
 }
 
+// Create godoc
+// @Summary      Create a new OAuth client
+// @Tags         Admin - Clients
+// @Accept       json
+// @Produce      json
+// @Param        body body client.CreateInput true "Client creation payload"
+// @Success      201 {object} map[string]any
+// @Failure      400 {object} map[string]any
+// @Failure      500 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/admin/clients [post]
 func (h *Handler) Create(c *gin.Context) {
 	var input CreateInput
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -52,6 +63,16 @@ func (h *Handler) Create(c *gin.Context) {
 	pkg.Created(c, resp)
 }
 
+// Get godoc
+// @Summary      Get a client by ID
+// @Tags         Admin - Clients
+// @Produce      json
+// @Param        id path string true "Client ID"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} map[string]any
+// @Failure      404 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/admin/clients/{id} [get]
 func (h *Handler) Get(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -68,6 +89,16 @@ func (h *Handler) Get(c *gin.Context) {
 	pkg.OK(c, gin.H{"client": client})
 }
 
+// List godoc
+// @Summary      List all clients
+// @Tags         Admin - Clients
+// @Produce      json
+// @Param        page query int false "Page number"
+// @Param        per_page query int false "Items per page"
+// @Success      200 {object} pkg.PaginatedResponse
+// @Failure      500 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/admin/clients [get]
 func (h *Handler) List(c *gin.Context) {
 	page, perPage := pkg.ParsePagination(c)
 
@@ -80,6 +111,18 @@ func (h *Handler) List(c *gin.Context) {
 	pkg.Paginated(c, clients, total, page, perPage)
 }
 
+// Update godoc
+// @Summary      Update a client
+// @Tags         Admin - Clients
+// @Accept       json
+// @Produce      json
+// @Param        id path string true "Client ID"
+// @Param        body body client.UpdateInput true "Client update payload"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} map[string]any
+// @Failure      404 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/admin/clients/{id} [patch]
 func (h *Handler) Update(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -108,6 +151,16 @@ func (h *Handler) Update(c *gin.Context) {
 	pkg.OK(c, gin.H{"client": client})
 }
 
+// Delete godoc
+// @Summary      Delete a client
+// @Tags         Admin - Clients
+// @Produce      json
+// @Param        id path string true "Client ID"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} map[string]any
+// @Failure      404 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/admin/clients/{id} [delete]
 func (h *Handler) Delete(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -129,6 +182,16 @@ func (h *Handler) Delete(c *gin.Context) {
 	pkg.OK(c, gin.H{"message": "client deactivated"})
 }
 
+// RotateSecret godoc
+// @Summary      Rotate a client's secret
+// @Tags         Admin - Clients
+// @Produce      json
+// @Param        id path string true "Client ID"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} map[string]any
+// @Failure      404 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/admin/clients/{id}/rotate-secret [post]
 func (h *Handler) RotateSecret(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {

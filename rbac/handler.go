@@ -34,6 +34,17 @@ func (h *Handler) RegisterRoutes(admin *gin.RouterGroup) {
 	admin.GET("/users/:id/roles", h.GetUserRoles)
 }
 
+// CreateRole godoc
+// @Summary      Create a new role
+// @Tags         Admin - RBAC
+// @Accept       json
+// @Produce      json
+// @Param        body body rbac.CreateRoleInput true "Role creation payload"
+// @Success      201 {object} map[string]any
+// @Failure      400 {object} map[string]any
+// @Failure      500 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/admin/roles [post]
 func (h *Handler) CreateRole(c *gin.Context) {
 	var input CreateRoleInput
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -56,6 +67,16 @@ func (h *Handler) CreateRole(c *gin.Context) {
 	pkg.Created(c, gin.H{"role": role})
 }
 
+// GetRole godoc
+// @Summary      Get a role by ID
+// @Tags         Admin - RBAC
+// @Produce      json
+// @Param        id path string true "Role ID"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} map[string]any
+// @Failure      404 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/admin/roles/{id} [get]
 func (h *Handler) GetRole(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -70,6 +91,14 @@ func (h *Handler) GetRole(c *gin.Context) {
 	pkg.OK(c, gin.H{"role": role})
 }
 
+// ListRoles godoc
+// @Summary      List all roles
+// @Tags         Admin - RBAC
+// @Produce      json
+// @Success      200 {object} map[string]any
+// @Failure      500 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/admin/roles [get]
 func (h *Handler) ListRoles(c *gin.Context) {
 	roles, err := h.service.ListRoles()
 	if err != nil {
@@ -79,6 +108,18 @@ func (h *Handler) ListRoles(c *gin.Context) {
 	pkg.OK(c, gin.H{"roles": roles})
 }
 
+// UpdateRole godoc
+// @Summary      Update a role
+// @Tags         Admin - RBAC
+// @Accept       json
+// @Produce      json
+// @Param        id path string true "Role ID"
+// @Param        body body rbac.UpdateRoleInput true "Role update payload"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} map[string]any
+// @Failure      404 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/admin/roles/{id} [patch]
 func (h *Handler) UpdateRole(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -105,6 +146,16 @@ func (h *Handler) UpdateRole(c *gin.Context) {
 	pkg.OK(c, gin.H{"role": role})
 }
 
+// DeleteRole godoc
+// @Summary      Delete a role
+// @Tags         Admin - RBAC
+// @Produce      json
+// @Param        id path string true "Role ID"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} map[string]any
+// @Failure      404 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/admin/roles/{id} [delete]
 func (h *Handler) DeleteRole(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -125,6 +176,18 @@ func (h *Handler) DeleteRole(c *gin.Context) {
 	pkg.OK(c, gin.H{"message": "role deleted"})
 }
 
+// SetPermissions godoc
+// @Summary      Set permissions for a role
+// @Tags         Admin - RBAC
+// @Accept       json
+// @Produce      json
+// @Param        id path string true "Role ID"
+// @Param        body body rbac.SetPermissionsInput true "Permissions payload"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} map[string]any
+// @Failure      404 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/admin/roles/{id}/permissions [post]
 func (h *Handler) SetPermissions(c *gin.Context) {
 	roleID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -151,6 +214,14 @@ func (h *Handler) SetPermissions(c *gin.Context) {
 	pkg.OK(c, gin.H{"message": "permissions updated"})
 }
 
+// ListPermissions godoc
+// @Summary      List all permissions
+// @Tags         Admin - RBAC
+// @Produce      json
+// @Success      200 {object} map[string]any
+// @Failure      500 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/admin/permissions [get]
 func (h *Handler) ListPermissions(c *gin.Context) {
 	perms, err := h.service.ListPermissions()
 	if err != nil {
@@ -160,6 +231,18 @@ func (h *Handler) ListPermissions(c *gin.Context) {
 	pkg.OK(c, gin.H{"permissions": perms})
 }
 
+// AssignRole godoc
+// @Summary      Assign a role to a user
+// @Tags         Admin - RBAC
+// @Accept       json
+// @Produce      json
+// @Param        id path string true "User ID"
+// @Param        body body rbac.AssignRoleInput true "Role assignment payload"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} map[string]any
+// @Failure      500 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/admin/users/{id}/roles [post]
 func (h *Handler) AssignRole(c *gin.Context) {
 	userID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -186,6 +269,17 @@ func (h *Handler) AssignRole(c *gin.Context) {
 	pkg.OK(c, gin.H{"message": "role assigned"})
 }
 
+// RemoveRole godoc
+// @Summary      Remove a role from a user
+// @Tags         Admin - RBAC
+// @Produce      json
+// @Param        id path string true "User ID"
+// @Param        roleId path string true "Role ID"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} map[string]any
+// @Failure      404 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/admin/users/{id}/roles/{roleId} [delete]
 func (h *Handler) RemoveRole(c *gin.Context) {
 	userID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -212,6 +306,16 @@ func (h *Handler) RemoveRole(c *gin.Context) {
 	pkg.OK(c, gin.H{"message": "role removed"})
 }
 
+// GetUserRoles godoc
+// @Summary      Get roles assigned to a user
+// @Tags         Admin - RBAC
+// @Produce      json
+// @Param        id path string true "User ID"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} map[string]any
+// @Failure      500 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/admin/users/{id}/roles [get]
 func (h *Handler) GetUserRoles(c *gin.Context) {
 	userID, err := uuid.Parse(c.Param("id"))
 	if err != nil {

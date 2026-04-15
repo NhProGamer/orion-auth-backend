@@ -29,6 +29,12 @@ func (h *Handler) RegisterPublicRoutes(public *gin.RouterGroup) {
 	public.GET("/auth/settings", h.PublicSettings)
 }
 
+// PublicSettings godoc
+// @Summary      Get public registration settings
+// @Tags         Invitations
+// @Produce      json
+// @Success      200 {object} map[string]any
+// @Router       /api/v1/auth/settings [get]
 func (h *Handler) PublicSettings(c *gin.Context) {
 	pkg.OK(c, gin.H{
 		"registration_enabled": h.service.IsRegistrationEnabled(),
@@ -43,6 +49,18 @@ func (h *Handler) RegisterAdminRoutes(admin *gin.RouterGroup) {
 	admin.PATCH("/settings", h.UpdateSettings)
 }
 
+// Create godoc
+// @Summary      Create an invitation
+// @Tags         Admin - Invitations
+// @Accept       json
+// @Produce      json
+// @Param        body body invitation.CreateInput true "Invitation creation payload"
+// @Success      201 {object} map[string]any
+// @Failure      400 {object} map[string]any
+// @Failure      401 {object} map[string]any
+// @Failure      500 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/admin/invitations [post]
 func (h *Handler) Create(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -72,6 +90,16 @@ func (h *Handler) Create(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"invitation": inv})
 }
 
+// List godoc
+// @Summary      List invitations
+// @Tags         Admin - Invitations
+// @Produce      json
+// @Param        page query int false "Page number"
+// @Param        per_page query int false "Items per page"
+// @Success      200 {object} pkg.PaginatedResponse
+// @Failure      500 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/admin/invitations [get]
 func (h *Handler) List(c *gin.Context) {
 	page, perPage := pkg.ParsePagination(c)
 
@@ -84,6 +112,16 @@ func (h *Handler) List(c *gin.Context) {
 	pkg.Paginated(c, invitations, total, page, perPage)
 }
 
+// Delete godoc
+// @Summary      Delete an invitation
+// @Tags         Admin - Invitations
+// @Produce      json
+// @Param        id path string true "Invitation ID"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} map[string]any
+// @Failure      404 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/admin/invitations/{id} [delete]
 func (h *Handler) Delete(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -99,6 +137,16 @@ func (h *Handler) Delete(c *gin.Context) {
 	pkg.OK(c, gin.H{"message": "invitation deleted"})
 }
 
+// RegisterWithInvite godoc
+// @Summary      Register a new user with an invitation code
+// @Tags         Invitations
+// @Accept       json
+// @Produce      json
+// @Param        body body invitation.RegisterInviteInput true "Registration payload"
+// @Success      201 {object} map[string]any
+// @Failure      400 {object} map[string]any
+// @Failure      500 {object} map[string]any
+// @Router       /api/v1/auth/register/invite [post]
 func (h *Handler) RegisterWithInvite(c *gin.Context) {
 	var input RegisterInviteInput
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -115,6 +163,14 @@ func (h *Handler) RegisterWithInvite(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"user": user.PublicProfile()})
 }
 
+// GetSettings godoc
+// @Summary      Get all application settings
+// @Tags         Admin - Settings
+// @Produce      json
+// @Success      200 {object} map[string]any
+// @Failure      500 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/admin/settings [get]
 func (h *Handler) GetSettings(c *gin.Context) {
 	settings, err := h.service.GetAllSettings()
 	if err != nil {
@@ -129,6 +185,17 @@ type UpdateSettingsInput struct {
 	RegistrationEnabled *bool `json:"registration_enabled"`
 }
 
+// UpdateSettings godoc
+// @Summary      Update application settings
+// @Tags         Admin - Settings
+// @Accept       json
+// @Produce      json
+// @Param        body body invitation.UpdateSettingsInput true "Settings update payload"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} map[string]any
+// @Failure      500 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/admin/settings [patch]
 func (h *Handler) UpdateSettings(c *gin.Context) {
 	var input UpdateSettingsInput
 	if err := c.ShouldBindJSON(&input); err != nil {
