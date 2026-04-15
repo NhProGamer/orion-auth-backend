@@ -24,26 +24,26 @@ func runCleanup(db *gorm.DB) {
 	now := time.Now()
 	grace := now.Add(-24 * time.Hour)
 
-	tables := []struct {
-		name  string
-		query string
+	queries := []struct {
+		label string
+		sql   string
 		args  []any
 	}{
-		{"access_tokens", "expires_at < ? OR (revoked = TRUE AND updated_at < ?)", []any{now, grace}},
-		{"refresh_tokens", "expires_at < ? OR (revoked = TRUE AND updated_at < ?)", []any{now, grace}},
-		{"authorization_codes", "expires_at < ?", []any{now}},
-		{"device_codes", "expires_at < ?", []any{now}},
-		{"sessions", "expires_at < ? OR (revoked = TRUE AND updated_at < ?)", []any{now, grace}},
+		{"access_tokens", "DELETE FROM access_tokens WHERE expires_at < ? OR (revoked = TRUE AND updated_at < ?)", []any{now, grace}},
+		{"refresh_tokens", "DELETE FROM refresh_tokens WHERE expires_at < ? OR (revoked = TRUE AND updated_at < ?)", []any{now, grace}},
+		{"authorization_codes", "DELETE FROM authorization_codes WHERE expires_at < ?", []any{now}},
+		{"device_codes", "DELETE FROM device_codes WHERE expires_at < ?", []any{now}},
+		{"sessions", "DELETE FROM sessions WHERE expires_at < ? OR (revoked = TRUE AND updated_at < ?)", []any{now, grace}},
 	}
 
-	for _, t := range tables {
-		result := db.Exec("DELETE FROM "+t.name+" WHERE "+t.query, t.args...)
+	for _, q := range queries {
+		result := db.Exec(q.sql, q.args...)
 		if result.Error != nil {
-			slog.Error("cleanup failed", "table", t.name, "error", result.Error)
+			slog.Error("cleanup failed", "table", q.label, "error", result.Error)
 			continue
 		}
 		if result.RowsAffected > 0 {
-			slog.Info("cleanup completed", "table", t.name, "deleted", result.RowsAffected)
+			slog.Info("cleanup completed", "table", q.label, "deleted", result.RowsAffected)
 		}
 	}
 }
