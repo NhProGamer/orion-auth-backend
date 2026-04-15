@@ -3,6 +3,8 @@ package oauth
 import (
 	"time"
 
+	"github.com/google/uuid"
+
 	"orion-auth-backend/crypto"
 	"orion-auth-backend/model"
 	"orion-auth-backend/pkg"
@@ -21,7 +23,7 @@ type IntrospectResponse struct {
 	Iss       string `json:"iss,omitempty"`
 }
 
-func (s *Service) Introspect(token, tokenTypeHint, issuer string) (*IntrospectResponse, error) {
+func (s *Service) Introspect(token, tokenTypeHint, issuer string, requestingClientID uuid.UUID) (*IntrospectResponse, error) {
 	if token == "" {
 		return nil, pkg.ErrInvalidRequest("missing token")
 	}
@@ -32,7 +34,7 @@ func (s *Service) Introspect(token, tokenTypeHint, issuer string) (*IntrospectRe
 	if tokenTypeHint == "" || tokenTypeHint == "access_token" {
 		at, err := s.repo.FindAccessToken(tokenHash)
 		if err == nil && at != nil {
-			return s.introspectAccessToken(at, issuer), nil
+			return s.introspectAccessToken(at, issuer, requestingClientID), nil
 		}
 	}
 
@@ -48,7 +50,7 @@ func (s *Service) Introspect(token, tokenTypeHint, issuer string) (*IntrospectRe
 	return &IntrospectResponse{Active: false}, nil
 }
 
-func (s *Service) introspectAccessToken(at *model.AccessToken, issuer string) *IntrospectResponse {
+func (s *Service) introspectAccessToken(at *model.AccessToken, issuer string, requestingClientID uuid.UUID) *IntrospectResponse {
 	if !at.IsValid() {
 		return &IntrospectResponse{Active: false}
 	}
@@ -65,10 +67,12 @@ func (s *Service) introspectAccessToken(at *model.AccessToken, issuer string) *I
 
 	if at.UserID != nil {
 		resp.Sub = at.UserID.String()
-		// Look up user email for username
-		user, err := s.userService.GetByID(*at.UserID)
-		if err == nil && user != nil {
-			resp.Username = user.Email
+		// Only return username to the client that owns the token
+		if at.ClientID == requestingClientID {
+			user, err := s.userService.GetByID(*at.UserID)
+			if err == nil && user != nil {
+				resp.Username = user.Email
+			}
 		}
 	}
 

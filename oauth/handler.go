@@ -252,7 +252,7 @@ func (h *Handler) handleRefreshTokenGrant(c *gin.Context, client *model.OAuthCli
 
 // Introspect handles POST /introspect (RFC 7662).
 func (h *Handler) Introspect(c *gin.Context) {
-	_, ok := middleware.GetOAuthClient(c)
+	client, ok := middleware.GetOAuthClient(c)
 	if !ok {
 		pkg.HandleError(c, pkg.ErrInvalidClient("client authentication required"))
 		return
@@ -261,7 +261,7 @@ func (h *Handler) Introspect(c *gin.Context) {
 	token := c.PostForm("token")
 	tokenTypeHint := c.PostForm("token_type_hint")
 
-	resp, err := h.service.Introspect(token, tokenTypeHint, h.issuer)
+	resp, err := h.service.Introspect(token, tokenTypeHint, h.issuer, client.ID)
 	if err != nil {
 		pkg.HandleError(c, err)
 		return
