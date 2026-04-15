@@ -16,18 +16,24 @@ import (
 
 	appCrypto "orion-auth-backend/crypto"
 	"orion-auth-backend/model"
+	"orion-auth-backend/rbac"
 	"orion-auth-backend/user"
 )
 
 type Service struct {
 	db          *gorm.DB
 	userService *user.Service
+	rbacService *rbac.Service
 	issuer      string
 
 	mu         sync.RWMutex
 	activeKey  *model.SigningKey
 	privateKey *rsa.PrivateKey
 	allKeys    []model.SigningKey
+}
+
+func (s *Service) SetRBACService(rs *rbac.Service) {
+	s.rbacService = rs
 }
 
 func NewService(db *gorm.DB, userService *user.Service, issuer string) *Service {
@@ -173,6 +179,8 @@ func (s *Service) GenerateIDToken(claims IDTokenClaims) (string, error) {
 		}
 	}
 
+	s.enrichClaimsWithRoles(claims.UserID, claims.Scopes, jwtClaims)
+
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, jwtClaims)
 	token.Header["kid"] = key.ID.String()
 
@@ -262,9 +270,9 @@ func (s *Service) GetDiscovery() OpenIDConfiguration {
 		GrantTypesSupported:              []string{"authorization_code", "client_credentials", "refresh_token", "urn:ietf:params:oauth:grant-type:device_code"},
 		SubjectTypesSupported:            []string{"public"},
 		IDTokenSigningAlgValuesSupported: []string{"RS256"},
-		ScopesSupported:                  []string{"openid", "profile", "email", "offline_access"},
+		ScopesSupported:                  []string{"openid", "profile", "email", "roles", "offline_access"},
 		TokenEndpointAuthMethodsSupported: []string{"client_secret_basic", "client_secret_post", "none"},
-		ClaimsSupported:                  []string{"sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "at_hash", "name", "email", "email_verified", "picture", "phone_number", "updated_at"},
+		ClaimsSupported:                  []string{"sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "at_hash", "name", "email", "email_verified", "picture", "phone_number", "updated_at", "roles"},
 		CodeChallengeMethodsSupported:    []string{"S256"},
 	}
 }
@@ -276,5 +284,28 @@ func (s *Service) GetUserInfo(userID uuid.UUID, scopes []string) (map[string]any
 	if err != nil {
 		return nil, err
 	}
-	return u.OIDCClaims(scopes), nil
+	claims := u.OIDCClaims(scopes)
+	s.enrichClaimsWithRoles(userID, scopes, claims)
+	return claims, nil
+}
+
+func (s *Service) enrichClaimsWithRoles(userID uuid.UUID, scopes []string, claims map[string]any) {
+	if s.rbacService == nil {
+		return
+	}
+	for _, scope := range scopes {
+		if scope == "roles" {
+			roles, err := s.rbacService.GetUserRoles(userID)
+			if err != nil {
+				slog.Error("failed to fetch roles for claims", "user_id", userID, "error", err)
+				return
+			}
+			names := make([]string, len(roles))
+			for i, r := range roles {
+				names[i] = r.Name
+			}
+			claims["roles"] = names
+			return
+		}
+	}
 }
