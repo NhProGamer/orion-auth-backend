@@ -45,6 +45,14 @@ func (h *Handler) CreateRole(c *gin.Context) {
 		pkg.HandleError(c, err)
 		return
 	}
+
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionRoleCreated, map[string]any{
+			"role_id":   role.ID,
+			"role_name": role.Name,
+		})
+	}
+
 	pkg.Created(c, gin.H{"role": role})
 }
 
@@ -100,6 +108,13 @@ func (h *Handler) DeleteRole(c *gin.Context) {
 		pkg.HandleError(c, err)
 		return
 	}
+
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionRoleDeleted, map[string]any{
+			"role_id": id,
+		})
+	}
+
 	pkg.OK(c, gin.H{"message": "role deleted"})
 }
 
@@ -118,6 +133,14 @@ func (h *Handler) SetPermissions(c *gin.Context) {
 		pkg.HandleError(c, err)
 		return
 	}
+
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionRolePermissionsUpdated, map[string]any{
+			"role_id":        roleID,
+			"permission_ids": input.PermissionIDs,
+		})
+	}
+
 	pkg.OK(c, gin.H{"message": "permissions updated"})
 }
 
@@ -145,6 +168,14 @@ func (h *Handler) AssignRole(c *gin.Context) {
 		pkg.HandleError(c, err)
 		return
 	}
+
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionRoleAssigned, map[string]any{
+			"target_user_id": userID,
+			"role_id":        input.RoleID,
+		})
+	}
+
 	pkg.OK(c, gin.H{"message": "role assigned"})
 }
 
@@ -163,6 +194,14 @@ func (h *Handler) RemoveRole(c *gin.Context) {
 		pkg.HandleError(c, err)
 		return
 	}
+
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionRoleRemoved, map[string]any{
+			"target_user_id": userID,
+			"role_id":        roleID,
+		})
+	}
+
 	pkg.OK(c, gin.H{"message": "role removed"})
 }
 
