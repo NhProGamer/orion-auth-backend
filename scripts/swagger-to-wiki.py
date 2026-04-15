@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""Convert swagger.json to a Markdown wiki page."""
+import json
+import sys
+
+def main():
+    if len(sys.argv) != 3:
+        print(f"Usage: {sys.argv[0]} <swagger.json> <output.md>")
+        sys.exit(1)
+
+    with open(sys.argv[1]) as f:
+        spec = json.load(f)
+
+    lines = []
+    info = spec.get("info", {})
+    lines.append(f"# {info.get('title', 'API Documentation')}")
+    lines.append("")
+    if info.get("description"):
+        lines.append(info["description"])
+        lines.append("")
+    lines.append(f"**Version:** {info.get('version', '')}")
+    lines.append(f"**Host:** {spec.get('host', '')}")
+    lines.append(f"**Base Path:** {spec.get('basePath', '/')}")
+    lines.append("")
+
+    # Group by tags
+    tag_ops = {}
+    for path, methods in sorted(spec.get("paths", {}).items()):
+        for method, op in methods.items():
+            if method in ("parameters",):
+                continue
+            tags = op.get("tags", ["Untagged"])
+            for tag in tags:
+                tag_ops.setdefault(tag, []).append((method.upper(), path, op))
+
+    for tag in sorted(tag_ops.keys()):
+        lines.append(f"## {tag}")
+        lines.append("")
+        for method, path, op in tag_ops[tag]:
+            summary = op.get("summary", "")
+            lines.append(f"### `{method}` {path}")
+            lines.append("")
+            if summary:
+                lines.append(summary)
+                lines.append("")
+
+            # Parameters
+            params = op.get("parameters", [])
+            if params:
+                lines.append("**Parameters:**")
+                lines.append("")
+                lines.append("| Name | In | Type | Required | Description |")
+                lines.append("|------|-----|------|----------|-------------|")
+                for p in params:
+                    name = p.get("name", "")
+                    loc = p.get("in", "")
+                    required = "Yes" if p.get("required") else "No"
+                    desc = p.get("description", "")
+                    if "schema" in p:
+                        ptype = p["schema"].get("type", p["schema"].get("$ref", "object"))
+                    else:
+                        ptype = p.get("type", "string")
+                    lines.append(f"| {name} | {loc} | {ptype} | {required} | {desc} |")
+                lines.append("")
+
+            # Responses
+            responses = op.get("responses", {})
+            if responses:
+                lines.append("**Responses:**")
+                lines.append("")
+                lines.append("| Code | Description |")
+                lines.append("|------|-------------|")
+                for code, resp in sorted(responses.items()):
+                    desc = resp.get("description", "")
+                    lines.append(f"| {code} | {desc} |")
+                lines.append("")
+
+            # Security
+            security = op.get("security", [])
+            if security:
+                schemes = [list(s.keys())[0] for s in security if s]
+                if schemes:
+                    lines.append(f"**Auth:** {', '.join(schemes)}")
+                    lines.append("")
+
+            lines.append("---")
+            lines.append("")
+
+    with open(sys.argv[2], "w") as f:
+        f.write("\n".join(lines))
+
+    print(f"Generated {sys.argv[2]} ({len(tag_ops)} tags, {sum(len(v) for v in tag_ops.values())} endpoints)")
+
+if __name__ == "__main__":
+    main()
