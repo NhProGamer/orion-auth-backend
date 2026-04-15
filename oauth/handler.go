@@ -91,8 +91,21 @@ func (h *Handler) AuthorizeLogin(c *gin.Context) {
 
 	resp, err := h.service.AuthorizeLogin(input, c.ClientIP(), c.GetHeader("User-Agent"))
 	if err != nil {
+		if h.auditService != nil {
+			h.auditService.LogFromContext(c, audit.ActionUserLoginFailed, map[string]any{
+				"email": input.Email,
+				"flow":  "oauth",
+			})
+		}
 		pkg.HandleError(c, err)
 		return
+	}
+
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionUserLogin, map[string]any{
+			"email": input.Email,
+			"flow":  "oauth",
+		})
 	}
 
 	// If no consent needed, auto-complete and return the code
@@ -149,6 +162,12 @@ func (h *Handler) AuthorizeConsent(c *gin.Context) {
 	if err != nil {
 		pkg.HandleError(c, err)
 		return
+	}
+
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionOAuthConsentGranted, map[string]any{
+			"request_id": input.RequestID,
+		})
 	}
 
 	pkg.OK(c, resp)
@@ -265,6 +284,12 @@ func (h *Handler) Revoke(c *gin.Context) {
 	if err := h.service.Revoke(token, tokenTypeHint, client); err != nil {
 		pkg.HandleError(c, err)
 		return
+	}
+
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionTokenRevoked, map[string]any{
+			"client_id": client.ID,
+		})
 	}
 
 	pkg.OK(c, gin.H{})
