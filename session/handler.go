@@ -79,6 +79,12 @@ func (h *Handler) Revoke(c *gin.Context) {
 		return
 	}
 
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionSessionRevoked, map[string]any{
+			"session_id": sessionID,
+		})
+	}
+
 	pkg.OK(c, gin.H{"message": "session revoked"})
 }
 
@@ -100,6 +106,12 @@ func (h *Handler) RevokeAll(c *gin.Context) {
 	if err != nil {
 		pkg.HandleError(c, err)
 		return
+	}
+
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionSessionsRevokedAll, map[string]any{
+			"revoked_count": count,
+		})
 	}
 
 	pkg.OK(c, gin.H{
