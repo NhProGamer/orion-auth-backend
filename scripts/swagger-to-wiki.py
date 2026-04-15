@@ -3,6 +3,16 @@
 import json
 import sys
 
+def resolve_ref(ref):
+    """Convert #/definitions/pkg.TypeName to TypeName."""
+    if ref and ref.startswith("#/definitions/"):
+        name = ref.split("/")[-1]
+        # Remove package prefix (e.g., "client.CreateInput" -> "CreateInput")
+        if "." in name:
+            name = name.split(".", 1)[1]
+        return f"`{name}`"
+    return ref
+
 def main():
     if len(sys.argv) != 3:
         print(f"Usage: {sys.argv[0]} <swagger.json> <output.md>")
@@ -18,8 +28,8 @@ def main():
     if info.get("description"):
         lines.append(info["description"])
         lines.append("")
-    lines.append(f"**Version:** {info.get('version', '')}")
-    lines.append(f"**Host:** {spec.get('host', '')}")
+    lines.append(f"**Version:** {info.get('version', '')}  ")
+    lines.append(f"**Host:** {spec.get('host', '')}  ")
     lines.append(f"**Base Path:** {spec.get('basePath', '/')}")
     lines.append("")
 
@@ -32,6 +42,15 @@ def main():
             tags = op.get("tags", ["Untagged"])
             for tag in tags:
                 tag_ops.setdefault(tag, []).append((method.upper(), path, op))
+
+    # Table of contents
+    lines.append("## Table of Contents")
+    lines.append("")
+    for tag in sorted(tag_ops.keys()):
+        anchor = tag.lower().replace(" ", "-").replace(".", "")
+        count = len(tag_ops[tag])
+        lines.append(f"- [{tag}](#{anchor}) ({count} endpoints)")
+    lines.append("")
 
     for tag in sorted(tag_ops.keys()):
         lines.append(f"## {tag}")
@@ -57,7 +76,7 @@ def main():
                     required = "Yes" if p.get("required") else "No"
                     desc = p.get("description", "")
                     if "schema" in p:
-                        ptype = p["schema"].get("type", p["schema"].get("$ref", "object"))
+                        ptype = p["schema"].get("type", resolve_ref(p["schema"].get("$ref", "object")))
                     else:
                         ptype = p.get("type", "string")
                     lines.append(f"| {name} | {loc} | {ptype} | {required} | {desc} |")
