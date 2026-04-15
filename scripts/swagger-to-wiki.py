@@ -50,6 +50,9 @@ def main():
         anchor = tag.lower().replace(" ", "-").replace(".", "")
         count = len(tag_ops[tag])
         lines.append(f"- [{tag}](#{anchor}) ({count} endpoints)")
+    definitions = spec.get("definitions", {})
+    if definitions:
+        lines.append(f"- [Models](#models) ({len(definitions)} schemas)")
     lines.append("")
 
     for tag in sorted(tag_ops.keys()):
@@ -105,10 +108,44 @@ def main():
             lines.append("---")
             lines.append("")
 
+    # Models / Definitions
+    definitions = spec.get("definitions", {})
+    if definitions:
+        lines.append("## Models")
+        lines.append("")
+        for name, schema in sorted(definitions.items()):
+            short_name = name.split(".", 1)[1] if "." in name else name
+            pkg = name.split(".", 1)[0] if "." in name else ""
+            lines.append(f"### `{short_name}`")
+            if pkg:
+                lines.append(f"*Package: {pkg}*")
+                lines.append("")
+            props = schema.get("properties", {})
+            required = schema.get("required", [])
+            if props:
+                lines.append("| Field | Type | Required | Description |")
+                lines.append("|-------|------|----------|-------------|")
+                for field, info in sorted(props.items()):
+                    ftype = info.get("type", "")
+                    if not ftype and "$ref" in info:
+                        ftype = resolve_ref(info["$ref"])
+                    if ftype == "array" and "items" in info:
+                        item_type = info["items"].get("type", "")
+                        if not item_type and "$ref" in info["items"]:
+                            item_type = resolve_ref(info["items"]["$ref"])
+                        ftype = f"{item_type}[]"
+                    req = "Yes" if field in required else "No"
+                    desc = info.get("description", "")
+                    lines.append(f"| {field} | {ftype} | {req} | {desc} |")
+            else:
+                lines.append("*No properties defined.*")
+            lines.append("")
+
     with open(sys.argv[2], "w") as f:
         f.write("\n".join(lines))
 
-    print(f"Generated {sys.argv[2]} ({len(tag_ops)} tags, {sum(len(v) for v in tag_ops.values())} endpoints)")
+    model_count = len(definitions)
+    print(f"Generated {sys.argv[2]} ({len(tag_ops)} tags, {sum(len(v) for v in tag_ops.values())} endpoints, {model_count} models)")
 
 if __name__ == "__main__":
     main()
