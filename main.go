@@ -108,6 +108,16 @@ func main() {
 	fedHandler := federation.NewHandler(fedService)
 	invHandler := invitation.NewHandler(invService)
 
+	// Connect audit logging to handlers
+	userHandler.SetAuditService(auditService)
+	clientHandler.SetAuditService(auditService)
+	oauthHandler.SetAuditService(auditService)
+	mfaHandler.SetAuditService(auditService)
+	sessionHandler.SetAuditService(auditService)
+	rbacHandler.SetAuditService(auditService)
+	fedHandler.SetAuditService(auditService)
+	invHandler.SetAuditService(auditService)
+
 	// Router
 	router := setupRouter(cfg, db, hasher, authRateLimiter, rbacService, userHandler, sessionHandler, clientHandler, oauthHandler, oidcHandler, mfaHandler, rbacHandler, auditHandler, fedHandler, invHandler)
 

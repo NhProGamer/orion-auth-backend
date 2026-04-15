@@ -4,16 +4,22 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"orion-auth-backend/audit"
 	"orion-auth-backend/middleware"
 	"orion-auth-backend/pkg"
 )
 
 type Handler struct {
-	service *Service
+	service      *Service
+	auditService *audit.Service
 }
 
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
+}
+
+func (h *Handler) SetAuditService(s *audit.Service) {
+	h.auditService = s
 }
 
 // RegisterPublicRoutes registers federation endpoints that don't require auth.

@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"orion-auth-backend/audit"
 	"orion-auth-backend/middleware"
 	"orion-auth-backend/model"
 	"orion-auth-backend/pkg"
@@ -12,12 +13,17 @@ import (
 )
 
 type Handler struct {
-	service *Service
-	issuer  string
+	service      *Service
+	issuer       string
+	auditService *audit.Service
 }
 
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
+}
+
+func (h *Handler) SetAuditService(s *audit.Service) {
+	h.auditService = s
 }
 
 func (h *Handler) RegisterRoutes(router *gin.Engine, clientAuth gin.HandlerFunc, issuer string) {

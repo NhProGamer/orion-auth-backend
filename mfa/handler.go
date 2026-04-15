@@ -3,18 +3,24 @@ package mfa
 import (
 	"github.com/gin-gonic/gin"
 
+	"orion-auth-backend/audit"
 	"orion-auth-backend/middleware"
 	"orion-auth-backend/pkg"
 	"orion-auth-backend/user"
 )
 
 type Handler struct {
-	service     *Service
-	userService *user.Service
+	service      *Service
+	userService  *user.Service
+	auditService *audit.Service
 }
 
 func NewHandler(service *Service, userService *user.Service) *Handler {
 	return &Handler{service: service, userService: userService}
+}
+
+func (h *Handler) SetAuditService(s *audit.Service) {
+	h.auditService = s
 }
 
 func (h *Handler) RegisterRoutes(authenticated *gin.RouterGroup) {

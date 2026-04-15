@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"orion-auth-backend/audit"
 	"orion-auth-backend/middleware"
 	"orion-auth-backend/pkg"
 )
@@ -17,6 +18,7 @@ type RegistrationChecker interface {
 type Handler struct {
 	service      *Service
 	regChecker   RegistrationChecker
+	auditService *audit.Service
 }
 
 func NewHandler(service *Service) *Handler {
@@ -25,6 +27,10 @@ func NewHandler(service *Service) *Handler {
 
 func (h *Handler) SetRegistrationChecker(checker RegistrationChecker) {
 	h.regChecker = checker
+}
+
+func (h *Handler) SetAuditService(s *audit.Service) {
+	h.auditService = s
 }
 
 func (h *Handler) RegisterRoutes(public, authenticated *gin.RouterGroup) {
