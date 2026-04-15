@@ -43,6 +43,12 @@ func (h *Handler) Create(c *gin.Context) {
 		return
 	}
 
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionClientCreated, map[string]any{
+			"client_name": input.Name,
+		})
+	}
+
 	pkg.Created(c, resp)
 }
 
@@ -93,6 +99,12 @@ func (h *Handler) Update(c *gin.Context) {
 		return
 	}
 
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionClientUpdated, map[string]any{
+			"client_id": id,
+		})
+	}
+
 	pkg.OK(c, gin.H{"client": client})
 }
 
@@ -106,6 +118,12 @@ func (h *Handler) Delete(c *gin.Context) {
 	if err := h.service.Delete(id); err != nil {
 		pkg.HandleError(c, err)
 		return
+	}
+
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionClientDeleted, map[string]any{
+			"client_id": id,
+		})
 	}
 
 	pkg.OK(c, gin.H{"message": "client deactivated"})
@@ -122,6 +140,12 @@ func (h *Handler) RotateSecret(c *gin.Context) {
 	if err != nil {
 		pkg.HandleError(c, err)
 		return
+	}
+
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionClientSecretRotated, map[string]any{
+			"client_id": id,
+		})
 	}
 
 	pkg.OK(c, gin.H{"client_id": id, "client_secret": secret})
