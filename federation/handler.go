@@ -128,6 +128,14 @@ func (h *Handler) CreateProvider(c *gin.Context) {
 		pkg.HandleError(c, err)
 		return
 	}
+
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionFederationProviderCreated, map[string]any{
+			"provider_id":   p.ID,
+			"provider_name": p.Name,
+		})
+	}
+
 	pkg.Created(c, gin.H{"provider": p})
 }
 
@@ -156,6 +164,13 @@ func (h *Handler) UpdateProvider(c *gin.Context) {
 		pkg.HandleError(c, err)
 		return
 	}
+
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionFederationProviderUpdated, map[string]any{
+			"provider_id": id,
+		})
+	}
+
 	pkg.OK(c, gin.H{"provider": p})
 }
 
@@ -169,5 +184,12 @@ func (h *Handler) DeleteProvider(c *gin.Context) {
 		pkg.HandleError(c, err)
 		return
 	}
+
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionFederationProviderDeleted, map[string]any{
+			"provider_id": id,
+		})
+	}
+
 	pkg.OK(c, gin.H{"message": "provider deleted"})
 }
