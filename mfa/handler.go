@@ -74,6 +74,10 @@ func (h *Handler) Verify(c *gin.Context) {
 		return
 	}
 
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionMFAEnrolled, nil)
+	}
+
 	pkg.OK(c, gin.H{
 		"message":      "TOTP activated successfully",
 		"backup_codes": backupCodes,
@@ -100,6 +104,10 @@ func (h *Handler) Disable(c *gin.Context) {
 	if err := h.service.Disable(userID, input.Code); err != nil {
 		pkg.HandleError(c, err)
 		return
+	}
+
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionMFADisabled, nil)
 	}
 
 	pkg.OK(c, gin.H{"message": "TOTP disabled"})
