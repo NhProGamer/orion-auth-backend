@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 
-	"orion-auth-backend/crypto"
 	"orion-auth-backend/model"
 	"orion-auth-backend/pkg"
 )
@@ -151,11 +150,6 @@ func (s *Service) InitSocialLogin(providerName string) (string, error) {
 		return "", pkg.ErrBadRequest("provider has no authorization URL configured")
 	}
 
-	state, err := crypto.GenerateRandomString(16)
-	if err != nil {
-		return "", pkg.ErrInternal("failed to generate state")
-	}
-
 	callbackURL := fmt.Sprintf("%s/api/v1/auth/federation/%s/callback", s.issuer, provider.Name)
 	scopes := strings.Join(provider.Scopes, " ")
 
@@ -164,7 +158,6 @@ func (s *Service) InitSocialLogin(providerName string) (string, error) {
 		"redirect_uri":  {callbackURL},
 		"response_type": {"code"},
 		"scope":         {scopes},
-		"state":         {state},
 	}
 
 	authURL := *provider.AuthorizationURL + "?" + params.Encode()
