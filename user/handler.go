@@ -108,6 +108,12 @@ func (h *Handler) AdminUpdateUser(c *gin.Context) {
 		return
 	}
 
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionUserUpdated, map[string]any{
+			"target_user_id": id,
+		})
+	}
+
 	pkg.OK(c, gin.H{"user": user.AdminView()})
 }
 
@@ -121,6 +127,12 @@ func (h *Handler) AdminDeleteUser(c *gin.Context) {
 	if err := h.service.Delete(id); err != nil {
 		pkg.HandleError(c, err)
 		return
+	}
+
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionUserDeleted, map[string]any{
+			"target_user_id": id,
+		})
 	}
 
 	pkg.OK(c, gin.H{"message": "user deleted"})
@@ -144,6 +156,13 @@ func (h *Handler) Register(c *gin.Context) {
 		return
 	}
 
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionUserRegistered, map[string]any{
+			"user_id": user.ID,
+			"email":   user.Email,
+		})
+	}
+
 	c.JSON(http.StatusCreated, gin.H{
 		"user": user.PublicProfile(),
 	})
@@ -158,8 +177,20 @@ func (h *Handler) Login(c *gin.Context) {
 
 	user, err := h.service.Authenticate(input)
 	if err != nil {
+		if h.auditService != nil {
+			h.auditService.LogFromContext(c, audit.ActionUserLoginFailed, map[string]any{
+				"email": input.Email,
+			})
+		}
 		pkg.HandleError(c, err)
 		return
+	}
+
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionUserLogin, map[string]any{
+			"user_id": user.ID,
+			"email":   user.Email,
+		})
 	}
 
 	// Session creation is handled by the session package.
@@ -226,6 +257,10 @@ func (h *Handler) ChangePassword(c *gin.Context) {
 		return
 	}
 
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionPasswordChanged, nil)
+	}
+
 	pkg.OK(c, gin.H{"message": "password changed successfully"})
 }
 
@@ -251,6 +286,10 @@ func (h *Handler) ResetPassword(c *gin.Context) {
 	if err := h.service.ResetPassword(input); err != nil {
 		pkg.HandleError(c, err)
 		return
+	}
+
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionPasswordReset, nil)
 	}
 
 	pkg.OK(c, gin.H{"message": "password reset successfully"})
