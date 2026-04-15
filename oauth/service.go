@@ -210,7 +210,9 @@ func (s *Service) AuthorizeLogin(input AuthorizeLoginInput, ipAddress, userAgent
 	} else {
 		// First-party clients skip consent
 		var client model.OAuthClient
-		s.repo.db.Where("id = ?", req.ClientID).First(&client)
+		if err := s.repo.db.Where("id = ?", req.ClientID).First(&client).Error; err != nil {
+			return nil, pkg.ErrServerError("failed to look up client")
+		}
 		needsConsent = !client.IsFirstParty
 	}
 
@@ -285,7 +287,9 @@ func (s *Service) AuthorizeMFA(input AuthorizeMFAInput) (*AuthorizeLoginResponse
 		req.ConsentGiven = true
 	} else {
 		var client model.OAuthClient
-		s.repo.db.Where("id = ?", req.ClientID).First(&client)
+		if err := s.repo.db.Where("id = ?", req.ClientID).First(&client).Error; err != nil {
+			return nil, pkg.ErrServerError("failed to look up client")
+		}
 		needsConsent = !client.IsFirstParty
 		if !needsConsent {
 			req.ConsentGiven = true
@@ -350,16 +354,22 @@ func (s *Service) AuthorizeConsent(input AuthorizeConsentInput, ipAddress, userA
 			Scopes:    pq.StringArray(grantedScopes),
 			GrantedAt: time.Now(),
 		}
-		s.repo.CreateConsent(consent)
+		if err := s.repo.CreateConsent(consent); err != nil {
+			return nil, pkg.ErrServerError("failed to store consent")
+		}
 	} else {
 		consent.Scopes = pq.StringArray(grantedScopes)
 		consent.GrantedAt = time.Now()
-		s.repo.UpdateConsent(consent)
+		if err := s.repo.UpdateConsent(consent); err != nil {
+			return nil, pkg.ErrServerError("failed to update consent")
+		}
 	}
 
 	req.ConsentGiven = true
 	req.Scopes = pq.StringArray(grantedScopes)
-	s.repo.UpdateAuthRequest(req)
+	if err := s.repo.UpdateAuthRequest(req); err != nil {
+		return nil, pkg.ErrServerError("failed to update authorization request")
+	}
 
 	return s.completeAuthorize(req, ipAddress, userAgent)
 }
@@ -388,7 +398,9 @@ func (s *Service) completeAuthorize(req *model.AuthorizationRequest, ipAddress, 
 	}
 
 	// Clean up auth request
-	_ = s.repo.DeleteAuthRequest(req.ID)
+	if err := s.repo.DeleteAuthRequest(req.ID); err != nil {
+		slog.Error("failed to delete auth request", "id", req.ID, "error", err)
+	}
 
 	// Implicit flow: response_type=token → return access token directly
 	if req.ResponseType == "token" {
