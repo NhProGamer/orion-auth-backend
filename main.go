@@ -52,6 +52,8 @@ func main() {
 		os.Exit(1)
 	}
 
+	database.StartCleanupJob(db, 1*time.Hour)
+
 	// Dependencies
 	hasher := crypto.NewArgon2Hasher(cfg.Argon2)
 	emailSender := email.NewSMTPSender(cfg.SMTP, cfg.Issuer)
