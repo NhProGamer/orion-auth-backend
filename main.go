@@ -200,6 +200,11 @@ func setupRouter(
 		router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 	}
 
+	// Root endpoint
+	router.GET("/", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
 	// Health endpoints
 	router.GET("/health", healthCheck)
 	router.GET("/ready", readinessCheck(db))
