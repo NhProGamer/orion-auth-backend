@@ -272,7 +272,7 @@ func (s *Service) GetDiscovery() OpenIDConfiguration {
 		IDTokenSigningAlgValuesSupported: []string{"RS256"},
 		ScopesSupported:                  []string{"openid", "profile", "email", "roles", "offline_access"},
 		TokenEndpointAuthMethodsSupported: []string{"client_secret_basic", "client_secret_post", "none"},
-		ClaimsSupported:                  []string{"sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "at_hash", "name", "email", "email_verified", "picture", "phone_number", "updated_at", "roles"},
+		ClaimsSupported:                  []string{"sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "at_hash", "name", "email", "email_verified", "picture", "phone_number", "updated_at", "roles", "groups"},
 		CodeChallengeMethodsSupported:    []string{"S256"},
 	}
 }
@@ -305,6 +305,7 @@ func (s *Service) enrichClaimsWithRoles(userID uuid.UUID, scopes []string, claim
 				names[i] = r.Name
 			}
 			claims["roles"] = names
+			claims["groups"] = names
 			return
 		}
 	}
