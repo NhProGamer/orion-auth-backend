@@ -29,11 +29,11 @@ func runCleanup(db *gorm.DB) {
 		sql   string
 		args  []any
 	}{
-		{"access_tokens", "DELETE FROM access_tokens WHERE expires_at < ? OR (revoked = TRUE AND updated_at < ?)", []any{now, grace}},
-		{"refresh_tokens", "DELETE FROM refresh_tokens WHERE expires_at < ? OR (revoked = TRUE AND updated_at < ?)", []any{now, grace}},
+		{"access_tokens", "DELETE FROM access_tokens WHERE expires_at < ? OR (revoked = TRUE AND created_at < ?)", []any{now, grace}},
+		{"refresh_tokens", "DELETE FROM refresh_tokens WHERE expires_at < ? OR (revoked = TRUE AND created_at < ?)", []any{now, grace}},
 		{"authorization_codes", "DELETE FROM authorization_codes WHERE expires_at < ?", []any{now}},
 		{"device_codes", "DELETE FROM device_codes WHERE expires_at < ?", []any{now}},
-		{"sessions", "DELETE FROM sessions WHERE expires_at < ? OR (revoked = TRUE AND updated_at < ?)", []any{now, grace}},
+		{"sessions", "DELETE FROM sessions WHERE expires_at < ? OR (revoked = TRUE AND revoked_at < ?)", []any{now, grace}},
 	}
 
 	for _, q := range queries {
