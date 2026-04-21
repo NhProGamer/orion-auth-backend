@@ -188,7 +188,7 @@ func (s *Service) Delete(id uuid.UUID) error {
 	if err := s.repo.Delete(id); err != nil {
 		return pkg.ErrInternal("failed to delete client")
 	}
-	slog.Info("oauth client deactivated", "client_id", id)
+	slog.Info("oauth client deleted", "client_id", id)
 	return nil
 }
 

@@ -55,5 +55,5 @@ func (r *Repository) List(page, perPage int) ([]model.OAuthClient, int64, error)
 }
 
 func (r *Repository) Delete(id uuid.UUID) error {
-	return r.db.Model(&model.OAuthClient{}).Where("id = ?", id).Update("active", false).Error
+	return r.db.Where("id = ?", id).Delete(&model.OAuthClient{}).Error
 }

@@ -179,7 +179,7 @@ func (h *Handler) Delete(c *gin.Context) {
 		})
 	}
 
-	pkg.OK(c, gin.H{"message": "client deactivated"})
+	pkg.OK(c, gin.H{"message": "client deleted"})
 }
 
 // RotateSecret godoc
