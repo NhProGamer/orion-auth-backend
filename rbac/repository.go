@@ -93,8 +93,7 @@ func (r *Repository) SetRolePermissions(roleID uuid.UUID, permissionIDs []uuid.U
 func (r *Repository) GetUserRoles(userID uuid.UUID) ([]model.Role, error) {
 	var roles []model.Role
 	err := r.db.
-		Joins("JOIN user_roles ON user_roles.role_id = roles.id").
-		Where("user_roles.user_id = ?", userID).
+		Where("id IN (SELECT role_id FROM user_roles WHERE user_id = ?)", userID).
 		Preload("Permissions").
 		Find(&roles).Error
 	return roles, err
