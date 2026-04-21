@@ -13,6 +13,7 @@ RUN go mod download
 
 COPY . .
 
+RUN go install github.com/swaggo/swag/cmd/swag@latest && swag init
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /orionauth .
 
 FROM alpine:3.21
