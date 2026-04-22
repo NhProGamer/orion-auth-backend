@@ -14,6 +14,7 @@ type DeviceCode struct {
 	Scopes         pq.StringArray `gorm:"type:text[];default:'{}'" json:"scopes"`
 	UserID         *uuid.UUID     `gorm:"type:uuid" json:"user_id,omitempty"`
 	SessionID      *uuid.UUID     `gorm:"type:uuid" json:"session_id,omitempty"`
+	Audience       *string        `gorm:"type:varchar(512)" json:"audience,omitempty"`
 	Status         string         `gorm:"type:varchar(20);default:'pending'" json:"status"`
 	IntervalSecs   int            `gorm:"column:interval_secs;default:5" json:"interval"`
 	ExpiresAt      time.Time      `gorm:"index;not null" json:"expires_at"`

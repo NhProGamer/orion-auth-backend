@@ -20,6 +20,7 @@ type AuthorizationRequest struct {
 	UserID              *uuid.UUID     `gorm:"type:uuid" json:"user_id,omitempty"`
 	Authenticated       bool           `gorm:"default:false" json:"authenticated"`
 	ConsentGiven        bool           `gorm:"default:false" json:"consent_given"`
+	Audience            *string        `gorm:"type:varchar(512)" json:"audience,omitempty"`
 	ExpiresAt           time.Time      `gorm:"not null" json:"expires_at"`
 }
 

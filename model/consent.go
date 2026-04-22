@@ -10,8 +10,9 @@ import (
 type Consent struct {
 	BaseModel
 	UserID    uuid.UUID      `gorm:"type:uuid;index;not null" json:"user_id"`
-	ClientID  uuid.UUID      `gorm:"type:uuid;not null" json:"client_id"`
-	Scopes    pq.StringArray `gorm:"type:text[];default:'{}'" json:"scopes"`
+	ClientID   uuid.UUID      `gorm:"type:uuid;not null" json:"client_id"`
+	ResourceID *uuid.UUID    `gorm:"type:uuid" json:"resource_id,omitempty"`
+	Scopes     pq.StringArray `gorm:"type:text[];default:'{}'" json:"scopes"`
 	GrantedAt time.Time      `gorm:"default:now()" json:"granted_at"`
 	RevokedAt *time.Time     `json:"revoked_at,omitempty"`
 }

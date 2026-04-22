@@ -14,6 +14,7 @@ type AccessToken struct {
 	SessionID      *uuid.UUID     `gorm:"type:uuid;index" json:"session_id,omitempty"`
 	RefreshTokenID *string        `gorm:"type:varchar(64);index" json:"-"`
 	Scopes         pq.StringArray `gorm:"type:text[];default:'{}'" json:"scopes"`
+	Audience       *string        `gorm:"type:varchar(512)" json:"audience,omitempty"`
 	ExpiresAt      time.Time      `gorm:"index;not null" json:"expires_at"`
 	Revoked        bool           `gorm:"default:false" json:"revoked"`
 	CreatedAt      time.Time      `gorm:"autoCreateTime" json:"created_at"`

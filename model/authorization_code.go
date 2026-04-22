@@ -17,6 +17,7 @@ type AuthorizationCode struct {
 	CodeChallengeMethod *string        `gorm:"type:varchar(10)" json:"-"`
 	Nonce               *string        `gorm:"type:varchar(128)" json:"-"`
 	SessionID           *uuid.UUID     `gorm:"type:uuid" json:"-"`
+	Audience            *string        `gorm:"type:varchar(512)" json:"audience,omitempty"`
 	ExpiresAt           time.Time      `gorm:"index;not null" json:"expires_at"`
 	Used                bool           `gorm:"default:false" json:"-"`
 	CreatedAt           time.Time      `gorm:"autoCreateTime" json:"created_at"`
