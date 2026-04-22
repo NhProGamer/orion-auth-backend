@@ -34,6 +34,7 @@ import (
 	"orion-auth-backend/oidc"
 	"orion-auth-backend/policy"
 	"orion-auth-backend/rbac"
+	"orion-auth-backend/resource"
 	"orion-auth-backend/session"
 	"orion-auth-backend/user"
 )
@@ -106,6 +107,10 @@ func main() {
 		os.Exit(1)
 	}
 
+	// API Resources
+	resourceRepo := resource.NewRepository(db)
+	resourceService := resource.NewService(resourceRepo)
+
 	// Seed defaults on first launch
 	seedDefaults(db, userService, rbacService, cfg.Issuer)
 
@@ -119,6 +124,7 @@ func main() {
 	oauthService.SetIDTokenGenerator(oidc.NewIDTokenAdapter(oidcService))
 	oauthService.SetMFAValidator(mfaService)
 	oauthService.SetPolicyEvaluator(policy.NewOAuthAdapter(policyService))
+	oauthService.SetResourceValidator(resourceService)
 	oidcService.SetRBACService(rbacService)
 
 	// Handlers
@@ -134,6 +140,7 @@ func main() {
 	fedHandler := federation.NewHandler(fedService)
 	invHandler := invitation.NewHandler(invService)
 	policyHandler := policy.NewHandler(policyService)
+	resourceHandler := resource.NewHandler(resourceService)
 
 	// Connect audit logging to handlers
 	userHandler.SetAuditService(auditService)
@@ -145,9 +152,10 @@ func main() {
 	fedHandler.SetAuditService(auditService)
 	invHandler.SetAuditService(auditService)
 	policyHandler.SetAuditService(auditService)
+	resourceHandler.SetAuditService(auditService)
 
 	// Router
-	router := setupRouter(cfg, db, hasher, authRateLimiter, rbacService, userHandler, sessionHandler, clientHandler, oauthHandler, oidcHandler, mfaHandler, rbacHandler, auditHandler, fedHandler, invHandler, policyHandler)
+	router := setupRouter(cfg, db, hasher, authRateLimiter, rbacService, userHandler, sessionHandler, clientHandler, oauthHandler, oidcHandler, mfaHandler, rbacHandler, auditHandler, fedHandler, invHandler, policyHandler, resourceHandler)
 
 	// Server
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
@@ -201,6 +209,7 @@ func setupRouter(
 	fedHandler *federation.Handler,
 	invHandler *invitation.Handler,
 	policyHandler *policy.Handler,
+	resourceHandler *resource.Handler,
 ) *gin.Engine {
 	gin.SetMode(cfg.Server.Mode)
 	router := gin.New()
@@ -281,6 +290,11 @@ func setupRouter(
 	policyAdmin := adminBase.Group("")
 	policyAdmin.Use(rbac.RequireAnyPermission(rbacService, "policies:read", "policies:write"))
 	policyHandler.RegisterRoutes(policyAdmin)
+
+	// Resource management (requires resources:read or resources:write)
+	resourceAdmin := adminBase.Group("")
+	resourceAdmin.Use(rbac.RequireAnyPermission(rbacService, "resources:read", "resources:write"))
+	resourceHandler.RegisterRoutes(resourceAdmin)
 
 	// Audit logs (requires audit:read)
 	auditAdmin := adminBase.Group("")
