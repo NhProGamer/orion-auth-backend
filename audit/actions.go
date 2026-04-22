@@ -2,19 +2,19 @@ package audit
 
 // User actions
 const (
-	ActionUserRegistered   = "user.registered"
-	ActionUserLogin        = "user.login"
-	ActionUserLoginFailed  = "user.login_failed"
-	ActionUserUpdated      = "user.updated"
-	ActionUserDeleted      = "user.deleted"
-	ActionPasswordChanged  = "user.password_changed"
-	ActionPasswordReset    = "user.password_reset"
-	ActionEmailVerified    = "user.email_verified"
+	ActionUserRegistered  = "user.registered"
+	ActionUserLogin       = "user.login"
+	ActionUserLoginFailed = "user.login_failed"
+	ActionUserUpdated     = "user.updated"
+	ActionUserDeleted     = "user.deleted"
+	ActionPasswordChanged = "user.password_changed"
+	ActionPasswordReset   = "user.password_reset"
+	ActionEmailVerified   = "user.email_verified"
 )
 
 // Session actions
 const (
-	ActionSessionRevoked    = "session.revoked"
+	ActionSessionRevoked     = "session.revoked"
 	ActionSessionsRevokedAll = "session.revoked_all"
 )
 
@@ -50,8 +50,8 @@ const (
 
 // Invitation actions
 const (
-	ActionInvitationCreated  = "invitation.created"
-	ActionSettingsUpdated    = "settings.updated"
+	ActionInvitationCreated = "invitation.created"
+	ActionSettingsUpdated   = "settings.updated"
 )
 
 // Federation actions
@@ -59,4 +59,12 @@ const (
 	ActionFederationProviderCreated = "federation.provider_created"
 	ActionFederationProviderUpdated = "federation.provider_updated"
 	ActionFederationProviderDeleted = "federation.provider_deleted"
+)
+
+// Policy actions
+const (
+	ActionPolicyCreated = "policy.created"
+	ActionPolicyUpdated = "policy.updated"
+	ActionPolicyDeleted = "policy.deleted"
+	ActionPolicyDenied  = "policy.denied"
 )

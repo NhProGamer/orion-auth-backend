@@ -11,20 +11,20 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/lib/pq"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"gorm.io/gorm"
 
-	"orion-auth-backend/model"
 	"orion-auth-backend/audit"
+	"orion-auth-backend/model"
 
-	_ "orion-auth-backend/docs"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 	"orion-auth-backend/client"
 	"orion-auth-backend/config"
 	"orion-auth-backend/crypto"
 	"orion-auth-backend/database"
+	_ "orion-auth-backend/docs"
 	"orion-auth-backend/email"
 	"orion-auth-backend/federation"
 	"orion-auth-backend/invitation"
@@ -32,6 +32,7 @@ import (
 	"orion-auth-backend/middleware"
 	"orion-auth-backend/oauth"
 	"orion-auth-backend/oidc"
+	"orion-auth-backend/policy"
 	"orion-auth-backend/rbac"
 	"orion-auth-backend/session"
 	"orion-auth-backend/user"
@@ -96,6 +97,15 @@ func main() {
 	invRepo := invitation.NewRepository(db)
 	invService := invitation.NewService(invRepo, userService, rbacService, emailSender, cfg.Issuer)
 
+	// Policy engine
+	policyRepo := policy.NewRepository(db)
+	policyEngine := policy.NewEngine()
+	policyService := policy.NewService(policyRepo, policyEngine)
+	if err := policyService.LoadAll(); err != nil {
+		slog.Error("failed to load policies", "error", err)
+		os.Exit(1)
+	}
+
 	// Seed defaults on first launch
 	seedDefaults(db, userService, rbacService, cfg.Issuer)
 
@@ -122,6 +132,7 @@ func main() {
 	auditHandler := audit.NewHandler(auditService)
 	fedHandler := federation.NewHandler(fedService)
 	invHandler := invitation.NewHandler(invService)
+	policyHandler := policy.NewHandler(policyService)
 
 	// Connect audit logging to handlers
 	userHandler.SetAuditService(auditService)
@@ -132,9 +143,10 @@ func main() {
 	rbacHandler.SetAuditService(auditService)
 	fedHandler.SetAuditService(auditService)
 	invHandler.SetAuditService(auditService)
+	policyHandler.SetAuditService(auditService)
 
 	// Router
-	router := setupRouter(cfg, db, hasher, authRateLimiter, rbacService, userHandler, sessionHandler, clientHandler, oauthHandler, oidcHandler, mfaHandler, rbacHandler, auditHandler, fedHandler, invHandler)
+	router := setupRouter(cfg, db, hasher, authRateLimiter, rbacService, userHandler, sessionHandler, clientHandler, oauthHandler, oidcHandler, mfaHandler, rbacHandler, auditHandler, fedHandler, invHandler, policyHandler)
 
 	// Server
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
@@ -187,6 +199,7 @@ func setupRouter(
 	auditHandler *audit.Handler,
 	fedHandler *federation.Handler,
 	invHandler *invitation.Handler,
+	policyHandler *policy.Handler,
 ) *gin.Engine {
 	gin.SetMode(cfg.Server.Mode)
 	router := gin.New()
@@ -263,6 +276,11 @@ func setupRouter(
 	fedAdmin.Use(rbac.RequireAnyPermission(rbacService, "federation:read", "federation:write"))
 	fedHandler.RegisterAdminRoutes(fedAdmin)
 
+	// Policy management (requires policies:read or policies:write)
+	policyAdmin := adminBase.Group("")
+	policyAdmin.Use(rbac.RequireAnyPermission(rbacService, "policies:read", "policies:write"))
+	policyHandler.RegisterRoutes(policyAdmin)
+
 	// Audit logs (requires audit:read)
 	auditAdmin := adminBase.Group("")
 	auditAdmin.Use(rbac.RequirePermission(rbacService, "audit:read"))
@@ -272,8 +290,8 @@ func setupRouter(
 }
 
 const (
-	adminRoleID    = "00000000-0000-0000-0000-000000000001"
-	adminClientID  = "00000000-0000-0000-0000-000000000002"
+	adminRoleID   = "00000000-0000-0000-0000-000000000001"
+	adminClientID = "00000000-0000-0000-0000-000000000002"
 )
 
 func seedDefaults(db *gorm.DB, userService *user.Service, rbacService *rbac.Service, issuer string) {
