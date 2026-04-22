@@ -44,6 +44,12 @@ type PolicyResult struct {
 	Modify     map[string]any
 }
 
+// ResourceValidator validates audience and scopes against API resources.
+type ResourceValidator interface {
+	ValidateAudience(audience string) (*model.APIResource, error)
+	ValidateClientScopes(clientID, resourceID uuid.UUID, requestedScopes []string) ([]string, error)
+}
+
 // IDTokenClaims mirrors oidc.IDTokenClaims to avoid circular imports.
 type IDTokenClaims struct {
 	UserID   uuid.UUID
@@ -56,14 +62,15 @@ type IDTokenClaims struct {
 }
 
 type Service struct {
-	repo            RepositoryInterface
-	userService     *user.Service
-	sessionService  *session.Service
-	hasher          *crypto.Argon2Hasher
-	cfg             config.AuthConfig
-	idTokenGen      IDTokenGenerator
-	mfaValidator    MFAValidator
-	policyEvaluator PolicyEvaluator
+	repo              RepositoryInterface
+	userService       *user.Service
+	sessionService    *session.Service
+	hasher            *crypto.Argon2Hasher
+	cfg               config.AuthConfig
+	idTokenGen        IDTokenGenerator
+	mfaValidator      MFAValidator
+	policyEvaluator   PolicyEvaluator
+	resourceValidator ResourceValidator
 }
 
 func NewService(
@@ -97,6 +104,11 @@ func (s *Service) SetPolicyEvaluator(p PolicyEvaluator) {
 	s.policyEvaluator = p
 }
 
+// SetResourceValidator sets the resource validator (called after init to break circular dep).
+func (s *Service) SetResourceValidator(v ResourceValidator) {
+	s.resourceValidator = v
+}
+
 // TokenResponse is the standard OAuth2 token response.
 type TokenResponse struct {
 	AccessToken  string `json:"access_token"`
@@ -109,16 +121,28 @@ type TokenResponse struct {
 
 // --- Authorization Request (API-driven) ---
 
-type InitAuthorizeResponse struct {
-	RequestID       uuid.UUID `json:"request_id"`
-	ClientName      string    `json:"client_name"`
-	ClientID        uuid.UUID `json:"client_id"`
-	ScopesRequested []string  `json:"scopes_requested"`
-	RequiresLogin   bool      `json:"requires_login"`
-	RequiresConsent bool      `json:"requires_consent"`
+type ResourceInfo struct {
+	Name        string                   `json:"name"`
+	Identifier  string                   `json:"identifier"`
+	Permissions []ResourcePermissionInfo `json:"permissions"`
 }
 
-func (s *Service) InitAuthorize(client *model.OAuthClient, redirectURI, responseType, scope, state, nonce, codeChallenge, codeChallengeMethod string) (*InitAuthorizeResponse, error) {
+type ResourcePermissionInfo struct {
+	Name        string  `json:"name"`
+	Description *string `json:"description,omitempty"`
+}
+
+type InitAuthorizeResponse struct {
+	RequestID       uuid.UUID     `json:"request_id"`
+	ClientName      string        `json:"client_name"`
+	ClientID        uuid.UUID     `json:"client_id"`
+	ScopesRequested []string      `json:"scopes_requested"`
+	RequiresLogin   bool          `json:"requires_login"`
+	RequiresConsent bool          `json:"requires_consent"`
+	Resource        *ResourceInfo `json:"resource,omitempty"`
+}
+
+func (s *Service) InitAuthorize(client *model.OAuthClient, redirectURI, responseType, scope, state, nonce, codeChallenge, codeChallengeMethod, audience string) (*InitAuthorizeResponse, error) {
 	// Validate response_type
 	if responseType != "code" && responseType != "token" {
 		return nil, pkg.ErrUnsupportedResponseType("supported response_types: code, token")
@@ -147,10 +171,42 @@ func (s *Service) InitAuthorize(client *model.OAuthClient, redirectURI, response
 		codeChallengeMethod = "S256"
 	}
 
-	// Parse scopes
-	scopes := client.ValidateScopes(parseSpaceDelimited(scope))
-	if len(scopes) == 0 {
-		return nil, pkg.ErrInvalidScope("no valid scopes requested")
+	// Validate audience and scopes
+	var validatedAudience *string
+	var resourceInfo *ResourceInfo
+	var scopes []string
+
+	if audience != "" && s.resourceValidator != nil {
+		resource, err := s.resourceValidator.ValidateAudience(audience)
+		if err != nil {
+			return nil, err
+		}
+		resourceScopes, err := s.resourceValidator.ValidateClientScopes(client.ID, resource.ID, parseSpaceDelimited(scope))
+		if err != nil {
+			return nil, err
+		}
+		if len(resourceScopes) == 0 {
+			return nil, pkg.ErrInvalidScope("client has no permissions for this resource")
+		}
+		scopes = resourceScopes
+		validatedAudience = &audience
+
+		// Build resource info for consent screen
+		var perms []ResourcePermissionInfo
+		for _, p := range resource.Permissions {
+			perms = append(perms, ResourcePermissionInfo{Name: p.Name, Description: p.Description})
+		}
+		resourceInfo = &ResourceInfo{
+			Name:        resource.Name,
+			Identifier:  resource.Identifier,
+			Permissions: perms,
+		}
+	} else {
+		// Standard scope validation against client
+		scopes = client.ValidateScopes(parseSpaceDelimited(scope))
+		if len(scopes) == 0 {
+			return nil, pkg.ErrInvalidScope("no valid scopes requested")
+		}
 	}
 
 	// Create authorization request
@@ -159,6 +215,7 @@ func (s *Service) InitAuthorize(client *model.OAuthClient, redirectURI, response
 		RedirectURI:  redirectURI,
 		ResponseType: responseType,
 		Scopes:       pq.StringArray(scopes),
+		Audience:     validatedAudience,
 		ExpiresAt:    time.Now().Add(10 * time.Minute),
 	}
 
@@ -185,6 +242,7 @@ func (s *Service) InitAuthorize(client *model.OAuthClient, redirectURI, response
 		ScopesRequested: scopes,
 		RequiresLogin:   true,
 		RequiresConsent: !client.IsFirstParty,
+		Resource:        resourceInfo,
 	}, nil
 }
 
@@ -460,6 +518,7 @@ func (s *Service) completeAuthorize(req *model.AuthorizationRequest, ipAddress, 
 		UserID:      *req.UserID,
 		RedirectURI: req.RedirectURI,
 		Scopes:      req.Scopes,
+		Audience:    req.Audience,
 		SessionID:   &sess.ID,
 		ExpiresAt:   time.Now().Add(s.cfg.AuthCodeTTL),
 	}
@@ -584,6 +643,7 @@ func (s *Service) ExchangeAuthorizationCode(client *model.OAuthClient, code, red
 		resp, err = s.issueTokensWithOpts(tx, client, &authCode.UserID, authCode.SessionID, authCode.Scopes, issueOpts{
 			nonce:    nonce,
 			authTime: authCode.CreatedAt,
+			audience: authCode.Audience,
 		})
 		return err
 	})
@@ -596,7 +656,7 @@ func (s *Service) ExchangeAuthorizationCode(client *model.OAuthClient, code, red
 
 // --- Token Exchange: Client Credentials ---
 
-func (s *Service) ExchangeClientCredentials(client *model.OAuthClient, scope string) (*TokenResponse, error) {
+func (s *Service) ExchangeClientCredentials(client *model.OAuthClient, scope, audience string) (*TokenResponse, error) {
 	if client.IsPublic {
 		return nil, pkg.ErrUnauthorizedClient("public clients cannot use client_credentials grant")
 	}
@@ -604,7 +664,28 @@ func (s *Service) ExchangeClientCredentials(client *model.OAuthClient, scope str
 		return nil, pkg.ErrUnauthorizedClient("client is not authorized for client_credentials grant")
 	}
 
-	scopes := client.ValidateScopes(parseSpaceDelimited(scope))
+	var scopes []string
+	var tokenAudience *string
+	ttl := client.AccessTokenTTL
+
+	if audience != "" && s.resourceValidator != nil {
+		resource, err := s.resourceValidator.ValidateAudience(audience)
+		if err != nil {
+			return nil, err
+		}
+		resourceScopes, err := s.resourceValidator.ValidateClientScopes(client.ID, resource.ID, parseSpaceDelimited(scope))
+		if err != nil {
+			return nil, err
+		}
+		if len(resourceScopes) == 0 {
+			return nil, pkg.ErrInvalidScope("client has no permissions for this resource")
+		}
+		scopes = resourceScopes
+		tokenAudience = &audience
+		ttl = resource.AccessTokenTTL
+	} else {
+		scopes = client.ValidateScopes(parseSpaceDelimited(scope))
+	}
 
 	rawToken, tokenHash, err := crypto.GenerateOpaqueToken()
 	if err != nil {
@@ -615,18 +696,19 @@ func (s *Service) ExchangeClientCredentials(client *model.OAuthClient, scope str
 		ID:        tokenHash,
 		ClientID:  client.ID,
 		Scopes:    pq.StringArray(scopes),
-		ExpiresAt: time.Now().Add(time.Duration(client.AccessTokenTTL) * time.Second),
+		Audience:  tokenAudience,
+		ExpiresAt: time.Now().Add(time.Duration(ttl) * time.Second),
 	}
 
 	if err := s.repo.CreateAccessToken(accessToken); err != nil {
 		return nil, pkg.ErrServerError("failed to store access token")
 	}
 
-	slog.Info("client_credentials token issued", "client_id", client.ID)
+	slog.Info("client_credentials token issued", "client_id", client.ID, "audience", audience)
 	return &TokenResponse{
 		AccessToken: rawToken,
 		TokenType:   "Bearer",
-		ExpiresIn:   client.AccessTokenTTL,
+		ExpiresIn:   ttl,
 		Scope:       joinScopes(scopes),
 	}, nil
 }
@@ -685,8 +767,11 @@ func (s *Service) ExchangeRefreshToken(client *model.OAuthClient, refreshTokenRa
 		// Revoke old access tokens linked to this RT
 		tx.RevokeAccessTokensByRefreshToken(rtHash)
 
-		// Issue new tokens
-		resp, err = s.issueTokens(tx, client, &rt.UserID, &rt.SessionID, grantedScopes)
+		// Issue new tokens (preserve audience from original token)
+		resp, err = s.issueTokensWithOpts(tx, client, &rt.UserID, &rt.SessionID, grantedScopes, issueOpts{
+			authTime: time.Now(),
+			audience: rt.Audience,
+		})
 		if err != nil {
 			return err
 		}
@@ -705,6 +790,7 @@ func (s *Service) ExchangeRefreshToken(client *model.OAuthClient, refreshTokenRa
 type issueOpts struct {
 	nonce    string
 	authTime time.Time
+	audience *string
 }
 
 func (s *Service) issueTokens(tx RepositoryInterface, client *model.OAuthClient, userID *uuid.UUID, sessionID *uuid.UUID, scopes pq.StringArray) (*TokenResponse, error) {
@@ -785,6 +871,7 @@ func (s *Service) issueTokensWithOpts(tx RepositoryInterface, client *model.OAut
 		UserID:    *userID,
 		SessionID: *sessionID,
 		Scopes:    scopes,
+		Audience:  opts.audience,
 		FamilyID:  familyID,
 		ExpiresAt: time.Now().Add(time.Duration(client.RefreshTokenTTL) * time.Second),
 	}
@@ -800,6 +887,7 @@ func (s *Service) issueTokensWithOpts(tx RepositoryInterface, client *model.OAut
 		SessionID:      sessionID,
 		RefreshTokenID: &rtHash,
 		Scopes:         scopes,
+		Audience:       opts.audience,
 		ExpiresAt:      time.Now().Add(time.Duration(client.AccessTokenTTL) * time.Second),
 	}
 

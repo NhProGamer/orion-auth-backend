@@ -21,6 +21,7 @@ type IntrospectResponse struct {
 	Iat       int64  `json:"iat,omitempty"`
 	Sub       string `json:"sub,omitempty"`
 	Iss       string `json:"iss,omitempty"`
+	Aud       string `json:"aud,omitempty"`
 }
 
 func (s *Service) Introspect(token, tokenTypeHint, issuer string, requestingClientID uuid.UUID) (*IntrospectResponse, error) {
@@ -65,6 +66,10 @@ func (s *Service) introspectAccessToken(at *model.AccessToken, issuer string, re
 		Iss:       issuer,
 	}
 
+	if at.Audience != nil {
+		resp.Aud = *at.Audience
+	}
+
 	if at.UserID != nil {
 		resp.Sub = at.UserID.String()
 		// Only return username to the client that owns the token
@@ -84,7 +89,7 @@ func (s *Service) introspectRefreshToken(rt *model.RefreshToken, issuer string) 
 		return &IntrospectResponse{Active: false}
 	}
 
-	return &IntrospectResponse{
+	resp := &IntrospectResponse{
 		Active:    true,
 		Scope:     joinScopes(rt.Scopes),
 		ClientID:  rt.ClientID.String(),
@@ -94,4 +99,8 @@ func (s *Service) introspectRefreshToken(rt *model.RefreshToken, issuer string) 
 		Sub:       rt.UserID.String(),
 		Iss:       issuer,
 	}
+	if rt.Audience != nil {
+		resp.Aud = *rt.Audience
+	}
+	return resp
 }

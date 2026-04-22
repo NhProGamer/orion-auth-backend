@@ -24,31 +24,31 @@ import (
 // ---------------------------------------------------------------------------
 
 type mockOAuthRepo struct {
-	findClientFn                    func(clientIDStr string) (*model.OAuthClient, error)
-	createAuthRequestFn             func(req *model.AuthorizationRequest) error
-	findAuthRequestFn               func(id uuid.UUID) (*model.AuthorizationRequest, error)
-	updateAuthRequestFn             func(req *model.AuthorizationRequest) error
-	deleteAuthRequestFn             func(id uuid.UUID) error
-	createAuthCodeFn                func(code *model.AuthorizationCode) error
-	findAuthCodeFn                  func(codeHash string) (*model.AuthorizationCode, error)
-	markAuthCodeUsedFn              func(codeHash string) error
-	createAccessTokenFn             func(token *model.AccessToken) error
-	findAccessTokenFn               func(id string) (*model.AccessToken, error)
-	revokeAccessTokenFn             func(id string) error
-	revokeAccessTokensByRefreshFn   func(refreshTokenID string) error
-	revokeAccessTokensBySessionFn   func(sessionID uuid.UUID) error
-	createRefreshTokenFn            func(token *model.RefreshToken) error
-	findRefreshTokenFn              func(id string) (*model.RefreshToken, error)
-	rotateRefreshTokenFn            func(id string) error
-	revokeRefreshTokenFamilyFn      func(familyID uuid.UUID) error
-	revokeRefreshTokensBySessionFn  func(sessionID uuid.UUID) error
-	findActiveConsentFn             func(userID, clientID uuid.UUID) (*model.Consent, error)
-	createConsentFn                 func(consent *model.Consent) error
-	updateConsentFn                 func(consent *model.Consent) error
-	createDeviceCodeFn              func(dc *model.DeviceCode) error
-	findDeviceCodeFn                func(codeHash string) (*model.DeviceCode, error)
-	findDeviceCodeByUserCodeFn      func(userCode string) (*model.DeviceCode, error)
-	updateDeviceCodeFn              func(dc *model.DeviceCode) error
+	findClientFn                   func(clientIDStr string) (*model.OAuthClient, error)
+	createAuthRequestFn            func(req *model.AuthorizationRequest) error
+	findAuthRequestFn              func(id uuid.UUID) (*model.AuthorizationRequest, error)
+	updateAuthRequestFn            func(req *model.AuthorizationRequest) error
+	deleteAuthRequestFn            func(id uuid.UUID) error
+	createAuthCodeFn               func(code *model.AuthorizationCode) error
+	findAuthCodeFn                 func(codeHash string) (*model.AuthorizationCode, error)
+	markAuthCodeUsedFn             func(codeHash string) error
+	createAccessTokenFn            func(token *model.AccessToken) error
+	findAccessTokenFn              func(id string) (*model.AccessToken, error)
+	revokeAccessTokenFn            func(id string) error
+	revokeAccessTokensByRefreshFn  func(refreshTokenID string) error
+	revokeAccessTokensBySessionFn  func(sessionID uuid.UUID) error
+	createRefreshTokenFn           func(token *model.RefreshToken) error
+	findRefreshTokenFn             func(id string) (*model.RefreshToken, error)
+	rotateRefreshTokenFn           func(id string) error
+	revokeRefreshTokenFamilyFn     func(familyID uuid.UUID) error
+	revokeRefreshTokensBySessionFn func(sessionID uuid.UUID) error
+	findActiveConsentFn            func(userID, clientID uuid.UUID) (*model.Consent, error)
+	createConsentFn                func(consent *model.Consent) error
+	updateConsentFn                func(consent *model.Consent) error
+	createDeviceCodeFn             func(dc *model.DeviceCode) error
+	findDeviceCodeFn               func(codeHash string) (*model.DeviceCode, error)
+	findDeviceCodeByUserCodeFn     func(userCode string) (*model.DeviceCode, error)
+	updateDeviceCodeFn             func(dc *model.DeviceCode) error
 }
 
 func (m *mockOAuthRepo) findClient(clientIDStr string) (*model.OAuthClient, error) {
@@ -212,12 +212,12 @@ func (m *mockOAuthRepo) Transaction(fn func(tx RepositoryInterface) error) error
 // ---------------------------------------------------------------------------
 
 type mockUserRepo struct {
-	findByEmailFn func(email string) (*model.User, error)
-	findByIDFn    func(id uuid.UUID) (*model.User, error)
+	findByEmailFn  func(email string) (*model.User, error)
+	findByIDFn     func(id uuid.UUID) (*model.User, error)
 	updateFieldsFn func(id uuid.UUID, fields map[string]any) error
 }
 
-func (m *mockUserRepo) Create(_ *model.User) error                   { return nil }
+func (m *mockUserRepo) Create(_ *model.User) error { return nil }
 func (m *mockUserRepo) FindByID(id uuid.UUID) (*model.User, error) {
 	if m.findByIDFn != nil {
 		return m.findByIDFn(id)
@@ -230,16 +230,16 @@ func (m *mockUserRepo) FindByEmail(email string) (*model.User, error) {
 	}
 	return nil, nil
 }
-func (m *mockUserRepo) Update(_ *model.User) error                    { return nil }
+func (m *mockUserRepo) Update(_ *model.User) error { return nil }
 func (m *mockUserRepo) UpdateFields(id uuid.UUID, fields map[string]any) error {
 	if m.updateFieldsFn != nil {
 		return m.updateFieldsFn(id, fields)
 	}
 	return nil
 }
-func (m *mockUserRepo) List(_, _ int) ([]model.User, int64, error) { return nil, 0, nil }
-func (m *mockUserRepo) Delete(_ uuid.UUID) error                    { return nil }
-func (m *mockUserRepo) FindByResetToken(_ string) (*model.User, error) { return nil, nil }
+func (m *mockUserRepo) List(_, _ int) ([]model.User, int64, error)      { return nil, 0, nil }
+func (m *mockUserRepo) Delete(_ uuid.UUID) error                        { return nil }
+func (m *mockUserRepo) FindByResetToken(_ string) (*model.User, error)  { return nil, nil }
 func (m *mockUserRepo) FindByVerifyToken(_ string) (*model.User, error) { return nil, nil }
 
 // ---------------------------------------------------------------------------
@@ -258,11 +258,11 @@ func (m *mockSessionRepo) Create(s *model.Session) error {
 	s.ID = id
 	return nil
 }
-func (m *mockSessionRepo) FindByID(_ uuid.UUID) (*model.Session, error)         { return nil, nil }
-func (m *mockSessionRepo) FindActiveByUser(_ uuid.UUID) ([]model.Session, error) { return nil, nil }
-func (m *mockSessionRepo) Revoke(_ uuid.UUID) error                              { return nil }
+func (m *mockSessionRepo) FindByID(_ uuid.UUID) (*model.Session, error)              { return nil, nil }
+func (m *mockSessionRepo) FindActiveByUser(_ uuid.UUID) ([]model.Session, error)     { return nil, nil }
+func (m *mockSessionRepo) Revoke(_ uuid.UUID) error                                  { return nil }
 func (m *mockSessionRepo) RevokeAllForUser(_ uuid.UUID, _ *uuid.UUID) (int64, error) { return 0, nil }
-func (m *mockSessionRepo) UpdateLastActive(_ uuid.UUID) error                    { return nil }
+func (m *mockSessionRepo) UpdateLastActive(_ uuid.UUID) error                        { return nil }
 
 // ---------------------------------------------------------------------------
 // Mock: IDTokenGenerator
@@ -284,7 +284,7 @@ func (m *mockIDTokenGen) GenerateIDToken(claims IDTokenClaims) (string, error) {
 // ---------------------------------------------------------------------------
 
 type mockMFAValidator struct {
-	hasMFAFn      func(userID uuid.UUID) (bool, error)
+	hasMFAFn       func(userID uuid.UUID) (bool, error)
 	validateCodeFn func(userID uuid.UUID, code string) (bool, error)
 }
 
@@ -385,7 +385,7 @@ func TestInitAuthorize_Success(t *testing.T) {
 	svc := newTestService(oauthRepo, &mockUserRepo{}, &mockSessionRepo{})
 	client := newTestClient()
 
-	resp, err := svc.InitAuthorize(client, "https://example.com/callback", "code", "openid profile", "state123", "nonce123", "", "")
+	resp, err := svc.InitAuthorize(client, "https://example.com/callback", "code", "openid profile", "state123", "nonce123", "", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -408,7 +408,7 @@ func TestInitAuthorize_FirstPartyNoConsent(t *testing.T) {
 	svc := newTestService(&mockOAuthRepo{}, &mockUserRepo{}, &mockSessionRepo{})
 	client := newFirstPartyClient()
 
-	resp, err := svc.InitAuthorize(client, "https://example.com/callback", "code", "openid", "", "", "", "")
+	resp, err := svc.InitAuthorize(client, "https://example.com/callback", "code", "openid", "", "", "", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -421,7 +421,7 @@ func TestInitAuthorize_UnsupportedResponseType(t *testing.T) {
 	svc := newTestService(&mockOAuthRepo{}, &mockUserRepo{}, &mockSessionRepo{})
 	client := newTestClient()
 
-	_, err := svc.InitAuthorize(client, "https://example.com/callback", "id_token", "openid", "", "", "", "")
+	_, err := svc.InitAuthorize(client, "https://example.com/callback", "id_token", "openid", "", "", "", "", "")
 	assertOAuthErrorCode(t, err, "unsupported_response_type")
 }
 
@@ -429,7 +429,7 @@ func TestInitAuthorize_InvalidRedirectURI(t *testing.T) {
 	svc := newTestService(&mockOAuthRepo{}, &mockUserRepo{}, &mockSessionRepo{})
 	client := newTestClient()
 
-	_, err := svc.InitAuthorize(client, "https://evil.com/callback", "code", "openid", "", "", "", "")
+	_, err := svc.InitAuthorize(client, "https://evil.com/callback", "code", "openid", "", "", "", "", "")
 	assertOAuthErrorCode(t, err, "invalid_request")
 }
 
@@ -438,7 +438,7 @@ func TestInitAuthorize_GrantTypeNotAllowed(t *testing.T) {
 	client := newTestClient()
 	client.GrantTypes = pq.StringArray{"client_credentials"} // no authorization_code
 
-	_, err := svc.InitAuthorize(client, "https://example.com/callback", "code", "openid", "", "", "", "")
+	_, err := svc.InitAuthorize(client, "https://example.com/callback", "code", "openid", "", "", "", "", "")
 	assertOAuthErrorCode(t, err, "unauthorized_client")
 }
 
@@ -446,7 +446,7 @@ func TestInitAuthorize_PublicClientRequiresPKCE(t *testing.T) {
 	svc := newTestService(&mockOAuthRepo{}, &mockUserRepo{}, &mockSessionRepo{})
 	client := newPublicClient()
 
-	_, err := svc.InitAuthorize(client, "https://example.com/callback", "code", "openid", "", "", "", "")
+	_, err := svc.InitAuthorize(client, "https://example.com/callback", "code", "openid", "", "", "", "", "")
 	assertOAuthErrorCode(t, err, "invalid_request")
 }
 
@@ -454,7 +454,7 @@ func TestInitAuthorize_OnlyS256Accepted(t *testing.T) {
 	svc := newTestService(&mockOAuthRepo{}, &mockUserRepo{}, &mockSessionRepo{})
 	client := newTestClient()
 
-	_, err := svc.InitAuthorize(client, "https://example.com/callback", "code", "openid", "", "", "challenge123", "plain")
+	_, err := svc.InitAuthorize(client, "https://example.com/callback", "code", "openid", "", "", "challenge123", "plain", "")
 	assertOAuthErrorCode(t, err, "invalid_request")
 }
 
@@ -470,7 +470,7 @@ func TestInitAuthorize_S256DefaultMethod(t *testing.T) {
 	svc := newTestService(oauthRepo, &mockUserRepo{}, &mockSessionRepo{})
 	client := newTestClient()
 
-	_, err := svc.InitAuthorize(client, "https://example.com/callback", "code", "openid", "", "", "challenge123", "")
+	_, err := svc.InitAuthorize(client, "https://example.com/callback", "code", "openid", "", "", "challenge123", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -483,7 +483,7 @@ func TestInitAuthorize_InvalidScopes(t *testing.T) {
 	svc := newTestService(&mockOAuthRepo{}, &mockUserRepo{}, &mockSessionRepo{})
 	client := newTestClient()
 
-	_, err := svc.InitAuthorize(client, "https://example.com/callback", "code", "unknown_scope", "", "", "", "")
+	_, err := svc.InitAuthorize(client, "https://example.com/callback", "code", "unknown_scope", "", "", "", "", "")
 	assertOAuthErrorCode(t, err, "invalid_scope")
 }
 
@@ -491,7 +491,7 @@ func TestInitAuthorize_PublicClientWithPKCE(t *testing.T) {
 	svc := newTestService(&mockOAuthRepo{}, &mockUserRepo{}, &mockSessionRepo{})
 	client := newPublicClient()
 
-	resp, err := svc.InitAuthorize(client, "https://example.com/callback", "code", "openid", "", "", "challenge123", "S256")
+	resp, err := svc.InitAuthorize(client, "https://example.com/callback", "code", "openid", "", "", "challenge123", "S256", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1033,7 +1033,7 @@ func TestExchangeClientCredentials_Success(t *testing.T) {
 	svc := newTestService(oauthRepo, &mockUserRepo{}, &mockSessionRepo{})
 	client := newTestClient()
 
-	resp, err := svc.ExchangeClientCredentials(client, "openid profile")
+	resp, err := svc.ExchangeClientCredentials(client, "openid profile", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1055,7 +1055,7 @@ func TestExchangeClientCredentials_PublicClientRejected(t *testing.T) {
 	svc := newTestService(&mockOAuthRepo{}, &mockUserRepo{}, &mockSessionRepo{})
 	client := newPublicClient()
 
-	_, err := svc.ExchangeClientCredentials(client, "openid")
+	_, err := svc.ExchangeClientCredentials(client, "openid", "")
 	assertOAuthErrorCode(t, err, "unauthorized_client")
 }
 
@@ -1064,7 +1064,7 @@ func TestExchangeClientCredentials_GrantTypeNotAllowed(t *testing.T) {
 	client := newTestClient()
 	client.GrantTypes = pq.StringArray{"authorization_code"} // no client_credentials
 
-	_, err := svc.ExchangeClientCredentials(client, "openid")
+	_, err := svc.ExchangeClientCredentials(client, "openid", "")
 	assertOAuthErrorCode(t, err, "unauthorized_client")
 }
 

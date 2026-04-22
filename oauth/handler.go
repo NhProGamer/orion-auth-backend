@@ -87,6 +87,7 @@ func (h *Handler) Authorize(c *gin.Context) {
 		c.Query("nonce"),
 		c.Query("code_challenge"),
 		c.Query("code_challenge_method"),
+		c.Query("audience"),
 	)
 	if err != nil {
 		pkg.HandleError(c, err)
@@ -277,8 +278,9 @@ func (h *Handler) handleAuthorizationCodeGrant(c *gin.Context, client *model.OAu
 
 func (h *Handler) handleClientCredentialsGrant(c *gin.Context, client *model.OAuthClient) {
 	scope := c.PostForm("scope")
+	audience := c.PostForm("audience")
 
-	resp, err := h.service.ExchangeClientCredentials(client, scope)
+	resp, err := h.service.ExchangeClientCredentials(client, scope, audience)
 	if err != nil {
 		pkg.HandleError(c, err)
 		return
