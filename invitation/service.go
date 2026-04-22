@@ -15,14 +15,14 @@ import (
 )
 
 type Service struct {
-	repo        *Repository
+	repo        RepositoryInterface
 	userService *user.Service
 	rbacService *rbac.Service
 	emailSender email.Sender
 	issuer      string
 }
 
-func NewService(repo *Repository, userService *user.Service, rbacService *rbac.Service, emailSender email.Sender, issuer string) *Service {
+func NewService(repo RepositoryInterface, userService *user.Service, rbacService *rbac.Service, emailSender email.Sender, issuer string) *Service {
 	return &Service{
 		repo:        repo,
 		userService: userService,

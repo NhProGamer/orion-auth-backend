@@ -188,7 +188,7 @@ func (r *Repository) UpdateDeviceCode(dc *model.DeviceCode) error {
 
 // --- Transactions ---
 
-func (r *Repository) Transaction(fn func(tx *Repository) error) error {
+func (r *Repository) Transaction(fn func(tx RepositoryInterface) error) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		return fn(&Repository{db: tx})
 	})

@@ -56,7 +56,7 @@ type IDTokenClaims struct {
 }
 
 type Service struct {
-	repo            *Repository
+	repo            RepositoryInterface
 	userService     *user.Service
 	sessionService  *session.Service
 	hasher          *crypto.Argon2Hasher
@@ -67,7 +67,7 @@ type Service struct {
 }
 
 func NewService(
-	repo *Repository,
+	repo RepositoryInterface,
 	userService *user.Service,
 	sessionService *session.Service,
 	hasher *crypto.Argon2Hasher,
@@ -250,8 +250,8 @@ func (s *Service) AuthorizeLogin(input AuthorizeLoginInput, ipAddress, userAgent
 		needsConsent = false
 	} else {
 		// First-party clients skip consent
-		var client model.OAuthClient
-		if err := s.repo.db.Where("id = ?", req.ClientID).First(&client).Error; err != nil {
+		client, err := s.repo.findClient(req.ClientID.String())
+		if err != nil {
 			return nil, pkg.ErrServerError("failed to look up client")
 		}
 		needsConsent = !client.IsFirstParty
@@ -327,8 +327,8 @@ func (s *Service) AuthorizeMFA(input AuthorizeMFAInput) (*AuthorizeLoginResponse
 		needsConsent = false
 		req.ConsentGiven = true
 	} else {
-		var client model.OAuthClient
-		if err := s.repo.db.Where("id = ?", req.ClientID).First(&client).Error; err != nil {
+		client, err := s.repo.findClient(req.ClientID.String())
+		if err != nil {
 			return nil, pkg.ErrServerError("failed to look up client")
 		}
 		needsConsent = !client.IsFirstParty
@@ -533,7 +533,7 @@ func (s *Service) ExchangeAuthorizationCode(client *model.OAuthClient, code, red
 	codeHash := crypto.HashToken(code)
 
 	var resp *TokenResponse
-	err := s.repo.Transaction(func(tx *Repository) error {
+	err := s.repo.Transaction(func(tx RepositoryInterface) error {
 		authCode, err := tx.FindAuthCode(codeHash)
 		if err != nil || authCode == nil {
 			return pkg.ErrInvalidGrant("invalid authorization code")
@@ -641,7 +641,7 @@ func (s *Service) ExchangeRefreshToken(client *model.OAuthClient, refreshTokenRa
 	rtHash := crypto.HashToken(refreshTokenRaw)
 
 	var resp *TokenResponse
-	err := s.repo.Transaction(func(tx *Repository) error {
+	err := s.repo.Transaction(func(tx RepositoryInterface) error {
 		rt, err := tx.FindRefreshToken(rtHash)
 		if err != nil || rt == nil {
 			return pkg.ErrInvalidGrant("invalid refresh token")
@@ -707,11 +707,11 @@ type issueOpts struct {
 	authTime time.Time
 }
 
-func (s *Service) issueTokens(tx *Repository, client *model.OAuthClient, userID *uuid.UUID, sessionID *uuid.UUID, scopes pq.StringArray) (*TokenResponse, error) {
+func (s *Service) issueTokens(tx RepositoryInterface, client *model.OAuthClient, userID *uuid.UUID, sessionID *uuid.UUID, scopes pq.StringArray) (*TokenResponse, error) {
 	return s.issueTokensWithOpts(tx, client, userID, sessionID, scopes, issueOpts{authTime: time.Now()})
 }
 
-func (s *Service) issueTokensWithOpts(tx *Repository, client *model.OAuthClient, userID *uuid.UUID, sessionID *uuid.UUID, scopes pq.StringArray, opts issueOpts) (*TokenResponse, error) {
+func (s *Service) issueTokensWithOpts(tx RepositoryInterface, client *model.OAuthClient, userID *uuid.UUID, sessionID *uuid.UUID, scopes pq.StringArray, opts issueOpts) (*TokenResponse, error) {
 	// Evaluate token issuance policies
 	if s.policyEvaluator != nil && userID != nil {
 		var u *model.User

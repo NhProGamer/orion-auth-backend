@@ -13,22 +13,22 @@ import (
 )
 
 const (
-	totpIssuer     = "orion-auth-backend"
+	totpIssuer      = "orion-auth-backend"
 	backupCodeCount = 10
 )
 
 type Service struct {
-	repo   *Repository
+	repo   RepositoryInterface
 	hasher *crypto.Argon2Hasher
 }
 
-func NewService(repo *Repository, hasher *crypto.Argon2Hasher) *Service {
+func NewService(repo RepositoryInterface, hasher *crypto.Argon2Hasher) *Service {
 	return &Service{repo: repo, hasher: hasher}
 }
 
 type EnrollResponse struct {
-	Secret    string `json:"secret"`
-	URL       string `json:"url"`
+	Secret    string           `json:"secret"`
+	URL       string           `json:"url"`
 	MFAMethod *model.MFAMethod `json:"mfa_method"`
 }
 

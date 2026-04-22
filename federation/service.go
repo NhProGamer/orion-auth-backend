@@ -15,11 +15,11 @@ import (
 )
 
 type Service struct {
-	repo   *Repository
+	repo   RepositoryInterface
 	issuer string
 }
 
-func NewService(repo *Repository, issuer string) *Service {
+func NewService(repo RepositoryInterface, issuer string) *Service {
 	return &Service{repo: repo, issuer: issuer}
 }
 

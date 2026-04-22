@@ -12,11 +12,11 @@ import (
 )
 
 type Service struct {
-	repo   *Repository
+	repo   RepositoryInterface
 	hasher *crypto.Argon2Hasher
 }
 
-func NewService(repo *Repository, hasher *crypto.Argon2Hasher) *Service {
+func NewService(repo RepositoryInterface, hasher *crypto.Argon2Hasher) *Service {
 	return &Service{repo: repo, hasher: hasher}
 }
 

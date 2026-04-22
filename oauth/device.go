@@ -190,7 +190,7 @@ func (s *Service) ExchangeDeviceCode(client *model.OAuthClient, deviceCodeRaw st
 		}
 		// Issue tokens
 		var resp *TokenResponse
-		err := s.repo.Transaction(func(tx *Repository) error {
+		err := s.repo.Transaction(func(tx RepositoryInterface) error {
 			var txErr error
 			resp, txErr = s.issueTokensWithOpts(tx, client, dc.UserID, dc.SessionID, dc.Scopes, issueOpts{
 				authTime: dc.CreatedAt,

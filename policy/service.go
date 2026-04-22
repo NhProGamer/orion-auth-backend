@@ -11,11 +11,11 @@ import (
 )
 
 type Service struct {
-	repo   *Repository
+	repo   RepositoryInterface
 	engine *Engine
 }
 
-func NewService(repo *Repository, engine *Engine) *Service {
+func NewService(repo RepositoryInterface, engine *Engine) *Service {
 	return &Service{repo: repo, engine: engine}
 }
 

@@ -16,13 +16,13 @@ import (
 )
 
 type Service struct {
-	repo        *Repository
+	repo        RepositoryInterface
 	hasher      *crypto.Argon2Hasher
 	cfg         config.AuthConfig
 	emailSender email.Sender
 }
 
-func NewService(repo *Repository, hasher *crypto.Argon2Hasher, cfg config.AuthConfig) *Service {
+func NewService(repo RepositoryInterface, hasher *crypto.Argon2Hasher, cfg config.AuthConfig) *Service {
 	return &Service{repo: repo, hasher: hasher, cfg: cfg}
 }
 
@@ -118,7 +118,7 @@ func (s *Service) Authenticate(input LoginInput) (*model.User, error) {
 	if user.FailedLoginAttempts > 0 {
 		_ = s.repo.UpdateFields(user.ID, map[string]any{
 			"failed_login_attempts": 0,
-			"locked_until":         nil,
+			"locked_until":          nil,
 		})
 	}
 

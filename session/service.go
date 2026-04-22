@@ -12,11 +12,11 @@ import (
 )
 
 type Service struct {
-	repo *Repository
+	repo RepositoryInterface
 	cfg  config.AuthConfig
 }
 
-func NewService(repo *Repository, cfg config.AuthConfig) *Service {
+func NewService(repo RepositoryInterface, cfg config.AuthConfig) *Service {
 	return &Service{repo: repo, cfg: cfg}
 }
 
