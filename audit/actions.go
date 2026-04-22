@@ -61,6 +61,16 @@ const (
 	ActionFederationProviderDeleted = "federation.provider_deleted"
 )
 
+// Resource actions
+const (
+	ActionResourceCreated           = "resource.created"
+	ActionResourceUpdated           = "resource.updated"
+	ActionResourceDeleted           = "resource.deleted"
+	ActionResourcePermissionAdded   = "resource.permission_added"
+	ActionResourcePermissionRemoved = "resource.permission_removed"
+	ActionClientPermissionsUpdated  = "resource.client_permissions_updated"
+)
+
 // Policy actions
 const (
 	ActionPolicyCreated = "policy.created"
