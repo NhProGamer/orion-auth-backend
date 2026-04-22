@@ -61,7 +61,7 @@ func (r *Repository) List(page, perPage int) ([]model.APIResource, int64, error)
 	r.db.Model(&model.APIResource{}).Count(&total)
 
 	offset := (page - 1) * perPage
-	err := r.db.Offset(offset).Limit(perPage).Order("created_at DESC").Find(&resources).Error
+	err := r.db.Preload("Permissions").Offset(offset).Limit(perPage).Order("created_at DESC").Find(&resources).Error
 	return resources, total, err
 }
 
