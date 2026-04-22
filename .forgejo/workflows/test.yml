@@ -17,7 +17,7 @@ jobs:
 
       - name: Checkout
         run: |
-          git clone https://oauth2:${{ secrets.REGISTRY_TOKEN }}@git.nhsoul.fr/nhpro/orion-auth-backend.git .
+          git clone https://oauth2:${{ github.token }}@git.nhsoul.fr/${{ github.repository }}.git .
           git checkout ${{ github.sha }}
 
       - name: Download modules
