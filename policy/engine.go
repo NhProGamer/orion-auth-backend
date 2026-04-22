@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -22,10 +23,12 @@ type EvalResult struct {
 }
 
 type preparedPolicy struct {
-	id       uuid.UUID
-	name     string
-	priority int
-	query    rego.PreparedEvalQuery
+	id          uuid.UUID
+	name        string
+	priority    int
+	allowQuery  rego.PreparedEvalQuery
+	denyQuery   *rego.PreparedEvalQuery
+	modifyQuery *rego.PreparedEvalQuery
 }
 
 // Engine manages compiled OPA policies and evaluates them.
@@ -122,34 +125,36 @@ func (e *Engine) Evaluate(ctx context.Context, policyType string, input map[stri
 	merged := make(map[string]any)
 
 	for _, p := range policies {
-		rs, err := p.query.Eval(ctx, rego.EvalInput(input))
-		if err != nil {
-			return nil, fmt.Errorf("policy %q evaluation failed: %w", p.name, err)
-		}
-
-		if len(rs) == 0 {
-			continue
-		}
-
-		bindings := rs[0].Bindings
-
 		// Check deny
-		if denyVal, ok := bindings["deny"]; ok {
-			if denySet, ok := denyVal.([]any); ok && len(denySet) > 0 {
-				reason := fmt.Sprintf("%v", denySet[0])
-				return &EvalResult{
-					Deny:       true,
-					DenyReason: reason,
-					PolicyName: p.name,
-				}, nil
+		if p.denyQuery != nil {
+			rs, err := p.denyQuery.Eval(ctx, rego.EvalInput(input))
+			if err != nil {
+				return nil, fmt.Errorf("policy %q deny evaluation failed: %w", p.name, err)
+			}
+			if len(rs) > 0 {
+				if denyVal, ok := rs[0].Bindings["x"]; ok {
+					reason := extractDenyReason(denyVal)
+					if reason != "" {
+						return &EvalResult{
+							Deny:       true,
+							DenyReason: reason,
+							PolicyName: p.name,
+						}, nil
+					}
+				}
 			}
 		}
 
 		// Collect modify
-		if modVal, ok := bindings["modify"]; ok {
-			if modMap, ok := modVal.(map[string]any); ok {
-				for k, v := range modMap {
-					merged[k] = v
+		if p.modifyQuery != nil {
+			rs, err := p.modifyQuery.Eval(ctx, rego.EvalInput(input))
+			if err == nil && len(rs) > 0 {
+				if modVal, ok := rs[0].Bindings["x"]; ok {
+					if modMap, ok := modVal.(map[string]any); ok {
+						for k, v := range modMap {
+							merged[k] = v
+						}
+					}
 				}
 			}
 		}
@@ -176,67 +181,125 @@ func (e *Engine) ValidateRego(regoCode string) error {
 
 // EvaluateRaw compiles and evaluates a Rego module with the given input (for testing).
 func (e *Engine) EvaluateRaw(ctx context.Context, regoCode string, input map[string]any) (*EvalResult, error) {
-	// Extract package name to build the query
-	query, err := rego.New(
-		rego.Module("test.rego", regoCode),
-		rego.Query("deny = data[_][_].deny; modify = data[_][_].modify; allow = data[_][_].allow"),
-	).PrepareForEval(ctx)
-	if err != nil {
+	pkgPath := extractPackagePath(regoCode)
+
+	// Validate compilation first
+	if err := e.ValidateRego(regoCode); err != nil {
 		return nil, fmt.Errorf("compilation failed: %w", err)
 	}
 
-	rs, err := query.Eval(ctx, rego.EvalInput(input))
-	if err != nil {
-		return nil, fmt.Errorf("evaluation failed: %w", err)
+	evalBinding := func(field string) (any, error) {
+		q := fmt.Sprintf("x = %s.%s", pkgPath, field)
+		prepared, err := rego.New(
+			rego.Module("test.rego", regoCode),
+			rego.Query(q),
+		).PrepareForEval(ctx)
+		if err != nil {
+			return nil, err
+		}
+		rs, err := prepared.Eval(ctx, rego.EvalInput(input))
+		if err != nil || len(rs) == 0 {
+			return nil, err
+		}
+		return rs[0].Bindings["x"], nil
 	}
 
 	result := &EvalResult{Allow: true}
-	if len(rs) == 0 {
-		return result, nil
-	}
 
-	bindings := rs[0].Bindings
-
-	if denyVal, ok := bindings["deny"]; ok {
-		if denySet, ok := denyVal.([]any); ok && len(denySet) > 0 {
-			result.Allow = false
-			result.Deny = true
-			result.DenyReason = fmt.Sprintf("%v", denySet[0])
-		}
-	}
-
-	if modVal, ok := bindings["modify"]; ok {
-		if modMap, ok := modVal.(map[string]any); ok && len(modMap) > 0 {
-			result.Modify = modMap
-		}
-	}
-
-	if allowVal, ok := bindings["allow"]; ok {
+	if allowVal, err := evalBinding("allow"); err == nil && allowVal != nil {
 		if b, ok := allowVal.(bool); ok {
 			result.Allow = b
+		}
+	}
+
+	if denyVal, err := evalBinding("deny"); err == nil && denyVal != nil {
+		reason := extractDenyReason(denyVal)
+		if reason != "" {
+			result.Allow = false
+			result.Deny = true
+			result.DenyReason = reason
+		}
+	}
+
+	if modVal, err := evalBinding("modify"); err == nil && modVal != nil {
+		if modMap, ok := modVal.(map[string]any); ok && len(modMap) > 0 {
+			result.Modify = modMap
 		}
 	}
 
 	return result, nil
 }
 
+// extractDenyReason extracts the first deny reason from OPA evaluation results.
+// OPA may return deny as []any (array), map[any]any (set), or other types.
+func extractDenyReason(denyVal any) string {
+	switch v := denyVal.(type) {
+	case []any:
+		if len(v) > 0 {
+			return fmt.Sprintf("%v", v[0])
+		}
+	case map[string]any:
+		for k := range v {
+			return k
+		}
+	default:
+		s := fmt.Sprintf("%v", v)
+		if s != "" && s != "[]" && s != "map[]" {
+			return s
+		}
+	}
+	return ""
+}
+
+// extractPackagePath parses the package declaration from Rego source code.
+func extractPackagePath(regoCode string) string {
+	for _, line := range strings.Split(regoCode, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "package ") {
+			pkg := strings.TrimPrefix(trimmed, "package ")
+			return "data." + strings.TrimSpace(pkg)
+		}
+	}
+	return "data"
+}
+
 func (e *Engine) compile(p model.Policy) (preparedPolicy, error) {
 	moduleName := fmt.Sprintf("policy_%s.rego", p.ID.String())
+	basePath := fmt.Sprintf("data.orionauth.%s", p.Type)
 
-	query, err := rego.New(
+	// Compile allow query (always required)
+	allowQuery, err := rego.New(
 		rego.Module(moduleName, p.Rego),
-		rego.Query(fmt.Sprintf("allow = data.orionauth.%s.allow; deny = data.orionauth.%s.deny; modify = data.orionauth.%s.modify", p.Type, p.Type, p.Type)),
+		rego.Query(fmt.Sprintf("x = %s.allow", basePath)),
 	).PrepareForEval(context.Background())
 	if err != nil {
 		return preparedPolicy{}, fmt.Errorf("compilation failed for %q: %w", p.Name, err)
 	}
 
-	return preparedPolicy{
-		id:       p.ID,
-		name:     p.Name,
-		priority: p.Priority,
-		query:    query,
-	}, nil
+	pp := preparedPolicy{
+		id:         p.ID,
+		name:       p.Name,
+		priority:   p.Priority,
+		allowQuery: allowQuery,
+	}
+
+	// Compile deny query (optional — may not be defined)
+	if denyQuery, err := rego.New(
+		rego.Module(moduleName, p.Rego),
+		rego.Query(fmt.Sprintf("x = %s.deny", basePath)),
+	).PrepareForEval(context.Background()); err == nil {
+		pp.denyQuery = &denyQuery
+	}
+
+	// Compile modify query (optional — may not be defined)
+	if modQuery, err := rego.New(
+		rego.Module(moduleName, p.Rego),
+		rego.Query(fmt.Sprintf("x = %s.modify", basePath)),
+	).PrepareForEval(context.Background()); err == nil {
+		pp.modifyQuery = &modQuery
+	}
+
+	return pp, nil
 }
 
 func sortByPriority(policies []preparedPolicy) {
