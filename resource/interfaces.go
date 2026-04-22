@@ -29,6 +29,11 @@ type RepositoryInterface interface {
 	GetClientPermissionsForResource(clientID, resourceID uuid.UUID) ([]model.ResourcePermission, error)
 	ValidateClientScopes(clientID, resourceID uuid.UUID, scopeNames []string) ([]string, error)
 
+	// Role-Resource Permissions
+	SetRolePermissions(roleID uuid.UUID, permissionIDs []uuid.UUID) error
+	GetRolePermissions(roleID uuid.UUID) ([]model.ResourcePermission, error)
+	ValidateUserScopes(userID, resourceID uuid.UUID, scopeNames []string) ([]string, error)
+
 	// For OIDC discovery
 	GetAllActiveScopes() ([]string, error)
 }

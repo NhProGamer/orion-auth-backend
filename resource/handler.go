@@ -31,6 +31,8 @@ func (h *Handler) RegisterRoutes(admin *gin.RouterGroup) {
 	admin.DELETE("/resources/:id/permissions/:permId", h.RemovePermission)
 	admin.POST("/clients/:id/resource-permissions", h.SetClientPermissions)
 	admin.GET("/clients/:id/resource-permissions", h.GetClientPermissions)
+	admin.POST("/roles/:id/resource-permissions", h.SetRolePermissions)
+	admin.GET("/roles/:id/resource-permissions", h.GetRolePermissions)
 }
 
 // Create godoc
@@ -326,6 +328,72 @@ func (h *Handler) GetClientPermissions(c *gin.Context) {
 	}
 
 	perms, err := h.service.GetClientPermissions(clientID)
+	if err != nil {
+		pkg.HandleError(c, err)
+		return
+	}
+
+	pkg.OK(c, gin.H{"permissions": perms})
+}
+
+// SetRolePermissions godoc
+// @Summary      Set resource permissions for a role
+// @Tags         Admin - Resources
+// @Accept       json
+// @Produce      json
+// @Param        id path string true "Role ID"
+// @Param        body body resource.SetRolePermissionsInput true "Permission IDs"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} map[string]any
+// @Failure      500 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/admin/roles/{id}/resource-permissions [post]
+func (h *Handler) SetRolePermissions(c *gin.Context) {
+	roleID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		pkg.HandleError(c, pkg.ErrBadRequest("invalid role ID"))
+		return
+	}
+
+	var input SetRolePermissionsInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		pkg.HandleError(c, pkg.ErrBadRequest("invalid request body: "+err.Error()))
+		return
+	}
+
+	if err := h.service.SetRolePermissions(roleID, input); err != nil {
+		pkg.HandleError(c, err)
+		return
+	}
+
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionClientPermissionsUpdated, map[string]any{
+			"role_id":        roleID,
+			"permission_ids": input.PermissionIDs,
+		})
+	}
+
+	pkg.OK(c, gin.H{"message": "role resource permissions updated"})
+}
+
+// GetRolePermissions godoc
+// @Summary      Get resource permissions for a role
+// @Tags         Admin - Resources
+// @Produce      json
+// @Param        id path string true "Role ID"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} map[string]any
+// @Failure      500 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/admin/roles/{id}/resource-permissions [get]
+func (h *Handler) GetRolePermissions(c *gin.Context) {
+	roleID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		pkg.HandleError(c, pkg.ErrBadRequest("invalid role ID"))
+		return
+	}
+
+	perms, err := h.service.GetRolePermissions(roleID)
 	if err != nil {
 		pkg.HandleError(c, err)
 		return

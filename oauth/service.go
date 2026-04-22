@@ -48,6 +48,7 @@ type PolicyResult struct {
 type ResourceValidator interface {
 	ValidateAudience(audience string) (*model.APIResource, error)
 	ValidateClientScopes(clientID, resourceID uuid.UUID, requestedScopes []string) ([]string, error)
+	ValidateUserScopes(userID, resourceID uuid.UUID, requestedScopes []string) ([]string, error)
 }
 
 // IDTokenClaims mirrors oidc.IDTokenClaims to avoid circular imports.
@@ -788,9 +789,10 @@ func (s *Service) ExchangeRefreshToken(client *model.OAuthClient, refreshTokenRa
 // --- Helpers ---
 
 type issueOpts struct {
-	nonce    string
-	authTime time.Time
-	audience *string
+	nonce      string
+	authTime   time.Time
+	audience   *string
+	resourceID *uuid.UUID
 }
 
 func (s *Service) issueTokens(tx RepositoryInterface, client *model.OAuthClient, userID *uuid.UUID, sessionID *uuid.UUID, scopes pq.StringArray) (*TokenResponse, error) {
@@ -848,6 +850,23 @@ func (s *Service) issueTokensWithOpts(tx RepositoryInterface, client *model.OAut
 					}
 				}
 			}
+		}
+	}
+
+	// Resolve resourceID from audience if needed
+	if opts.audience != nil && opts.resourceID == nil && s.resourceValidator != nil {
+		if res, err := s.resourceValidator.ValidateAudience(*opts.audience); err == nil && res != nil {
+			opts.resourceID = &res.ID
+		}
+	}
+
+	// Validate user scopes against role-resource permissions (if audience is set)
+	if opts.resourceID != nil && userID != nil && s.resourceValidator != nil {
+		userScopes, err := s.resourceValidator.ValidateUserScopes(*userID, *opts.resourceID, scopes)
+		if err != nil {
+			slog.Warn("user scope validation failed", "error", err)
+		} else if len(userScopes) > 0 {
+			scopes = pq.StringArray(userScopes)
 		}
 	}
 

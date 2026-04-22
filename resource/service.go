@@ -42,6 +42,10 @@ type SetClientPermissionsInput struct {
 	PermissionIDs []uuid.UUID `json:"permission_ids" binding:"required"`
 }
 
+type SetRolePermissionsInput struct {
+	PermissionIDs []uuid.UUID `json:"permission_ids" binding:"required"`
+}
+
 // CRUD
 
 func (s *Service) Create(input CreateInput) (*model.APIResource, error) {
@@ -201,6 +205,25 @@ func (s *Service) GetClientPermissions(clientID uuid.UUID) ([]model.ResourcePerm
 	return perms, nil
 }
 
+// Role permissions
+
+func (s *Service) SetRolePermissions(roleID uuid.UUID, input SetRolePermissionsInput) error {
+	if err := s.repo.SetRolePermissions(roleID, input.PermissionIDs); err != nil {
+		slog.Error("failed to set role resource permissions", "error", err)
+		return pkg.ErrInternal("failed to set role resource permissions")
+	}
+	slog.Info("role resource permissions updated", "role_id", roleID)
+	return nil
+}
+
+func (s *Service) GetRolePermissions(roleID uuid.UUID) ([]model.ResourcePermission, error) {
+	perms, err := s.repo.GetRolePermissions(roleID)
+	if err != nil {
+		return nil, pkg.ErrInternal("failed to get role resource permissions")
+	}
+	return perms, nil
+}
+
 // Validation (used by OAuth)
 
 func (s *Service) ValidateAudience(audience string) (*model.APIResource, error) {
@@ -216,6 +239,10 @@ func (s *Service) ValidateAudience(audience string) (*model.APIResource, error) 
 
 func (s *Service) ValidateClientScopes(clientID, resourceID uuid.UUID, scopes []string) ([]string, error) {
 	return s.repo.ValidateClientScopes(clientID, resourceID, scopes)
+}
+
+func (s *Service) ValidateUserScopes(userID, resourceID uuid.UUID, scopes []string) ([]string, error) {
+	return s.repo.ValidateUserScopes(userID, resourceID, scopes)
 }
 
 // Discovery

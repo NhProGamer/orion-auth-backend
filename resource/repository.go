@@ -149,6 +149,44 @@ func (r *Repository) ValidateClientScopes(clientID, resourceID uuid.UUID, scopeN
 	return names, err
 }
 
+// Role-Resource Permissions
+
+func (r *Repository) SetRolePermissions(roleID uuid.UUID, permissionIDs []uuid.UUID) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("role_id = ?", roleID).Delete(&model.RoleResourcePermission{}).Error; err != nil {
+			return err
+		}
+		for _, pid := range permissionIDs {
+			rrp := model.RoleResourcePermission{RoleID: roleID, PermissionID: pid}
+			if err := tx.Create(&rrp).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (r *Repository) GetRolePermissions(roleID uuid.UUID) ([]model.ResourcePermission, error) {
+	var perms []model.ResourcePermission
+	err := r.db.
+		Joins("JOIN role_resource_permissions ON role_resource_permissions.permission_id = resource_permissions.id").
+		Where("role_resource_permissions.role_id = ?", roleID).
+		Find(&perms).Error
+	return perms, err
+}
+
+func (r *Repository) ValidateUserScopes(userID, resourceID uuid.UUID, scopeNames []string) ([]string, error) {
+	var names []string
+	err := r.db.
+		Model(&model.ResourcePermission{}).
+		Joins("JOIN role_resource_permissions ON role_resource_permissions.permission_id = resource_permissions.id").
+		Joins("JOIN user_roles ON user_roles.role_id = role_resource_permissions.role_id").
+		Where("user_roles.user_id = ? AND resource_permissions.resource_id = ? AND resource_permissions.name IN (?)", userID, resourceID, scopeNames).
+		Distinct().
+		Pluck("resource_permissions.name", &names).Error
+	return names, err
+}
+
 // OIDC Discovery
 
 func (r *Repository) GetAllActiveScopes() ([]string, error) {
