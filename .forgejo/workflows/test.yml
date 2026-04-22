@@ -1,0 +1,31 @@
+name: Tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  test:
+    runs-on: docker
+    container:
+      image: golang:1.25-alpine
+    steps:
+      - name: Install dependencies
+        run: apk add --no-cache git build-base
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test with coverage
+        run: go test ./... -race -coverprofile=coverage.out -covermode=atomic
+
+      - name: Show coverage summary
+        run: go tool cover -func=coverage.out | tail -1

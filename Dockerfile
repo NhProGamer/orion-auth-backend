@@ -4,7 +4,7 @@ LABEL org.opencontainers.image.source="https://git.nhsoul.fr/nhpro/orion-auth-ba
 LABEL org.opencontainers.image.url="https://git.nhsoul.fr/nhpro/orion-auth-backend"
 LABEL org.opencontainers.image.description="OrionAuth Backend"
 
-RUN apk add --no-cache git ca-certificates
+RUN apk add --no-cache git ca-certificates build-base
 
 WORKDIR /src
 
@@ -13,6 +13,7 @@ RUN go mod download
 
 COPY . .
 
+RUN go test ./... -race -count=1
 RUN go install github.com/swaggo/swag/cmd/swag@latest && swag init
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /orionauth .
 
