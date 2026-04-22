@@ -118,6 +118,7 @@ func main() {
 	// Connect cross-service dependencies
 	oauthService.SetIDTokenGenerator(oidc.NewIDTokenAdapter(oidcService))
 	oauthService.SetMFAValidator(mfaService)
+	oauthService.SetPolicyEvaluator(policy.NewOAuthAdapter(policyService))
 	oidcService.SetRBACService(rbacService)
 
 	// Handlers

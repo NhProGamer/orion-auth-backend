@@ -1,9 +1,11 @@
 package oauth
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/json"
 	"log/slog"
 	"time"
 
@@ -29,6 +31,19 @@ type MFAValidator interface {
 	ValidateCode(userID uuid.UUID, code string) (bool, error)
 }
 
+// PolicyEvaluator is an interface to avoid circular imports with the policy package.
+type PolicyEvaluator interface {
+	Evaluate(ctx context.Context, policyType string, input map[string]any) (*PolicyResult, error)
+}
+
+// PolicyResult mirrors policy.EvalResult to avoid circular imports.
+type PolicyResult struct {
+	Allow      bool
+	Deny       bool
+	DenyReason string
+	Modify     map[string]any
+}
+
 // IDTokenClaims mirrors oidc.IDTokenClaims to avoid circular imports.
 type IDTokenClaims struct {
 	UserID   uuid.UUID
@@ -41,13 +56,14 @@ type IDTokenClaims struct {
 }
 
 type Service struct {
-	repo           *Repository
-	userService    *user.Service
-	sessionService *session.Service
-	hasher         *crypto.Argon2Hasher
-	cfg            config.AuthConfig
-	idTokenGen     IDTokenGenerator
-	mfaValidator   MFAValidator
+	repo            *Repository
+	userService     *user.Service
+	sessionService  *session.Service
+	hasher          *crypto.Argon2Hasher
+	cfg             config.AuthConfig
+	idTokenGen      IDTokenGenerator
+	mfaValidator    MFAValidator
+	policyEvaluator PolicyEvaluator
 }
 
 func NewService(
@@ -74,6 +90,11 @@ func (s *Service) SetIDTokenGenerator(gen IDTokenGenerator) {
 // SetMFAValidator sets the MFA validator (called after init to break circular dep).
 func (s *Service) SetMFAValidator(v MFAValidator) {
 	s.mfaValidator = v
+}
+
+// SetPolicyEvaluator sets the policy evaluator (called after init to break circular dep).
+func (s *Service) SetPolicyEvaluator(p PolicyEvaluator) {
+	s.policyEvaluator = p
 }
 
 // TokenResponse is the standard OAuth2 token response.
@@ -200,6 +221,26 @@ func (s *Service) AuthorizeLogin(input AuthorizeLoginInput, ipAddress, userAgent
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	// Evaluate login policies
+	if s.policyEvaluator != nil {
+		pInput := map[string]any{
+			"user": map[string]any{
+				"id":             u.ID.String(),
+				"email":          u.Email,
+				"email_verified": u.EmailVerified,
+				"active":         u.Active,
+			},
+			"ip_address": ipAddress,
+			"user_agent": userAgent,
+		}
+		result, pErr := s.policyEvaluator.Evaluate(context.Background(), "login", pInput)
+		if pErr != nil {
+			slog.Warn("login policy evaluation failed", "error", pErr)
+		} else if result != nil && result.Deny {
+			return nil, pkg.ErrAccessDenied(result.DenyReason)
+		}
 	}
 
 	// Check if consent already given
@@ -671,6 +712,59 @@ func (s *Service) issueTokens(tx *Repository, client *model.OAuthClient, userID 
 }
 
 func (s *Service) issueTokensWithOpts(tx *Repository, client *model.OAuthClient, userID *uuid.UUID, sessionID *uuid.UUID, scopes pq.StringArray, opts issueOpts) (*TokenResponse, error) {
+	// Evaluate token issuance policies
+	if s.policyEvaluator != nil && userID != nil {
+		var u *model.User
+		if s.userService != nil {
+			u, _ = s.userService.GetByID(*userID)
+		}
+		pInput := map[string]any{
+			"client": map[string]any{
+				"id":             client.ID.String(),
+				"name":           client.Name,
+				"is_public":      client.IsPublic,
+				"is_first_party": client.IsFirstParty,
+			},
+			"scopes": []string(scopes),
+		}
+		if u != nil {
+			pInput["user"] = map[string]any{
+				"id":             u.ID.String(),
+				"email":          u.Email,
+				"email_verified": u.EmailVerified,
+				"active":         u.Active,
+			}
+		}
+		result, pErr := s.policyEvaluator.Evaluate(context.Background(), "token_issuance", pInput)
+		if pErr != nil {
+			slog.Warn("token issuance policy evaluation failed", "error", pErr)
+		} else if result != nil {
+			if result.Deny {
+				return nil, pkg.ErrAccessDenied(result.DenyReason)
+			}
+			if result.Modify != nil {
+				if ttl, ok := result.Modify["access_token_ttl"]; ok {
+					if v, ok := ttl.(json.Number); ok {
+						if n, err := v.Int64(); err == nil {
+							client.AccessTokenTTL = int(n)
+						}
+					} else if v, ok := ttl.(float64); ok {
+						client.AccessTokenTTL = int(v)
+					}
+				}
+				if ttl, ok := result.Modify["refresh_token_ttl"]; ok {
+					if v, ok := ttl.(json.Number); ok {
+						if n, err := v.Int64(); err == nil {
+							client.RefreshTokenTTL = int(n)
+						}
+					} else if v, ok := ttl.(float64); ok {
+						client.RefreshTokenTTL = int(v)
+					}
+				}
+			}
+		}
+	}
+
 	// Generate access token
 	rawAT, atHash, err := crypto.GenerateOpaqueToken()
 	if err != nil {

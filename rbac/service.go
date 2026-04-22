@@ -140,6 +140,11 @@ func (s *Service) GetUserRoles(userID uuid.UUID) ([]model.Role, error) {
 	return s.repo.GetUserRoles(userID)
 }
 
+// GetUserPermissions returns all permission names for a user.
+func (s *Service) GetUserPermissions(userID uuid.UUID) ([]string, error) {
+	return s.repo.GetUserPermissions(userID)
+}
+
 // HasPermission checks if a user has a specific permission.
 func (s *Service) HasPermission(userID uuid.UUID, permission string) (bool, error) {
 	perms, err := s.repo.GetUserPermissions(userID)
