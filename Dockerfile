@@ -13,21 +13,23 @@ RUN go mod download
 
 COPY . .
 
+# 1. Generate swagger docs (required by main.go import)
+RUN go install github.com/swaggo/swag/cmd/swag@latest && swag init -g main.go -o docs/
+
+# 2. Run tests
 RUN go test ./... -race -count=1
-RUN go install github.com/swaggo/swag/cmd/swag@latest && swag init
+
+# 3. Build binary
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /orionauth .
 
 FROM alpine:3.21
 
 RUN apk add --no-cache ca-certificates tzdata
-
 RUN adduser -D -u 1000 orionauth
 
 COPY --from=builder /orionauth /usr/local/bin/orionauth
 COPY --from=builder /src/config.yaml /etc/orionauth/config.yaml
 
 USER orionauth
-
 EXPOSE 8080
-
 ENTRYPOINT ["orionauth"]

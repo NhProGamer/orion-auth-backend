@@ -1,3 +1,5 @@
+name: Wiki Documentation
+
 on:
   push:
     branches: [master]
@@ -8,21 +10,21 @@ jobs:
     container:
       image: golang:1.25-alpine
     steps:
+      - name: Install system dependencies
+        run: apk add --no-cache git python3
+
       - name: Checkout
         run: |
-          apk add --no-cache git
           git clone https://oauth2:${{ secrets.WIKI_TOKEN }}@git.nhsoul.fr/nhpro/orion-auth-backend.git .
           git checkout ${{ github.sha }}
 
-      - name: Install swag
-        run: go install github.com/swaggo/swag/cmd/swag@latest
-
-      - name: Generate docs
-        run: swag init -g main.go -o docs/
-
-      - name: Convert to Markdown and push to wiki
+      - name: Generate swagger docs
         run: |
-          apk add --no-cache python3
+          go install github.com/swaggo/swag/cmd/swag@latest
+          swag init -g main.go -o docs/
+
+      - name: Convert and push to wiki
+        run: |
           python3 scripts/swagger-to-wiki.py docs/swagger.json API-Documentation.md
           git config --global user.name "Forgejo Actions"
           git config --global user.email "actions@nhsoul.fr"

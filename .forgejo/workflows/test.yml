@@ -12,7 +12,7 @@ jobs:
     container:
       image: golang:1.25-alpine
     steps:
-      - name: Install dependencies
+      - name: Install system dependencies
         run: apk add --no-cache git build-base
 
       - name: Checkout
@@ -20,14 +20,19 @@ jobs:
           git clone https://oauth2:${{ github.token }}@git.nhsoul.fr/${{ github.repository }}.git .
           git checkout ${{ github.sha }}
 
-      - name: Download modules
+      - name: Download Go modules
         run: go mod download
+
+      - name: Generate swagger docs
+        run: |
+          go install github.com/swaggo/swag/cmd/swag@latest
+          swag init -g main.go -o docs/
 
       - name: Vet
         run: go vet ./...
 
-      - name: Test with coverage
+      - name: Test
         run: go test ./... -race -coverprofile=coverage.out -covermode=atomic
 
-      - name: Show coverage summary
+      - name: Coverage summary
         run: go tool cover -func=coverage.out | tail -1
