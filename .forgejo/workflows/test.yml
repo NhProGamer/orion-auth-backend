@@ -16,7 +16,9 @@ jobs:
         run: apk add --no-cache git build-base
 
       - name: Checkout
-        uses: actions/checkout@v4
+        run: |
+          git clone https://oauth2:${{ secrets.REGISTRY_TOKEN }}@git.nhsoul.fr/nhpro/orion-auth-backend.git .
+          git checkout ${{ github.sha }}
 
       - name: Download modules
         run: go mod download
