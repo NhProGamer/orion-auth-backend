@@ -64,11 +64,11 @@ func (s *Service) Log(entry LogEntry) {
 }
 
 type QueryInput struct {
-	UserID *uuid.UUID
-	Action string
-	From   *time.Time
-	To     *time.Time
-	Page   int
+	UserID  *uuid.UUID
+	Action  string
+	From    *time.Time
+	To      *time.Time
+	Page    int
 	PerPage int
 }
 

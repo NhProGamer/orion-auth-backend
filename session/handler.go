@@ -147,7 +147,7 @@ func (h *Handler) RevokeAll(c *gin.Context) {
 	}
 
 	pkg.OK(c, gin.H{
-		"message":         "sessions revoked",
-		"revoked_count":   count,
+		"message":       "sessions revoked",
+		"revoked_count": count,
 	})
 }

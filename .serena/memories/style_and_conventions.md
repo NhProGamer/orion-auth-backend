@@ -22,6 +22,11 @@ func NewHandler(service *Service) *Handler { return &Handler{service: service} }
 func (h *Handler) RegisterRoutes(public, authenticated *gin.RouterGroup) { ... }
 ```
 
+## Git Workflow
+- **Commits atomiques simples** : un commit par changement logique, message concis
+- **Pas de Co-Authored-By** dans les messages de commit
+- **Mettre à jour les mémoires Serena** quand l'architecture ou les conventions changent
+
 ## Error Handling
 - **OAuthError**: RFC 6749 compliant (error, error_description, error_uri, status_code)
   - Constructors: ErrInvalidRequest(), ErrUnauthorizedClient(), ErrAccessDenied(), ErrInvalidGrant(), etc.

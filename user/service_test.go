@@ -17,14 +17,14 @@ import (
 // ---------------------------------------------------------------------------
 
 type mockUserRepo struct {
-	createFn           func(user *model.User) error
-	findByIDFn         func(id uuid.UUID) (*model.User, error)
-	findByEmailFn      func(email string) (*model.User, error)
-	updateFn           func(user *model.User) error
-	updateFieldsFn     func(id uuid.UUID, fields map[string]any) error
-	listFn             func(page, perPage int) ([]model.User, int64, error)
-	deleteFn           func(id uuid.UUID) error
-	findByResetTokenFn func(tokenHash string) (*model.User, error)
+	createFn            func(user *model.User) error
+	findByIDFn          func(id uuid.UUID) (*model.User, error)
+	findByEmailFn       func(email string) (*model.User, error)
+	updateFn            func(user *model.User) error
+	updateFieldsFn      func(id uuid.UUID, fields map[string]any) error
+	listFn              func(page, perPage int) ([]model.User, int64, error)
+	deleteFn            func(id uuid.UUID) error
+	findByResetTokenFn  func(tokenHash string) (*model.User, error)
 	findByVerifyTokenFn func(tokenHash string) (*model.User, error)
 }
 

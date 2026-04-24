@@ -17,14 +17,14 @@ import (
 // --- Mock Invitation Repository ---
 
 type mockInvitationRepo struct {
-	createFn        func(inv *model.Invitation) error
-	findByTokenFn   func(tokenHash string) (*model.Invitation, error)
-	findByIDFn      func(id uuid.UUID) (*model.Invitation, error)
-	listFn          func(page, perPage int) ([]model.Invitation, int64, error)
-	markUsedFn      func(inv *model.Invitation) error
-	deleteFn        func(id uuid.UUID) error
-	getSettingFn    func(key string) (string, error)
-	setSettingFn    func(key, value string) error
+	createFn         func(inv *model.Invitation) error
+	findByTokenFn    func(tokenHash string) (*model.Invitation, error)
+	findByIDFn       func(id uuid.UUID) (*model.Invitation, error)
+	listFn           func(page, perPage int) ([]model.Invitation, int64, error)
+	markUsedFn       func(inv *model.Invitation) error
+	deleteFn         func(id uuid.UUID) error
+	getSettingFn     func(key string) (string, error)
+	setSettingFn     func(key, value string) error
 	getAllSettingsFn func() ([]model.Setting, error)
 }
 
@@ -271,7 +271,7 @@ type mockEmailSender struct {
 	sendInvitationFn func(to, token string) error
 }
 
-func (m *mockEmailSender) SendVerificationEmail(_, _ string) error { return nil }
+func (m *mockEmailSender) SendVerificationEmail(_, _ string) error  { return nil }
 func (m *mockEmailSender) SendPasswordResetEmail(_, _ string) error { return nil }
 func (m *mockEmailSender) SendInvitationEmail(to, token string) error {
 	if m.sendInvitationFn != nil {

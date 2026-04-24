@@ -18,11 +18,11 @@ import (
 // --- Mock Repository ---
 
 type mockMFARepo struct {
-	createFn            func(m *model.MFAMethod) error
-	findByUserAndTypeFn func(userID uuid.UUID, mfaType string) (*model.MFAMethod, error)
+	createFn             func(m *model.MFAMethod) error
+	findByUserAndTypeFn  func(userID uuid.UUID, mfaType string) (*model.MFAMethod, error)
 	findVerifiedByUserFn func(userID uuid.UUID) (*model.MFAMethod, error)
-	updateFn            func(m *model.MFAMethod) error
-	deleteFn            func(id uuid.UUID) error
+	updateFn             func(m *model.MFAMethod) error
+	deleteFn             func(id uuid.UUID) error
 }
 
 func (m *mockMFARepo) Create(method *model.MFAMethod) error {

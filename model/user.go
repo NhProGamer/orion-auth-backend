@@ -9,20 +9,20 @@ import (
 
 type User struct {
 	BaseModel
-	Email                 string          `gorm:"type:varchar(255);uniqueIndex;not null" json:"email"`
-	EmailVerified         bool            `gorm:"default:false" json:"email_verified"`
-	EmailVerifyToken      *string         `gorm:"type:varchar(255)" json:"-"`
-	EmailVerifyExpiresAt  *time.Time      `json:"-"`
-	PasswordHash          string          `gorm:"type:varchar(255);not null" json:"-"`
-	PasswordResetToken    *string         `gorm:"type:varchar(255)" json:"-"`
-	PasswordResetExpiresAt *time.Time     `json:"-"`
-	DisplayName           *string         `gorm:"type:varchar(255)" json:"display_name,omitempty"`
-	AvatarURL             *string         `gorm:"type:varchar(512)" json:"avatar_url,omitempty"`
-	Phone                 *string         `gorm:"type:varchar(50)" json:"phone,omitempty"`
-	LockedUntil           *time.Time      `json:"locked_until,omitempty"`
-	FailedLoginAttempts   int             `gorm:"default:0" json:"-"`
-	Active                bool            `gorm:"default:true" json:"active"`
-	Metadata              json.RawMessage `gorm:"type:jsonb;default:'{}'" json:"metadata,omitempty"`
+	Email                  string          `gorm:"type:varchar(255);uniqueIndex;not null" json:"email"`
+	EmailVerified          bool            `gorm:"default:false" json:"email_verified"`
+	EmailVerifyToken       *string         `gorm:"type:varchar(255)" json:"-"`
+	EmailVerifyExpiresAt   *time.Time      `json:"-"`
+	PasswordHash           string          `gorm:"type:varchar(255);not null" json:"-"`
+	PasswordResetToken     *string         `gorm:"type:varchar(255)" json:"-"`
+	PasswordResetExpiresAt *time.Time      `json:"-"`
+	DisplayName            *string         `gorm:"type:varchar(255)" json:"display_name,omitempty"`
+	AvatarURL              *string         `gorm:"type:varchar(512)" json:"avatar_url,omitempty"`
+	Phone                  *string         `gorm:"type:varchar(50)" json:"phone,omitempty"`
+	LockedUntil            *time.Time      `json:"locked_until,omitempty"`
+	FailedLoginAttempts    int             `gorm:"default:0" json:"-"`
+	Active                 bool            `gorm:"default:true" json:"active"`
+	Metadata               json.RawMessage `gorm:"type:jsonb;default:'{}'" json:"metadata,omitempty"`
 }
 
 func (User) TableName() string {

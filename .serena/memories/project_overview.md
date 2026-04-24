@@ -9,6 +9,7 @@ OrionAuth is a full-featured OAuth2/OIDC authorization server written in Go. It 
 - OpenID Connect: ID tokens (RS256), JWKS, Discovery, UserInfo endpoint
 - Multi-Factor Authentication: TOTP with backup codes
 - Role-Based Access Control (RBAC) with permission middleware
+- Policy-Based Authorization (OPA/Rego) for dynamic, context-aware access control
 - Audit logging (async, queryable with filters)
 - Federation: Social login with external OAuth/OIDC providers, account linking
 - Session management with IP/User-Agent tracking
@@ -73,6 +74,7 @@ OrionAuth/
 ├── oidc/                # OIDC discovery, JWKS, ID token generation, UserInfo, key rotation
 ├── mfa/                 # TOTP enrollment, verification, backup codes
 ├── rbac/                # Roles, permissions, user-role assignment, permission middleware
+├── policy/              # OPA/Rego policy engine, CRUD, evaluation, middleware
 ├── audit/               # Async audit logging, queryable logs
 ├── federation/          # Social login providers, account linking
 ├── email/               # Sender interface + SMTP implementation
