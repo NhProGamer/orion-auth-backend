@@ -69,6 +69,24 @@ func ErrExpiredToken(desc string) *OAuthError {
 	return &OAuthError{Code: "expired_token", Description: desc, StatusCode: http.StatusBadRequest}
 }
 
+// OIDC Core errors (OpenID Connect Core 1.0 Section 3.1.2.6).
+
+func ErrLoginRequired(desc string) *OAuthError {
+	return &OAuthError{Code: "login_required", Description: desc, StatusCode: http.StatusBadRequest}
+}
+
+func ErrConsentRequired(desc string) *OAuthError {
+	return &OAuthError{Code: "consent_required", Description: desc, StatusCode: http.StatusBadRequest}
+}
+
+func ErrInteractionRequired(desc string) *OAuthError {
+	return &OAuthError{Code: "interaction_required", Description: desc, StatusCode: http.StatusBadRequest}
+}
+
+func ErrAccountSelectionRequired(desc string) *OAuthError {
+	return &OAuthError{Code: "account_selection_required", Description: desc, StatusCode: http.StatusBadRequest}
+}
+
 // Application-level errors (not OAuth2 spec, but used for API responses).
 
 type AppError struct {
