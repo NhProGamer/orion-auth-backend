@@ -126,6 +126,9 @@ func main() {
 	oauthService.SetPolicyEvaluator(policy.NewOAuthAdapter(policyService))
 	oauthService.SetResourceValidator(resourceService)
 	oidcService.SetRBACService(rbacService)
+	oidcService.SetSessionRevoker(sessionService)
+	oidcService.SetClientFinder(clientRepo)
+	oauthService.SetIDTokenValidator(oidcService)
 
 	// Handlers
 	userHandler := user.NewHandler(userService)
