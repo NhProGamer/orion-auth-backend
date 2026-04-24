@@ -27,6 +27,7 @@
 | GET | /.well-known/jwks.json | None | JWKS (Cache-Control: public, max-age=3600) |
 | GET | /userinfo | Bearer | User info claims |
 | POST | /userinfo | Bearer | User info claims |
+| GET | /end_session | None | RP-Initiated Logout (OIDC) |
 
 ## Public API Routes (/api/v1, rate limited)
 | Method | Path | Auth | Description |
@@ -95,7 +96,14 @@
 - Grant Types: ["authorization_code", "client_credentials", "refresh_token", "urn:ietf:params:oauth:grant-type:device_code"]
 - Subject Type: ["public"]
 - ID Token Signing: ["RS256"]
-- Scopes: ["openid", "profile", "email", "offline_access"]
+- Scopes: ["openid", "profile", "email", "roles", "offline_access"]
 - Token Auth Methods: ["client_secret_basic", "client_secret_post", "none"]
-- Claims: ["sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "at_hash", "name", "email", "email_verified", "picture", "phone_number", "updated_at"]
+- Claims: ["sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "at_hash", "name", "email", "email_verified", "picture", "phone_number", "updated_at", "roles", "groups"]
 - Code Challenge Methods: ["S256"]
+- End Session Endpoint: /end_session
+- request_parameter_supported: false
+- request_uri_parameter_supported: false
+- claims_parameter_supported: true
+
+## OIDC Core Parameters Supported in /authorize
+prompt (none|login|consent|select_account), max_age, display (page|popup|touch|wap), ui_locales, claims_locales, acr_values, login_hint, claims (JSON), id_token_hint

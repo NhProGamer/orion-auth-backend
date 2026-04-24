@@ -99,3 +99,19 @@
 - Consent caching (skip if already granted same scopes)
 - MFA integration in authorization flow
 - First-party client auto-consent
+- ID token validation for prompt=none and end_session flows
+
+## OIDC Core Parameters (in /authorize)
+- **prompt**: none (silent auth via id_token_hint), login (force re-auth), consent (force consent even for first-party), select_account (returns error)
+- **max_age**: stored on auth request, auth_time propagated to ID token
+- **display**: page/popup/touch/wap, passed to frontend
+- **login_hint**: pre-populates email in AuthUI login form
+- **claims**: JSON claims request parameter, honored in ID token generation
+- **id_token_hint**: validated via ValidateIDToken, used for prompt=none
+- **ui_locales, claims_locales, acr_values**: accepted without error (stored)
+
+## RP-Initiated Logout (GET /end_session)
+- Parameters: id_token_hint, post_logout_redirect_uri, state, client_id
+- Validates id_token_hint, revokes all user sessions
+- Validates post_logout_redirect_uri against client's PostLogoutRedirectURIs
+- Returns redirect_uri with state if valid, otherwise shows logout confirmation
