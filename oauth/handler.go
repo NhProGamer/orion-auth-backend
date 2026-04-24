@@ -78,17 +78,25 @@ func (h *Handler) Authorize(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.service.InitAuthorize(
-		client,
-		c.Query("redirect_uri"),
-		c.Query("response_type"),
-		c.Query("scope"),
-		c.Query("state"),
-		c.Query("nonce"),
-		c.Query("code_challenge"),
-		c.Query("code_challenge_method"),
-		c.Query("audience"),
-	)
+	resp, err := h.service.InitAuthorize(client, InitAuthorizeParams{
+		RedirectURI:         c.Query("redirect_uri"),
+		ResponseType:        c.Query("response_type"),
+		Scope:               c.Query("scope"),
+		State:               c.Query("state"),
+		Nonce:               c.Query("nonce"),
+		CodeChallenge:       c.Query("code_challenge"),
+		CodeChallengeMethod: c.Query("code_challenge_method"),
+		Audience:            c.Query("audience"),
+		Prompt:              c.Query("prompt"),
+		MaxAge:              c.Query("max_age"),
+		Display:             c.Query("display"),
+		UILocales:           c.Query("ui_locales"),
+		ClaimsLocales:       c.Query("claims_locales"),
+		ACRValues:           c.Query("acr_values"),
+		LoginHint:           c.Query("login_hint"),
+		Claims:              c.Query("claims"),
+		IDTokenHint:         c.Query("id_token_hint"),
+	})
 	if err != nil {
 		pkg.HandleError(c, err)
 		return

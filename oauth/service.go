@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -51,15 +52,21 @@ type ResourceValidator interface {
 	ValidateUserScopes(userID, resourceID uuid.UUID, requestedScopes []string) ([]string, error)
 }
 
+// IDTokenValidator validates and extracts claims from an existing ID token.
+type IDTokenValidator interface {
+	ValidateIDToken(tokenString string) (uuid.UUID, error)
+}
+
 // IDTokenClaims mirrors oidc.IDTokenClaims to avoid circular imports.
 type IDTokenClaims struct {
-	UserID   uuid.UUID
-	ClientID uuid.UUID
-	Scopes   []string
-	Nonce    string
-	AuthTime time.Time
-	ATHash   string
-	TTL      time.Duration
+	UserID          uuid.UUID
+	ClientID        uuid.UUID
+	Scopes          []string
+	Nonce           string
+	AuthTime        time.Time
+	ATHash          string
+	TTL             time.Duration
+	RequestedClaims string
 }
 
 type Service struct {
@@ -71,7 +78,8 @@ type Service struct {
 	idTokenGen        IDTokenGenerator
 	mfaValidator      MFAValidator
 	policyEvaluator   PolicyEvaluator
-	resourceValidator ResourceValidator
+	resourceValidator  ResourceValidator
+	idTokenValidator   IDTokenValidator
 }
 
 func NewService(
@@ -110,6 +118,11 @@ func (s *Service) SetResourceValidator(v ResourceValidator) {
 	s.resourceValidator = v
 }
 
+// SetIDTokenValidator sets the ID token validator (called after init to break circular dep).
+func (s *Service) SetIDTokenValidator(v IDTokenValidator) {
+	s.idTokenValidator = v
+}
+
 // TokenResponse is the standard OAuth2 token response.
 type TokenResponse struct {
 	AccessToken  string `json:"access_token"`
@@ -133,24 +146,50 @@ type ResourcePermissionInfo struct {
 	Description *string `json:"description,omitempty"`
 }
 
-type InitAuthorizeResponse struct {
-	RequestID       uuid.UUID     `json:"request_id"`
-	ClientName      string        `json:"client_name"`
-	ClientID        uuid.UUID     `json:"client_id"`
-	ScopesRequested []string      `json:"scopes_requested"`
-	RequiresLogin   bool          `json:"requires_login"`
-	RequiresConsent bool          `json:"requires_consent"`
-	Resource        *ResourceInfo `json:"resource,omitempty"`
+// InitAuthorizeParams holds all parameters for the authorization request.
+type InitAuthorizeParams struct {
+	RedirectURI         string
+	ResponseType        string
+	Scope               string
+	State               string
+	Nonce               string
+	CodeChallenge       string
+	CodeChallengeMethod string
+	Audience            string
+	// OIDC Core parameters
+	Prompt       string
+	MaxAge       string
+	Display      string
+	UILocales    string
+	ClaimsLocales string
+	ACRValues    string
+	LoginHint    string
+	Claims       string
+	IDTokenHint  string
 }
 
-func (s *Service) InitAuthorize(client *model.OAuthClient, redirectURI, responseType, scope, state, nonce, codeChallenge, codeChallengeMethod, audience string) (*InitAuthorizeResponse, error) {
+type InitAuthorizeResponse struct {
+	RequestID       uuid.UUID                `json:"request_id"`
+	ClientName      string                   `json:"client_name"`
+	ClientID        uuid.UUID                `json:"client_id"`
+	ScopesRequested []string                 `json:"scopes_requested"`
+	RequiresLogin   bool                     `json:"requires_login"`
+	RequiresConsent bool                     `json:"requires_consent"`
+	Resource        *ResourceInfo            `json:"resource,omitempty"`
+	LoginHint       string                   `json:"login_hint,omitempty"`
+	Display         string                   `json:"display,omitempty"`
+	Prompt          string                   `json:"prompt,omitempty"`
+	Redirect        *AuthorizeConsentResponse `json:"redirect,omitempty"`
+}
+
+func (s *Service) InitAuthorize(client *model.OAuthClient, params InitAuthorizeParams) (*InitAuthorizeResponse, error) {
 	// Validate response_type
-	if responseType != "code" && responseType != "token" {
+	if params.ResponseType != "code" && params.ResponseType != "token" {
 		return nil, pkg.ErrUnsupportedResponseType("supported response_types: code, token")
 	}
 
 	// Validate redirect_uri
-	if !client.HasRedirectURI(redirectURI) {
+	if !client.HasRedirectURI(params.RedirectURI) {
 		return nil, pkg.ErrInvalidRequest("invalid redirect_uri")
 	}
 
@@ -160,16 +199,59 @@ func (s *Service) InitAuthorize(client *model.OAuthClient, redirectURI, response
 	}
 
 	// Validate PKCE for public clients
-	if client.IsPublic && codeChallenge == "" {
+	if client.IsPublic && params.CodeChallenge == "" {
 		return nil, pkg.ErrInvalidRequest("PKCE (code_challenge) is required for public clients")
 	}
 
 	// Only S256 allowed
-	if codeChallenge != "" && codeChallengeMethod != "S256" && codeChallengeMethod != "" {
+	if params.CodeChallenge != "" && params.CodeChallengeMethod != "S256" && params.CodeChallengeMethod != "" {
 		return nil, pkg.ErrInvalidRequest("only S256 code_challenge_method is supported")
 	}
-	if codeChallenge != "" && codeChallengeMethod == "" {
-		codeChallengeMethod = "S256"
+	if params.CodeChallenge != "" && params.CodeChallengeMethod == "" {
+		params.CodeChallengeMethod = "S256"
+	}
+
+	// Validate prompt parameter
+	if params.Prompt != "" {
+		switch params.Prompt {
+		case "none", "login", "consent", "select_account":
+			// valid
+		default:
+			return nil, pkg.ErrInvalidRequest("invalid prompt value")
+		}
+	}
+
+	// Validate display parameter
+	if params.Display != "" {
+		switch params.Display {
+		case "page", "popup", "touch", "wap":
+			// valid
+		default:
+			return nil, pkg.ErrInvalidRequest("invalid display value")
+		}
+	}
+
+	// Validate max_age parameter
+	var maxAge *int
+	if params.MaxAge != "" {
+		v, err := strconv.Atoi(params.MaxAge)
+		if err != nil || v < 0 {
+			return nil, pkg.ErrInvalidRequest("max_age must be a non-negative integer")
+		}
+		maxAge = &v
+	}
+
+	// Validate claims parameter (must be valid JSON if present)
+	if params.Claims != "" {
+		var tmp json.RawMessage
+		if err := json.Unmarshal([]byte(params.Claims), &tmp); err != nil {
+			return nil, pkg.ErrInvalidRequest("invalid claims parameter: must be valid JSON")
+		}
+	}
+
+	// Handle prompt=select_account (not supported)
+	if params.Prompt == "select_account" {
+		return nil, pkg.ErrAccountSelectionRequired("account selection is not supported")
 	}
 
 	// Validate audience and scopes
@@ -177,12 +259,12 @@ func (s *Service) InitAuthorize(client *model.OAuthClient, redirectURI, response
 	var resourceInfo *ResourceInfo
 	var scopes []string
 
-	if audience != "" && s.resourceValidator != nil {
-		resource, err := s.resourceValidator.ValidateAudience(audience)
+	if params.Audience != "" && s.resourceValidator != nil {
+		resource, err := s.resourceValidator.ValidateAudience(params.Audience)
 		if err != nil {
 			return nil, err
 		}
-		resourceScopes, err := s.resourceValidator.ValidateClientScopes(client.ID, resource.ID, parseSpaceDelimited(scope))
+		resourceScopes, err := s.resourceValidator.ValidateClientScopes(client.ID, resource.ID, parseSpaceDelimited(params.Scope))
 		if err != nil {
 			return nil, err
 		}
@@ -190,7 +272,7 @@ func (s *Service) InitAuthorize(client *model.OAuthClient, redirectURI, response
 			return nil, pkg.ErrInvalidScope("client has no permissions for this resource")
 		}
 		scopes = resourceScopes
-		validatedAudience = &audience
+		validatedAudience = &params.Audience
 
 		// Build resource info for consent screen
 		var perms []ResourcePermissionInfo
@@ -204,31 +286,63 @@ func (s *Service) InitAuthorize(client *model.OAuthClient, redirectURI, response
 		}
 	} else {
 		// Standard scope validation against client
-		scopes = client.ValidateScopes(parseSpaceDelimited(scope))
+		scopes = client.ValidateScopes(parseSpaceDelimited(params.Scope))
 		if len(scopes) == 0 {
 			return nil, pkg.ErrInvalidScope("no valid scopes requested")
 		}
 	}
 
+	// Handle prompt=none (silent authentication)
+	if params.Prompt == "none" {
+		return s.handlePromptNone(client, params, scopes, validatedAudience, resourceInfo)
+	}
+
 	// Create authorization request
 	req := &model.AuthorizationRequest{
 		ClientID:     client.ID,
-		RedirectURI:  redirectURI,
-		ResponseType: responseType,
+		RedirectURI:  params.RedirectURI,
+		ResponseType: params.ResponseType,
 		Scopes:       pq.StringArray(scopes),
 		Audience:     validatedAudience,
 		ExpiresAt:    time.Now().Add(10 * time.Minute),
 	}
 
-	if state != "" {
-		req.State = &state
+	if params.State != "" {
+		req.State = &params.State
 	}
-	if nonce != "" {
-		req.Nonce = &nonce
+	if params.Nonce != "" {
+		req.Nonce = &params.Nonce
 	}
-	if codeChallenge != "" {
-		req.CodeChallenge = &codeChallenge
-		req.CodeChallengeMethod = &codeChallengeMethod
+	if params.CodeChallenge != "" {
+		req.CodeChallenge = &params.CodeChallenge
+		req.CodeChallengeMethod = &params.CodeChallengeMethod
+	}
+	if params.Prompt != "" {
+		req.Prompt = &params.Prompt
+	}
+	if maxAge != nil {
+		req.MaxAge = maxAge
+	}
+	if params.Display != "" {
+		req.Display = &params.Display
+	}
+	if params.UILocales != "" {
+		req.UILocales = &params.UILocales
+	}
+	if params.ClaimsLocales != "" {
+		req.ClaimsLocales = &params.ClaimsLocales
+	}
+	if params.ACRValues != "" {
+		req.ACRValues = &params.ACRValues
+	}
+	if params.LoginHint != "" {
+		req.LoginHint = &params.LoginHint
+	}
+	if params.Claims != "" {
+		req.ClaimsParam = &params.Claims
+	}
+	if params.IDTokenHint != "" {
+		req.IDTokenHint = &params.IDTokenHint
 	}
 
 	if err := s.repo.CreateAuthRequest(req); err != nil {
@@ -236,14 +350,91 @@ func (s *Service) InitAuthorize(client *model.OAuthClient, redirectURI, response
 		return nil, pkg.ErrServerError("failed to create authorization request")
 	}
 
+	// Determine login/consent requirements
+	requiresLogin := true
+	requiresConsent := !client.IsFirstParty
+	if params.Prompt == "consent" {
+		requiresConsent = true
+	}
+
 	return &InitAuthorizeResponse{
 		RequestID:       req.ID,
 		ClientName:      client.Name,
 		ClientID:        client.ID,
 		ScopesRequested: scopes,
-		RequiresLogin:   true,
-		RequiresConsent: !client.IsFirstParty,
+		RequiresLogin:   requiresLogin,
+		RequiresConsent: requiresConsent,
 		Resource:        resourceInfo,
+		LoginHint:       params.LoginHint,
+		Display:         params.Display,
+		Prompt:          params.Prompt,
+	}, nil
+}
+
+// handlePromptNone handles silent authentication (prompt=none).
+// It requires a valid id_token_hint to identify the user and existing consent.
+func (s *Service) handlePromptNone(client *model.OAuthClient, params InitAuthorizeParams, scopes []string, audience *string, resource *ResourceInfo) (*InitAuthorizeResponse, error) {
+	if params.IDTokenHint == "" || s.idTokenValidator == nil {
+		return nil, pkg.ErrLoginRequired("prompt=none requires id_token_hint")
+	}
+
+	userID, err := s.idTokenValidator.ValidateIDToken(params.IDTokenHint)
+	if err != nil {
+		return nil, pkg.ErrLoginRequired("invalid id_token_hint")
+	}
+
+	// Check existing consent
+	consent, _ := s.repo.FindActiveConsent(userID, client.ID)
+	if consent == nil || !consent.CoversScopes(scopes) {
+		if !client.IsFirstParty {
+			return nil, pkg.ErrConsentRequired("user has not consented to the requested scopes")
+		}
+	}
+
+	// Create a temporary auth request for completeAuthorize
+	req := &model.AuthorizationRequest{
+		ClientID:      client.ID,
+		RedirectURI:   params.RedirectURI,
+		ResponseType:  params.ResponseType,
+		Scopes:        pq.StringArray(scopes),
+		Audience:      audience,
+		UserID:        &userID,
+		Authenticated: true,
+		ConsentGiven:  true,
+		ExpiresAt:     time.Now().Add(1 * time.Minute),
+	}
+	if params.State != "" {
+		req.State = &params.State
+	}
+	if params.Nonce != "" {
+		req.Nonce = &params.Nonce
+	}
+	if params.CodeChallenge != "" {
+		req.CodeChallenge = &params.CodeChallenge
+		req.CodeChallengeMethod = &params.CodeChallengeMethod
+	}
+	if params.Claims != "" {
+		req.ClaimsParam = &params.Claims
+	}
+	now := time.Now()
+	req.AuthTime = &now
+
+	if err := s.repo.CreateAuthRequest(req); err != nil {
+		return nil, pkg.ErrServerError("failed to create authorization request")
+	}
+
+	// Complete the flow immediately (no UI interaction)
+	redirect, err := s.completeAuthorize(req, "", "")
+	if err != nil {
+		return nil, err
+	}
+
+	return &InitAuthorizeResponse{
+		RequestID:       req.ID,
+		ClientName:      client.Name,
+		ClientID:        client.ID,
+		ScopesRequested: scopes,
+		Redirect:        redirect,
 	}, nil
 }
 
@@ -324,11 +515,19 @@ func (s *Service) AuthorizeLogin(input AuthorizeLoginInput, ipAddress, userAgent
 	}
 
 	req.UserID = &u.ID
+	now := time.Now()
 	if needsMFA {
 		// Don't mark as authenticated yet — MFA step required
 	} else {
 		req.Authenticated = true
+		req.AuthTime = &now
 	}
+
+	// prompt=consent forces consent even for first-party or pre-consented clients
+	if req.Prompt != nil && *req.Prompt == "consent" {
+		needsConsent = true
+	}
+
 	if !needsConsent && req.Authenticated {
 		req.ConsentGiven = true
 	}
@@ -378,6 +577,8 @@ func (s *Service) AuthorizeMFA(input AuthorizeMFAInput) (*AuthorizeLoginResponse
 	}
 
 	req.Authenticated = true
+	now := time.Now()
+	req.AuthTime = &now
 
 	// Check consent
 	var needsConsent bool
@@ -394,6 +595,12 @@ func (s *Service) AuthorizeMFA(input AuthorizeMFAInput) (*AuthorizeLoginResponse
 		if !needsConsent {
 			req.ConsentGiven = true
 		}
+	}
+
+	// prompt=consent forces consent
+	if req.Prompt != nil && *req.Prompt == "consent" {
+		needsConsent = true
+		req.ConsentGiven = false
 	}
 
 	if err := s.repo.UpdateAuthRequest(req); err != nil {
@@ -530,6 +737,12 @@ func (s *Service) completeAuthorize(req *model.AuthorizationRequest, ipAddress, 
 	if req.Nonce != nil {
 		authCode.Nonce = req.Nonce
 	}
+	if req.AuthTime != nil {
+		authCode.AuthTime = req.AuthTime
+	}
+	if req.ClaimsParam != nil {
+		authCode.ClaimsParam = req.ClaimsParam
+	}
 
 	if err := s.repo.CreateAuthCode(authCode); err != nil {
 		return nil, pkg.ErrServerError("failed to create authorization code")
@@ -641,10 +854,19 @@ func (s *Service) ExchangeAuthorizationCode(client *model.OAuthClient, code, red
 		if authCode.Nonce != nil {
 			nonce = *authCode.Nonce
 		}
+		authTime := authCode.CreatedAt
+		if authCode.AuthTime != nil {
+			authTime = *authCode.AuthTime
+		}
+		var requestedClaims string
+		if authCode.ClaimsParam != nil {
+			requestedClaims = *authCode.ClaimsParam
+		}
 		resp, err = s.issueTokensWithOpts(tx, client, &authCode.UserID, authCode.SessionID, authCode.Scopes, issueOpts{
-			nonce:    nonce,
-			authTime: authCode.CreatedAt,
-			audience: authCode.Audience,
+			nonce:           nonce,
+			authTime:        authTime,
+			audience:        authCode.Audience,
+			requestedClaims: requestedClaims,
 		})
 		return err
 	})
@@ -789,10 +1011,11 @@ func (s *Service) ExchangeRefreshToken(client *model.OAuthClient, refreshTokenRa
 // --- Helpers ---
 
 type issueOpts struct {
-	nonce      string
-	authTime   time.Time
-	audience   *string
-	resourceID *uuid.UUID
+	nonce           string
+	authTime        time.Time
+	audience        *string
+	resourceID      *uuid.UUID
+	requestedClaims string
 }
 
 func (s *Service) issueTokens(tx RepositoryInterface, client *model.OAuthClient, userID *uuid.UUID, sessionID *uuid.UUID, scopes pq.StringArray) (*TokenResponse, error) {
@@ -931,13 +1154,14 @@ func (s *Service) issueTokensWithOpts(tx RepositoryInterface, client *model.OAut
 		}
 
 		idToken, err := s.idTokenGen.GenerateIDToken(IDTokenClaims{
-			UserID:   *userID,
-			ClientID: client.ID,
-			Scopes:   scopes,
-			Nonce:    opts.nonce,
-			AuthTime: authTime,
-			ATHash:   atHashValue,
-			TTL:      time.Duration(client.IDTokenTTL) * time.Second,
+			UserID:          *userID,
+			ClientID:        client.ID,
+			Scopes:          scopes,
+			Nonce:           opts.nonce,
+			AuthTime:        authTime,
+			ATHash:          atHashValue,
+			TTL:             time.Duration(client.IDTokenTTL) * time.Second,
+			RequestedClaims: opts.requestedClaims,
 		})
 		if err != nil {
 			slog.Warn("failed to generate ID token", "error", err)
