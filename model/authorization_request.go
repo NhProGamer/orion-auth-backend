@@ -31,6 +31,7 @@ type AuthorizationRequest struct {
 	ClaimsParam         *string        `gorm:"type:jsonb;column:claims_param" json:"-"`
 	IDTokenHint         *string        `gorm:"type:text" json:"-"`
 	AuthTime            *time.Time     `gorm:"type:timestamptz" json:"-"`
+	ResponseMode        *string        `gorm:"type:varchar(20)" json:"-"`
 	ExpiresAt           time.Time      `gorm:"not null" json:"expires_at"`
 }
 

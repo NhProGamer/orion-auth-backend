@@ -96,6 +96,7 @@ func (h *Handler) Authorize(c *gin.Context) {
 		LoginHint:           c.Query("login_hint"),
 		Claims:              c.Query("claims"),
 		IDTokenHint:         c.Query("id_token_hint"),
+		ResponseMode:        c.Query("response_mode"),
 	})
 	if err != nil {
 		pkg.HandleError(c, err)
