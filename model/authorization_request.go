@@ -21,6 +21,16 @@ type AuthorizationRequest struct {
 	Authenticated       bool           `gorm:"default:false" json:"authenticated"`
 	ConsentGiven        bool           `gorm:"default:false" json:"consent_given"`
 	Audience            *string        `gorm:"type:varchar(512)" json:"audience,omitempty"`
+	Prompt              *string        `gorm:"type:varchar(50)" json:"-"`
+	MaxAge              *int           `gorm:"type:int" json:"-"`
+	Display             *string        `gorm:"type:varchar(20)" json:"-"`
+	UILocales           *string        `gorm:"type:varchar(255)" json:"-"`
+	ClaimsLocales       *string        `gorm:"type:varchar(255)" json:"-"`
+	ACRValues           *string        `gorm:"type:varchar(512)" json:"-"`
+	LoginHint           *string        `gorm:"type:varchar(255)" json:"-"`
+	ClaimsParam         *string        `gorm:"type:jsonb;column:claims_param" json:"-"`
+	IDTokenHint         *string        `gorm:"type:text" json:"-"`
+	AuthTime            *time.Time     `gorm:"type:timestamptz" json:"-"`
 	ExpiresAt           time.Time      `gorm:"not null" json:"expires_at"`
 }
 

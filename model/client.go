@@ -20,7 +20,8 @@ type OAuthClient struct {
 	AccessTokenTTL  int            `gorm:"default:3600" json:"access_token_ttl"`
 	RefreshTokenTTL int            `gorm:"default:86400" json:"refresh_token_ttl"`
 	IDTokenTTL      int            `gorm:"default:3600" json:"id_token_ttl"`
-	Active          bool           `gorm:"default:true" json:"active"`
+	PostLogoutRedirectURIs pq.StringArray `gorm:"type:text[];default:'{}'" json:"post_logout_redirect_uris"`
+	Active                bool           `gorm:"default:true" json:"active"`
 }
 
 func (OAuthClient) TableName() string {
@@ -47,6 +48,15 @@ func (c *OAuthClient) HasScope(scope string) bool {
 
 func (c *OAuthClient) HasRedirectURI(uri string) bool {
 	for _, u := range c.RedirectURIs {
+		if u == uri {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *OAuthClient) HasPostLogoutRedirectURI(uri string) bool {
+	for _, u := range c.PostLogoutRedirectURIs {
 		if u == uri {
 			return true
 		}
