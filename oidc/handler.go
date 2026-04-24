@@ -20,6 +20,7 @@ func (h *Handler) RegisterRoutes(router *gin.Engine, bearerAuth, rateLimiter gin
 	router.GET("/.well-known/jwks.json", h.JWKS)
 	router.GET("/userinfo", rateLimiter, bearerAuth, h.UserInfo)
 	router.POST("/userinfo", rateLimiter, bearerAuth, h.UserInfo)
+	router.GET("/end_session", h.EndSession)
 }
 
 func (h *Handler) RegisterAdminRoutes(admin *gin.RouterGroup) {
@@ -72,6 +73,31 @@ func (h *Handler) UserInfo(c *gin.Context) {
 	}
 
 	pkg.OK(c, claims)
+}
+
+// EndSession handles RP-Initiated Logout (OIDC RP-Initiated Logout 1.0).
+// @Summary End session / logout
+// @Tags OIDC
+// @Produce json
+// @Param id_token_hint query string false "Previously issued ID Token"
+// @Param post_logout_redirect_uri query string false "URL to redirect after logout"
+// @Param state query string false "Opaque value for the RP"
+// @Param client_id query string false "Client ID"
+// @Success 200 {object} map[string]any
+// @Router /end_session [get]
+func (h *Handler) EndSession(c *gin.Context) {
+	resp, err := h.service.EndSession(EndSessionParams{
+		IDTokenHint:           c.Query("id_token_hint"),
+		PostLogoutRedirectURI: c.Query("post_logout_redirect_uri"),
+		State:                 c.Query("state"),
+		ClientID:              c.Query("client_id"),
+	})
+	if err != nil {
+		pkg.HandleError(c, err)
+		return
+	}
+
+	pkg.OK(c, resp)
 }
 
 // ListKeys returns all signing keys.

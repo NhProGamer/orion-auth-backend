@@ -4,6 +4,7 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"math/big"
@@ -20,11 +21,23 @@ import (
 	"orion-auth-backend/user"
 )
 
+// SessionRevoker is an interface to avoid circular imports with the session package.
+type SessionRevoker interface {
+	RevokeAll(userID uuid.UUID, currentSessionID *uuid.UUID) (int64, error)
+}
+
+// ClientFinder is an interface for looking up OAuth clients.
+type ClientFinder interface {
+	FindActiveByID(id uuid.UUID) (*model.OAuthClient, error)
+}
+
 type Service struct {
-	db          *gorm.DB
-	userService *user.Service
-	rbacService *rbac.Service
-	issuer      string
+	db             *gorm.DB
+	userService    *user.Service
+	rbacService    *rbac.Service
+	sessionRevoker SessionRevoker
+	clientFinder   ClientFinder
+	issuer         string
 
 	mu         sync.RWMutex
 	activeKey  *model.SigningKey
@@ -34,6 +47,14 @@ type Service struct {
 
 func (s *Service) SetRBACService(rs *rbac.Service) {
 	s.rbacService = rs
+}
+
+func (s *Service) SetSessionRevoker(sr SessionRevoker) {
+	s.sessionRevoker = sr
+}
+
+func (s *Service) SetClientFinder(cf ClientFinder) {
+	s.clientFinder = cf
 }
 
 func NewService(db *gorm.DB, userService *user.Service, issuer string) *Service {
@@ -131,13 +152,14 @@ func (s *Service) loadAllKeys() {
 // --- ID Token Generation ---
 
 type IDTokenClaims struct {
-	UserID   uuid.UUID
-	ClientID uuid.UUID
-	Scopes   []string
-	Nonce    string
-	AuthTime time.Time
-	ATHash   string // access token hash
-	TTL      time.Duration
+	UserID          uuid.UUID
+	ClientID        uuid.UUID
+	Scopes          []string
+	Nonce           string
+	AuthTime        time.Time
+	ATHash          string // access token hash
+	TTL             time.Duration
+	RequestedClaims string // JSON claims parameter from the authorization request
 }
 
 func (s *Service) GenerateIDToken(claims IDTokenClaims) (string, error) {
@@ -181,10 +203,97 @@ func (s *Service) GenerateIDToken(claims IDTokenClaims) (string, error) {
 
 	s.enrichClaimsWithRoles(claims.UserID, claims.Scopes, jwtClaims)
 
+	// Honor the claims parameter (OIDC Core Section 5.5)
+	if claims.RequestedClaims != "" && u != nil {
+		s.applyRequestedClaims(claims.RequestedClaims, "id_token", u, jwtClaims)
+	}
+
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, jwtClaims)
 	token.Header["kid"] = key.ID.String()
 
 	return token.SignedString(privKey)
+}
+
+// applyRequestedClaims parses the claims parameter JSON and adds requested claims
+// for the given target ("id_token" or "userinfo") to the claims map.
+func (s *Service) applyRequestedClaims(requestedClaimsJSON, target string, u *model.User, claims jwt.MapClaims) {
+	var parsed map[string]map[string]any
+	if err := json.Unmarshal([]byte(requestedClaimsJSON), &parsed); err != nil {
+		return
+	}
+
+	targetClaims, ok := parsed[target]
+	if !ok {
+		return
+	}
+
+	// Map of all available user claims
+	allClaims := u.OIDCClaims([]string{"openid", "profile", "email"})
+
+	for claimName := range targetClaims {
+		if _, alreadySet := claims[claimName]; alreadySet {
+			continue
+		}
+		if val, available := allClaims[claimName]; available {
+			claims[claimName] = val
+		}
+	}
+}
+
+// ValidateIDToken parses and validates an ID token, returning the subject (user ID).
+// Used for id_token_hint validation in prompt=none and end_session flows.
+func (s *Service) ValidateIDToken(tokenString string) (uuid.UUID, error) {
+	s.mu.RLock()
+	keys := s.allKeys
+	s.mu.RUnlock()
+
+	// Build a key function that tries all known keys
+	keyFunc := func(token *jwt.Token) (any, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+			return nil, errors.New("unexpected signing method")
+		}
+
+		kid, ok := token.Header["kid"].(string)
+		if !ok {
+			return nil, errors.New("missing kid in token header")
+		}
+
+		for _, k := range keys {
+			if k.ID.String() == kid {
+				pubKey, err := appCrypto.ParseRSAPublicKey(k.PublicKeyPEM)
+				if err != nil {
+					return nil, err
+				}
+				return pubKey, nil
+			}
+		}
+		return nil, errors.New("unknown signing key")
+	}
+
+	token, err := jwt.Parse(tokenString, keyFunc,
+		jwt.WithIssuer(s.issuer),
+		jwt.WithValidMethods([]string{"RS256"}),
+	)
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok || !token.Valid {
+		return uuid.Nil, errors.New("invalid token claims")
+	}
+
+	sub, ok := claims["sub"].(string)
+	if !ok {
+		return uuid.Nil, errors.New("missing sub claim")
+	}
+
+	userID, err := uuid.Parse(sub)
+	if err != nil {
+		return uuid.Nil, errors.New("invalid sub claim")
+	}
+
+	return userID, nil
 }
 
 // ComputeATHash computes the at_hash claim for an access token.
@@ -238,42 +347,50 @@ func (s *Service) GetJWKS() JWKS {
 // --- Discovery ---
 
 type OpenIDConfiguration struct {
-	Issuer                           string   `json:"issuer"`
-	AuthorizationEndpoint            string   `json:"authorization_endpoint"`
-	TokenEndpoint                    string   `json:"token_endpoint"`
-	UserinfoEndpoint                 string   `json:"userinfo_endpoint"`
-	JwksURI                          string   `json:"jwks_uri"`
-	IntrospectionEndpoint            string   `json:"introspection_endpoint"`
-	RevocationEndpoint               string   `json:"revocation_endpoint"`
-	DeviceAuthorizationEndpoint      string   `json:"device_authorization_endpoint"`
-	ResponseTypesSupported           []string `json:"response_types_supported"`
-	GrantTypesSupported              []string `json:"grant_types_supported"`
-	SubjectTypesSupported            []string `json:"subject_types_supported"`
-	IDTokenSigningAlgValuesSupported []string `json:"id_token_signing_alg_values_supported"`
-	ScopesSupported                  []string `json:"scopes_supported"`
+	Issuer                            string   `json:"issuer"`
+	AuthorizationEndpoint             string   `json:"authorization_endpoint"`
+	TokenEndpoint                     string   `json:"token_endpoint"`
+	UserinfoEndpoint                  string   `json:"userinfo_endpoint"`
+	JwksURI                           string   `json:"jwks_uri"`
+	IntrospectionEndpoint             string   `json:"introspection_endpoint"`
+	RevocationEndpoint                string   `json:"revocation_endpoint"`
+	DeviceAuthorizationEndpoint       string   `json:"device_authorization_endpoint"`
+	EndSessionEndpoint                string   `json:"end_session_endpoint"`
+	ResponseTypesSupported            []string `json:"response_types_supported"`
+	GrantTypesSupported               []string `json:"grant_types_supported"`
+	SubjectTypesSupported             []string `json:"subject_types_supported"`
+	IDTokenSigningAlgValuesSupported  []string `json:"id_token_signing_alg_values_supported"`
+	ScopesSupported                   []string `json:"scopes_supported"`
 	TokenEndpointAuthMethodsSupported []string `json:"token_endpoint_auth_methods_supported"`
-	ClaimsSupported                  []string `json:"claims_supported"`
-	CodeChallengeMethodsSupported    []string `json:"code_challenge_methods_supported"`
+	ClaimsSupported                   []string `json:"claims_supported"`
+	CodeChallengeMethodsSupported     []string `json:"code_challenge_methods_supported"`
+	RequestParameterSupported         bool     `json:"request_parameter_supported"`
+	RequestURIParameterSupported      bool     `json:"request_uri_parameter_supported"`
+	ClaimsParameterSupported          bool     `json:"claims_parameter_supported"`
 }
 
 func (s *Service) GetDiscovery() OpenIDConfiguration {
 	return OpenIDConfiguration{
-		Issuer:                           s.issuer,
-		AuthorizationEndpoint:            s.issuer + "/ui/authorize",
-		TokenEndpoint:                    s.issuer + "/token",
-		UserinfoEndpoint:                 s.issuer + "/userinfo",
-		JwksURI:                          s.issuer + "/.well-known/jwks.json",
-		IntrospectionEndpoint:            s.issuer + "/introspect",
-		RevocationEndpoint:               s.issuer + "/revoke",
-		DeviceAuthorizationEndpoint:      s.issuer + "/device_authorization",
-		ResponseTypesSupported:           []string{"code"},
-		GrantTypesSupported:              []string{"authorization_code", "client_credentials", "refresh_token", "urn:ietf:params:oauth:grant-type:device_code"},
-		SubjectTypesSupported:            []string{"public"},
-		IDTokenSigningAlgValuesSupported: []string{"RS256"},
-		ScopesSupported:                  []string{"openid", "profile", "email", "roles", "offline_access"},
+		Issuer:                            s.issuer,
+		AuthorizationEndpoint:             s.issuer + "/ui/authorize",
+		TokenEndpoint:                     s.issuer + "/token",
+		UserinfoEndpoint:                  s.issuer + "/userinfo",
+		JwksURI:                           s.issuer + "/.well-known/jwks.json",
+		IntrospectionEndpoint:             s.issuer + "/introspect",
+		RevocationEndpoint:                s.issuer + "/revoke",
+		DeviceAuthorizationEndpoint:       s.issuer + "/device_authorization",
+		EndSessionEndpoint:                s.issuer + "/end_session",
+		ResponseTypesSupported:            []string{"code"},
+		GrantTypesSupported:               []string{"authorization_code", "client_credentials", "refresh_token", "urn:ietf:params:oauth:grant-type:device_code"},
+		SubjectTypesSupported:             []string{"public"},
+		IDTokenSigningAlgValuesSupported:  []string{"RS256"},
+		ScopesSupported:                   []string{"openid", "profile", "email", "roles", "offline_access"},
 		TokenEndpointAuthMethodsSupported: []string{"client_secret_basic", "client_secret_post", "none"},
-		ClaimsSupported:                  []string{"sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "at_hash", "name", "email", "email_verified", "picture", "phone_number", "updated_at", "roles", "groups"},
-		CodeChallengeMethodsSupported:    []string{"S256"},
+		ClaimsSupported:                   []string{"sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "at_hash", "name", "email", "email_verified", "picture", "phone_number", "updated_at", "roles", "groups"},
+		CodeChallengeMethodsSupported:     []string{"S256"},
+		RequestParameterSupported:         false,
+		RequestURIParameterSupported:      false,
+		ClaimsParameterSupported:          true,
 	}
 }
 
@@ -309,4 +426,68 @@ func (s *Service) enrichClaimsWithRoles(userID uuid.UUID, scopes []string, claim
 			return
 		}
 	}
+}
+
+// --- End Session (RP-Initiated Logout) ---
+
+type EndSessionParams struct {
+	IDTokenHint           string
+	PostLogoutRedirectURI string
+	State                 string
+	ClientID              string
+}
+
+type EndSessionResponse struct {
+	RedirectURI string `json:"redirect_uri,omitempty"`
+	LoggedOut   bool   `json:"logged_out"`
+}
+
+func (s *Service) EndSession(params EndSessionParams) (*EndSessionResponse, error) {
+	var userID *uuid.UUID
+
+	// Validate id_token_hint if provided
+	if params.IDTokenHint != "" {
+		uid, err := s.ValidateIDToken(params.IDTokenHint)
+		if err != nil {
+			slog.Warn("invalid id_token_hint in end_session", "error", err)
+			// Per spec, invalid id_token_hint should not prevent logout display
+		} else {
+			userID = &uid
+		}
+	}
+
+	// Revoke all sessions for the identified user
+	if userID != nil && s.sessionRevoker != nil {
+		if _, err := s.sessionRevoker.RevokeAll(*userID, nil); err != nil {
+			slog.Error("failed to revoke sessions during end_session", "user_id", userID, "error", err)
+		}
+	}
+
+	resp := &EndSessionResponse{LoggedOut: true}
+
+	// Validate post_logout_redirect_uri
+	if params.PostLogoutRedirectURI != "" {
+		validRedirect := false
+
+		// Look up client to validate the post_logout_redirect_uri
+		if params.ClientID != "" && s.clientFinder != nil {
+			clientUUID, err := uuid.Parse(params.ClientID)
+			if err == nil {
+				client, err := s.clientFinder.FindActiveByID(clientUUID)
+				if err == nil && client != nil && client.HasPostLogoutRedirectURI(params.PostLogoutRedirectURI) {
+					validRedirect = true
+				}
+			}
+		}
+
+		if validRedirect {
+			redirectURI := params.PostLogoutRedirectURI
+			if params.State != "" {
+				redirectURI += "?state=" + params.State
+			}
+			resp.RedirectURI = redirectURI
+		}
+	}
+
+	return resp, nil
 }
