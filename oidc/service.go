@@ -8,6 +8,8 @@ import (
 	"errors"
 	"log/slog"
 	"math/big"
+	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -29,6 +31,7 @@ type SessionRevoker interface {
 // ClientFinder is an interface for looking up OAuth clients.
 type ClientFinder interface {
 	FindActiveByID(id uuid.UUID) (*model.OAuthClient, error)
+	FindClientsWithBackchannelLogout(userID uuid.UUID) ([]model.OAuthClient, error)
 }
 
 type Service struct {
@@ -228,7 +231,7 @@ func (s *Service) applyRequestedClaims(requestedClaimsJSON, target string, u *mo
 	}
 
 	// Map of all available user claims
-	allClaims := u.OIDCClaims([]string{"openid", "profile", "email"})
+	allClaims := u.OIDCClaims([]string{"openid", "profile", "email", "phone", "address"})
 
 	for claimName := range targetClaims {
 		if _, alreadySet := claims[claimName]; alreadySet {
@@ -364,9 +367,12 @@ type OpenIDConfiguration struct {
 	TokenEndpointAuthMethodsSupported []string `json:"token_endpoint_auth_methods_supported"`
 	ClaimsSupported                   []string `json:"claims_supported"`
 	CodeChallengeMethodsSupported     []string `json:"code_challenge_methods_supported"`
-	RequestParameterSupported         bool     `json:"request_parameter_supported"`
-	RequestURIParameterSupported      bool     `json:"request_uri_parameter_supported"`
-	ClaimsParameterSupported          bool     `json:"claims_parameter_supported"`
+	ResponseModesSupported           []string `json:"response_modes_supported"`
+	RequestParameterSupported          bool     `json:"request_parameter_supported"`
+	RequestURIParameterSupported       bool     `json:"request_uri_parameter_supported"`
+	ClaimsParameterSupported           bool     `json:"claims_parameter_supported"`
+	BackchannelLogoutSupported         bool     `json:"backchannel_logout_supported"`
+	BackchannelLogoutSessionSupported  bool     `json:"backchannel_logout_session_supported"`
 }
 
 func (s *Service) GetDiscovery() OpenIDConfiguration {
@@ -384,13 +390,24 @@ func (s *Service) GetDiscovery() OpenIDConfiguration {
 		GrantTypesSupported:               []string{"authorization_code", "client_credentials", "refresh_token", "urn:ietf:params:oauth:grant-type:device_code"},
 		SubjectTypesSupported:             []string{"public"},
 		IDTokenSigningAlgValuesSupported:  []string{"RS256"},
-		ScopesSupported:                   []string{"openid", "profile", "email", "roles", "offline_access"},
+		ScopesSupported:                   []string{"openid", "profile", "email", "phone", "address", "roles", "offline_access"},
 		TokenEndpointAuthMethodsSupported: []string{"client_secret_basic", "client_secret_post", "none"},
-		ClaimsSupported:                   []string{"sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "at_hash", "name", "email", "email_verified", "picture", "phone_number", "updated_at", "roles", "groups"},
+		ClaimsSupported: []string{
+			"sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "at_hash",
+			"name", "given_name", "family_name", "middle_name", "nickname",
+			"preferred_username", "profile", "picture", "website",
+			"gender", "birthdate", "zoneinfo", "locale",
+			"email", "email_verified",
+			"phone_number", "phone_number_verified",
+			"address", "updated_at", "roles", "groups",
+		},
 		CodeChallengeMethodsSupported:     []string{"S256"},
+		ResponseModesSupported:           []string{"query", "fragment", "form_post"},
 		RequestParameterSupported:         false,
 		RequestURIParameterSupported:      false,
 		ClaimsParameterSupported:          true,
+		BackchannelLogoutSupported:        true,
+		BackchannelLogoutSessionSupported: true,
 	}
 }
 
@@ -463,6 +480,11 @@ func (s *Service) EndSession(params EndSessionParams) (*EndSessionResponse, erro
 		}
 	}
 
+	// Back-Channel Logout: notify RPs asynchronously
+	if userID != nil && s.clientFinder != nil {
+		s.dispatchBackchannelLogout(*userID)
+	}
+
 	resp := &EndSessionResponse{LoggedOut: true}
 
 	// Validate post_logout_redirect_uri
@@ -490,4 +512,73 @@ func (s *Service) EndSession(params EndSessionParams) (*EndSessionResponse, erro
 	}
 
 	return resp, nil
+}
+
+// GenerateLogoutToken creates a logout_token JWT for Back-Channel Logout.
+func (s *Service) GenerateLogoutToken(userID, clientID uuid.UUID) (string, error) {
+	s.mu.RLock()
+	key := s.activeKey
+	privKey := s.privateKey
+	s.mu.RUnlock()
+
+	if key == nil || privKey == nil {
+		return "", errors.New("no active signing key")
+	}
+
+	jti, _ := uuid.NewV7()
+	now := time.Now()
+
+	claims := jwt.MapClaims{
+		"iss": s.issuer,
+		"sub": userID.String(),
+		"aud": clientID.String(),
+		"iat": now.Unix(),
+		"jti": jti.String(),
+		"events": map[string]any{
+			"http://schemas.openid.net/event/backchannel-logout": map[string]any{},
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	token.Header["kid"] = key.ID.String()
+
+	return token.SignedString(privKey)
+}
+
+// dispatchBackchannelLogout sends logout_tokens to all RPs with backchannel_logout_uri.
+func (s *Service) dispatchBackchannelLogout(userID uuid.UUID) {
+	clients, err := s.clientFinder.FindClientsWithBackchannelLogout(userID)
+	if err != nil {
+		slog.Error("failed to find clients for backchannel logout", "user_id", userID, "error", err)
+		return
+	}
+
+	for _, client := range clients {
+		if client.BackchannelLogoutURI == nil {
+			continue
+		}
+		go func(c model.OAuthClient) {
+			logoutToken, err := s.GenerateLogoutToken(userID, c.ID)
+			if err != nil {
+				slog.Error("failed to generate logout token", "client_id", c.ID, "error", err)
+				return
+			}
+
+			httpClient := &http.Client{Timeout: 5 * time.Second}
+			resp, err := httpClient.PostForm(*c.BackchannelLogoutURI, url.Values{
+				"logout_token": {logoutToken},
+			})
+			if err != nil {
+				slog.Warn("backchannel logout request failed", "client_id", c.ID, "uri", *c.BackchannelLogoutURI, "error", err)
+				return
+			}
+			resp.Body.Close()
+
+			if resp.StatusCode == http.StatusOK {
+				slog.Info("backchannel logout succeeded", "client_id", c.ID)
+			} else {
+				slog.Warn("backchannel logout returned non-200", "client_id", c.ID, "status", resp.StatusCode)
+			}
+		}(client)
+	}
 }

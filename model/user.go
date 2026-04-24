@@ -72,10 +72,20 @@ func (u *User) OIDCClaims(scopes []string) map[string]any {
 		if u.AvatarURL != nil {
 			claims["picture"] = *u.AvatarURL
 		}
-		if u.Phone != nil {
-			claims["phone_number"] = *u.Phone
-		}
 		claims["updated_at"] = u.UpdatedAt.Unix()
+
+		meta := u.GetProfileMetadata()
+		setIfNotNil(claims, "given_name", meta.GivenName)
+		setIfNotNil(claims, "family_name", meta.FamilyName)
+		setIfNotNil(claims, "middle_name", meta.MiddleName)
+		setIfNotNil(claims, "nickname", meta.Nickname)
+		setIfNotNil(claims, "preferred_username", meta.PreferredUsername)
+		setIfNotNil(claims, "profile", meta.ProfileURL)
+		setIfNotNil(claims, "website", meta.Website)
+		setIfNotNil(claims, "gender", meta.Gender)
+		setIfNotNil(claims, "birthdate", meta.Birthdate)
+		setIfNotNil(claims, "zoneinfo", meta.Zoneinfo)
+		setIfNotNil(claims, "locale", meta.Locale)
 	}
 
 	if scopeSet["email"] {
@@ -83,7 +93,30 @@ func (u *User) OIDCClaims(scopes []string) map[string]any {
 		claims["email_verified"] = u.EmailVerified
 	}
 
+	if scopeSet["phone"] {
+		if u.Phone != nil {
+			claims["phone_number"] = *u.Phone
+		}
+		meta := u.GetProfileMetadata()
+		if meta.PhoneVerified != nil {
+			claims["phone_number_verified"] = *meta.PhoneVerified
+		}
+	}
+
+	if scopeSet["address"] {
+		meta := u.GetProfileMetadata()
+		if meta.Address != nil {
+			claims["address"] = meta.Address
+		}
+	}
+
 	return claims
+}
+
+func setIfNotNil(claims map[string]any, key string, val *string) {
+	if val != nil {
+		claims[key] = *val
+	}
 }
 
 // AdminView returns the full user data for admin endpoints.
@@ -97,3 +130,39 @@ func (u *User) AdminView() map[string]any {
 
 // UserID is a helper type for foreign keys.
 type UserID = uuid.UUID
+
+// ProfileMetadata holds OIDC standard claims stored in the Metadata JSONB field.
+type ProfileMetadata struct {
+	GivenName         *string       `json:"given_name,omitempty"`
+	FamilyName        *string       `json:"family_name,omitempty"`
+	MiddleName        *string       `json:"middle_name,omitempty"`
+	Nickname          *string       `json:"nickname,omitempty"`
+	PreferredUsername  *string       `json:"preferred_username,omitempty"`
+	ProfileURL        *string       `json:"profile,omitempty"`
+	Website           *string       `json:"website,omitempty"`
+	Gender            *string       `json:"gender,omitempty"`
+	Birthdate         *string       `json:"birthdate,omitempty"`
+	Zoneinfo          *string       `json:"zoneinfo,omitempty"`
+	Locale            *string       `json:"locale,omitempty"`
+	PhoneVerified     *bool         `json:"phone_number_verified,omitempty"`
+	Address           *AddressClaim `json:"address,omitempty"`
+}
+
+// AddressClaim represents the OIDC standard address claim (Section 5.1.1).
+type AddressClaim struct {
+	Formatted     *string `json:"formatted,omitempty"`
+	StreetAddress *string `json:"street_address,omitempty"`
+	Locality      *string `json:"locality,omitempty"`
+	Region        *string `json:"region,omitempty"`
+	PostalCode    *string `json:"postal_code,omitempty"`
+	Country       *string `json:"country,omitempty"`
+}
+
+// GetProfileMetadata unmarshals the Metadata JSONB into ProfileMetadata.
+func (u *User) GetProfileMetadata() ProfileMetadata {
+	var meta ProfileMetadata
+	if len(u.Metadata) > 0 {
+		_ = json.Unmarshal(u.Metadata, &meta)
+	}
+	return meta
+}

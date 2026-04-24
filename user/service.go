@@ -1,6 +1,7 @@
 package user
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -43,9 +44,10 @@ type LoginInput struct {
 }
 
 type UpdateProfileInput struct {
-	DisplayName *string `json:"display_name"`
-	AvatarURL   *string `json:"avatar_url"`
-	Phone       *string `json:"phone"`
+	DisplayName *string                `json:"display_name"`
+	AvatarURL   *string                `json:"avatar_url"`
+	Phone       *string                `json:"phone"`
+	Metadata    *model.ProfileMetadata `json:"metadata"`
 }
 
 type ChangePasswordInput struct {
@@ -207,6 +209,15 @@ func (s *Service) UpdateProfile(id uuid.UUID, input UpdateProfileInput) (*model.
 	}
 	if input.Phone != nil {
 		user.Phone = input.Phone
+	}
+	if input.Metadata != nil {
+		merged := user.GetProfileMetadata()
+		mergeProfileMetadata(&merged, input.Metadata)
+		raw, err := json.Marshal(merged)
+		if err != nil {
+			return nil, pkg.ErrInternal("failed to marshal metadata")
+		}
+		user.Metadata = raw
 	}
 
 	if err := s.repo.Update(user); err != nil {
@@ -384,4 +395,47 @@ func (s *Service) incrementFailedAttempts(user *model.User) {
 	}
 
 	_ = s.repo.UpdateFields(user.ID, fields)
+}
+
+// mergeProfileMetadata updates dst fields with non-nil values from src.
+func mergeProfileMetadata(dst *model.ProfileMetadata, src *model.ProfileMetadata) {
+	if src.GivenName != nil {
+		dst.GivenName = src.GivenName
+	}
+	if src.FamilyName != nil {
+		dst.FamilyName = src.FamilyName
+	}
+	if src.MiddleName != nil {
+		dst.MiddleName = src.MiddleName
+	}
+	if src.Nickname != nil {
+		dst.Nickname = src.Nickname
+	}
+	if src.PreferredUsername != nil {
+		dst.PreferredUsername = src.PreferredUsername
+	}
+	if src.ProfileURL != nil {
+		dst.ProfileURL = src.ProfileURL
+	}
+	if src.Website != nil {
+		dst.Website = src.Website
+	}
+	if src.Gender != nil {
+		dst.Gender = src.Gender
+	}
+	if src.Birthdate != nil {
+		dst.Birthdate = src.Birthdate
+	}
+	if src.Zoneinfo != nil {
+		dst.Zoneinfo = src.Zoneinfo
+	}
+	if src.Locale != nil {
+		dst.Locale = src.Locale
+	}
+	if src.PhoneVerified != nil {
+		dst.PhoneVerified = src.PhoneVerified
+	}
+	if src.Address != nil {
+		dst.Address = src.Address
+	}
 }
