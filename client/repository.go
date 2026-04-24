@@ -57,3 +57,11 @@ func (r *Repository) List(page, perPage int) ([]model.OAuthClient, int64, error)
 func (r *Repository) Delete(id uuid.UUID) error {
 	return r.db.Where("id = ?", id).Delete(&model.OAuthClient{}).Error
 }
+
+func (r *Repository) FindClientsWithBackchannelLogout(userID uuid.UUID) ([]model.OAuthClient, error) {
+	var clients []model.OAuthClient
+	err := r.db.Where("backchannel_logout_uri IS NOT NULL AND active = TRUE AND id IN (?)",
+		r.db.Table("consents").Select("client_id").Where("user_id = ? AND revoked_at IS NULL", userID),
+	).Find(&clients).Error
+	return clients, err
+}

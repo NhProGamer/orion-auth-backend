@@ -20,8 +20,10 @@ type OAuthClient struct {
 	AccessTokenTTL  int            `gorm:"default:3600" json:"access_token_ttl"`
 	RefreshTokenTTL int            `gorm:"default:86400" json:"refresh_token_ttl"`
 	IDTokenTTL      int            `gorm:"default:3600" json:"id_token_ttl"`
-	PostLogoutRedirectURIs pq.StringArray `gorm:"type:text[];default:'{}'" json:"post_logout_redirect_uris"`
-	Active                bool           `gorm:"default:true" json:"active"`
+	PostLogoutRedirectURIs         pq.StringArray `gorm:"type:text[];default:'{}'" json:"post_logout_redirect_uris"`
+	BackchannelLogoutURI           *string        `gorm:"type:varchar(512)" json:"backchannel_logout_uri,omitempty"`
+	BackchannelLogoutSessionReq    bool           `gorm:"column:backchannel_logout_session_required;default:false" json:"backchannel_logout_session_required"`
+	Active                         bool           `gorm:"default:true" json:"active"`
 }
 
 func (OAuthClient) TableName() string {
