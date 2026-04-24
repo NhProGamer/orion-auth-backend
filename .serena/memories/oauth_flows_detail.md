@@ -69,7 +69,7 @@
 - Returns access_denied if user denied
 - Returns token response when approved
 
-## 5. Implicit Flow (deprecated)
+## 5. Implicit Flow (REMOVED - OAuth 2.1)
 - Triggered when response_type=token in /authorize flow
 - Returns access_token directly in AuthorizeConsentResponse
 - No refresh token, no authorization code
