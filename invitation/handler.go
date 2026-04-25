@@ -11,9 +11,22 @@ import (
 	"orion-auth-backend/pkg"
 )
 
+// FederationProviderInfo is the public-safe info for a federation provider.
+type FederationProviderInfo struct {
+	Name        string  `json:"name"`
+	DisplayName *string `json:"display_name,omitempty"`
+	Type        string  `json:"type"`
+}
+
+// FederationLister lists active federation providers (avoids circular import).
+type FederationLister interface {
+	ListActiveProviders() ([]FederationProviderInfo, error)
+}
+
 type Handler struct {
-	service      *Service
-	auditService *audit.Service
+	service          *Service
+	auditService     *audit.Service
+	federationLister FederationLister
 }
 
 func NewHandler(service *Service) *Handler {
@@ -22,6 +35,10 @@ func NewHandler(service *Service) *Handler {
 
 func (h *Handler) SetAuditService(s *audit.Service) {
 	h.auditService = s
+}
+
+func (h *Handler) SetFederationLister(fl FederationLister) {
+	h.federationLister = fl
 }
 
 func (h *Handler) RegisterPublicRoutes(public *gin.RouterGroup) {
@@ -36,9 +53,22 @@ func (h *Handler) RegisterPublicRoutes(public *gin.RouterGroup) {
 // @Success      200 {object} map[string]any
 // @Router       /api/v1/auth/settings [get]
 func (h *Handler) PublicSettings(c *gin.Context) {
-	pkg.OK(c, gin.H{
+	resp := gin.H{
 		"registration_enabled": h.service.IsRegistrationEnabled(),
-	})
+	}
+
+	if h.federationLister != nil {
+		providers, err := h.federationLister.ListActiveProviders()
+		if err == nil {
+			resp["federation_providers"] = providers
+		} else {
+			resp["federation_providers"] = []FederationProviderInfo{}
+		}
+	} else {
+		resp["federation_providers"] = []FederationProviderInfo{}
+	}
+
+	pkg.OK(c, resp)
 }
 
 func (h *Handler) RegisterAdminRoutes(admin *gin.RouterGroup) {

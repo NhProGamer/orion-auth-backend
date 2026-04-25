@@ -155,6 +155,7 @@ func main() {
 	rbacHandler.SetAuditService(auditService)
 	fedHandler.SetAuditService(auditService)
 	invHandler.SetAuditService(auditService)
+	invHandler.SetFederationLister(&federationListerAdapter{fedService: fedService})
 	policyHandler.SetAuditService(auditService)
 	resourceHandler.SetAuditService(auditService)
 
@@ -415,6 +416,27 @@ func seedAdminClient(db *gorm.DB, issuer string) {
 	slog.Warn("Client ID: " + adminClientID)
 	slog.Warn("Public client (no secret, PKCE required)")
 	slog.Warn("========================================")
+}
+
+// federationListerAdapter adapts federation.Service to invitation.FederationLister.
+type federationListerAdapter struct {
+	fedService *federation.Service
+}
+
+func (a *federationListerAdapter) ListActiveProviders() ([]invitation.FederationProviderInfo, error) {
+	providers, err := a.fedService.ListActiveProviders()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]invitation.FederationProviderInfo, len(providers))
+	for i, p := range providers {
+		result[i] = invitation.FederationProviderInfo{
+			Name:        p.Name,
+			DisplayName: p.DisplayName,
+			Type:        p.Type,
+		}
+	}
+	return result, nil
 }
 
 // healthCheck godoc

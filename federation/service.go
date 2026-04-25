@@ -90,6 +90,21 @@ func (s *Service) ListProviders() ([]model.FederationProvider, error) {
 	return s.repo.ListProviders()
 }
 
+// ListActiveProviders returns only active providers (for public exposure).
+func (s *Service) ListActiveProviders() ([]model.FederationProvider, error) {
+	providers, err := s.repo.ListProviders()
+	if err != nil {
+		return nil, err
+	}
+	var active []model.FederationProvider
+	for _, p := range providers {
+		if p.Active {
+			active = append(active, p)
+		}
+	}
+	return active, nil
+}
+
 func (s *Service) UpdateProvider(id uuid.UUID, input UpdateProviderInput) (*model.FederationProvider, error) {
 	p, err := s.GetProvider(id)
 	if err != nil {
