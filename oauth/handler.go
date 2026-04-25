@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 
 	"orion-auth-backend/audit"
 	"orion-auth-backend/middleware"
@@ -97,7 +98,7 @@ func (h *Handler) Authorize(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.service.InitAuthorize(client, InitAuthorizeParams{
+	params := InitAuthorizeParams{
 		RedirectURI:         c.Query("redirect_uri"),
 		ResponseType:        c.Query("response_type"),
 		Scope:               c.Query("scope"),
@@ -116,7 +117,19 @@ func (h *Handler) Authorize(c *gin.Context) {
 		Claims:              c.Query("claims"),
 		IDTokenHint:         c.Query("id_token_hint"),
 		ResponseMode:        c.Query("response_mode"),
-	})
+	}
+
+	// JAR (RFC 9101): if request param is present, parse JWT and override params
+	if requestJWT := c.Query("request"); requestJWT != "" {
+		jarParams, jarErr := parseRequestObject(requestJWT)
+		if jarErr != nil {
+			pkg.HandleError(c, pkg.ErrInvalidRequest("invalid request object: "+jarErr.Error()))
+			return
+		}
+		mergeJARParams(&params, jarParams)
+	}
+
+	resp, err := h.service.InitAuthorize(client, params)
 	if err != nil {
 		pkg.HandleError(c, err)
 		return
@@ -556,4 +569,74 @@ func (h *Handler) handleDeviceCodeGrant(c *gin.Context, client *model.OAuthClien
 	}
 
 	pkg.OK(c, resp)
+}
+
+// parseRequestObject parses a JWT Request Object (RFC 9101) without signature verification.
+func parseRequestObject(requestJWT string) (map[string]string, error) {
+	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
+	token, _, err := parser.ParseUnverified(requestJWT, jwt.MapClaims{})
+	if err != nil {
+		return nil, err
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, err
+	}
+
+	result := make(map[string]string)
+	for key, val := range claims {
+		if str, ok := val.(string); ok {
+			result[key] = str
+		}
+	}
+	return result, nil
+}
+
+// mergeJARParams overrides InitAuthorizeParams with values from the Request Object.
+func mergeJARParams(params *InitAuthorizeParams, jar map[string]string) {
+	if v := jar["redirect_uri"]; v != "" {
+		params.RedirectURI = v
+	}
+	if v := jar["response_type"]; v != "" {
+		params.ResponseType = v
+	}
+	if v := jar["scope"]; v != "" {
+		params.Scope = v
+	}
+	if v := jar["state"]; v != "" {
+		params.State = v
+	}
+	if v := jar["nonce"]; v != "" {
+		params.Nonce = v
+	}
+	if v := jar["code_challenge"]; v != "" {
+		params.CodeChallenge = v
+	}
+	if v := jar["code_challenge_method"]; v != "" {
+		params.CodeChallengeMethod = v
+	}
+	if v := jar["audience"]; v != "" {
+		params.Audience = v
+	}
+	if v := jar["prompt"]; v != "" {
+		params.Prompt = v
+	}
+	if v := jar["max_age"]; v != "" {
+		params.MaxAge = v
+	}
+	if v := jar["display"]; v != "" {
+		params.Display = v
+	}
+	if v := jar["login_hint"]; v != "" {
+		params.LoginHint = v
+	}
+	if v := jar["claims"]; v != "" {
+		params.Claims = v
+	}
+	if v := jar["id_token_hint"]; v != "" {
+		params.IDTokenHint = v
+	}
+	if v := jar["response_mode"]; v != "" {
+		params.ResponseMode = v
+	}
 }

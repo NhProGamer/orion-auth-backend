@@ -424,7 +424,7 @@ func (s *Service) GetDiscovery() OpenIDConfiguration {
 		},
 		CodeChallengeMethodsSupported:              []string{"S256"},
 		ResponseModesSupported:                     []string{"query", "fragment", "form_post"},
-		RequestParameterSupported:                  false,
+		RequestParameterSupported:                  true,
 		RequestURIParameterSupported:               false,
 		ClaimsParameterSupported:                   true,
 		BackchannelLogoutSupported:                 true,
