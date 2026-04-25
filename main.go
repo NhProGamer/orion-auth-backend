@@ -248,6 +248,9 @@ func setupRouter(
 
 	// Dynamic Client Registration (RFC 7591)
 	router.POST("/register", oauthRL.Middleware(), dcrHandler.Register)
+	router.GET("/register/:client_id", dcrHandler.ReadRegistration)
+	router.PUT("/register/:client_id", dcrHandler.UpdateRegistration)
+	router.DELETE("/register/:client_id", dcrHandler.DeleteRegistration)
 
 	// OIDC endpoints (root level)
 	bearerAuthMiddleware := middleware.BearerAuth(db)

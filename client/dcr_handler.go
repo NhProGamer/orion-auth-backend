@@ -2,15 +2,19 @@ package client
 
 import (
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/lib/pq"
 
 	"orion-auth-backend/crypto"
+	"orion-auth-backend/model"
 	"orion-auth-backend/pkg"
 )
 
-// DCRHandler handles Dynamic Client Registration (RFC 7591).
+// DCRHandler handles Dynamic Client Registration (RFC 7591 + RFC 7592).
 type DCRHandler struct {
 	service *Service
 }
@@ -38,6 +42,8 @@ type DCRRequest struct {
 type DCRResponse struct {
 	ClientID                string   `json:"client_id"`
 	ClientSecret            string   `json:"client_secret,omitempty"`
+	ClientIDIssuedAt        int64    `json:"client_id_issued_at"`
+	ClientSecretExpiresAt   int64    `json:"client_secret_expires_at"`
 	ClientName              string   `json:"client_name"`
 	RedirectURIs            []string `json:"redirect_uris"`
 	GrantTypes              []string `json:"grant_types"`
@@ -107,6 +113,8 @@ func (h *DCRHandler) Register(c *gin.Context) {
 	resp := DCRResponse{
 		ClientID:                result.Client.ID.String(),
 		ClientSecret:            result.ClientSecret,
+		ClientIDIssuedAt:        time.Now().Unix(),
+		ClientSecretExpiresAt:   0,
 		ClientName:              result.Client.Name,
 		RedirectURIs:            result.Client.RedirectURIs,
 		GrantTypes:              result.Client.GrantTypes,
@@ -116,6 +124,124 @@ func (h *DCRHandler) Register(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, resp)
+}
+
+// ReadRegistration handles GET /register/:client_id (RFC 7592).
+func (h *DCRHandler) ReadRegistration(c *gin.Context) {
+	client, err := h.authenticateRAT(c)
+	if err != nil {
+		return
+	}
+
+	resp := DCRResponse{
+		ClientID:                client.ID.String(),
+		ClientIDIssuedAt:        client.CreatedAt.Unix(),
+		ClientSecretExpiresAt:   0,
+		ClientName:              client.Name,
+		RedirectURIs:            client.RedirectURIs,
+		GrantTypes:              client.GrantTypes,
+		ResponseTypes:           client.ResponseTypes,
+		TokenEndpointAuthMethod: client.TokenAuthMethod,
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
+// UpdateRegistration handles PUT /register/:client_id (RFC 7592).
+func (h *DCRHandler) UpdateRegistration(c *gin.Context) {
+	client, err := h.authenticateRAT(c)
+	if err != nil {
+		return
+	}
+
+	var req DCRRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		pkg.HandleError(c, pkg.ErrInvalidRequest("invalid request body"))
+		return
+	}
+
+	if req.ClientName != "" {
+		client.Name = req.ClientName
+	}
+	if len(req.RedirectURIs) > 0 {
+		client.RedirectURIs = pq.StringArray(req.RedirectURIs)
+	}
+	if len(req.GrantTypes) > 0 {
+		client.GrantTypes = pq.StringArray(req.GrantTypes)
+	}
+	if len(req.ResponseTypes) > 0 {
+		client.ResponseTypes = pq.StringArray(req.ResponseTypes)
+	}
+	if req.TokenEndpointAuthMethod != "" {
+		client.TokenAuthMethod = req.TokenEndpointAuthMethod
+	}
+	if req.Scope != "" {
+		client.Scopes = pq.StringArray(splitScopes(req.Scope))
+	}
+
+	if err := h.service.repo.Update(client); err != nil {
+		pkg.HandleError(c, pkg.ErrInternal("failed to update client"))
+		return
+	}
+
+	resp := DCRResponse{
+		ClientID:                client.ID.String(),
+		ClientIDIssuedAt:        client.CreatedAt.Unix(),
+		ClientSecretExpiresAt:   0,
+		ClientName:              client.Name,
+		RedirectURIs:            client.RedirectURIs,
+		GrantTypes:              client.GrantTypes,
+		ResponseTypes:           client.ResponseTypes,
+		TokenEndpointAuthMethod: client.TokenAuthMethod,
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
+// DeleteRegistration handles DELETE /register/:client_id (RFC 7592).
+func (h *DCRHandler) DeleteRegistration(c *gin.Context) {
+	client, err := h.authenticateRAT(c)
+	if err != nil {
+		return
+	}
+
+	if err := h.service.repo.Delete(client.ID); err != nil {
+		pkg.HandleError(c, pkg.ErrInternal("failed to delete client"))
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+// authenticateRAT validates the registration_access_token from the Bearer header.
+func (h *DCRHandler) authenticateRAT(c *gin.Context) (*model.OAuthClient, error) {
+	clientIDStr := c.Param("client_id")
+	clientID, err := uuid.Parse(clientIDStr)
+	if err != nil {
+		pkg.HandleError(c, pkg.ErrInvalidRequest("invalid client_id"))
+		return nil, err
+	}
+
+	authHeader := c.GetHeader("Authorization")
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		pkg.HandleError(c, pkg.ErrUnauthorized("missing registration_access_token"))
+		return nil, pkg.ErrUnauthorized("missing token")
+	}
+	rawToken := strings.TrimPrefix(authHeader, "Bearer ")
+	tokenHash := crypto.HashToken(rawToken)
+
+	client, err := h.service.repo.FindByID(clientID)
+	if err != nil || client == nil {
+		pkg.HandleError(c, pkg.ErrNotFound("client not found"))
+		return nil, pkg.ErrNotFound("client not found")
+	}
+
+	if client.RegistrationAccessTokenHash == nil || *client.RegistrationAccessTokenHash != tokenHash {
+		pkg.HandleError(c, pkg.ErrUnauthorized("invalid registration_access_token"))
+		return nil, pkg.ErrUnauthorized("invalid token")
+	}
+
+	return client, nil
 }
 
 func splitScopes(s string) []string {
