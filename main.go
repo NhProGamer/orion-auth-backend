@@ -158,8 +158,11 @@ func main() {
 	policyHandler.SetAuditService(auditService)
 	resourceHandler.SetAuditService(auditService)
 
+	// Dynamic Client Registration handler
+	dcrHandler := client.NewDCRHandler(clientService)
+
 	// Router
-	router := setupRouter(cfg, db, hasher, authRateLimiter, rbacService, userHandler, sessionHandler, clientHandler, oauthHandler, oidcHandler, mfaHandler, rbacHandler, auditHandler, fedHandler, invHandler, policyHandler, resourceHandler)
+	router := setupRouter(cfg, db, hasher, authRateLimiter, rbacService, userHandler, sessionHandler, clientHandler, oauthHandler, oidcHandler, mfaHandler, rbacHandler, auditHandler, fedHandler, invHandler, policyHandler, resourceHandler, dcrHandler)
 
 	// Server
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
@@ -214,6 +217,7 @@ func setupRouter(
 	invHandler *invitation.Handler,
 	policyHandler *policy.Handler,
 	resourceHandler *resource.Handler,
+	dcrHandler *client.DCRHandler,
 ) *gin.Engine {
 	gin.SetMode(cfg.Server.Mode)
 	router := gin.New()
@@ -241,6 +245,9 @@ func setupRouter(
 	jwksCache := middleware.NewJWKSCache()
 	clientAuthMiddleware := middleware.ClientAuth(db, hasher, cfg.Issuer+"/token", jwksCache)
 	oauthHandler.RegisterRoutes(router, clientAuthMiddleware, oauthRL.Middleware(), cfg.Issuer)
+
+	// Dynamic Client Registration (RFC 7591)
+	router.POST("/register", oauthRL.Middleware(), dcrHandler.Register)
 
 	// OIDC endpoints (root level)
 	bearerAuthMiddleware := middleware.BearerAuth(db)

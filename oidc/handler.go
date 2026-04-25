@@ -1,6 +1,8 @@
 package oidc
 
 import (
+	"net/http"
+
 	"github.com/gin-gonic/gin"
 
 	"orion-auth-backend/middleware"
@@ -21,6 +23,7 @@ func (h *Handler) RegisterRoutes(router *gin.Engine, bearerAuth, rateLimiter gin
 	router.GET("/userinfo", rateLimiter, bearerAuth, h.UserInfo)
 	router.POST("/userinfo", rateLimiter, bearerAuth, h.UserInfo)
 	router.GET("/end_session", h.EndSession)
+	router.GET("/check_session", h.CheckSession)
 }
 
 func (h *Handler) RegisterAdminRoutes(admin *gin.RouterGroup) {
@@ -128,4 +131,26 @@ func (h *Handler) RotateKey(c *gin.Context) {
 		return
 	}
 	pkg.OK(c, gin.H{"message": "signing key rotated"})
+}
+
+// CheckSession serves the OIDC Session Management check_session_iframe HTML page.
+func (h *Handler) CheckSession(c *gin.Context) {
+	html := `<!DOCTYPE html>
+<html><head><title>Check Session</title></head>
+<body>
+<script>
+window.addEventListener("message", function(e) {
+  var clientId = e.data.split(" ")[0];
+  var sessionState = e.data.split(" ")[1];
+  // Compare with cookie-based session state
+  var cookie = document.cookie.match(/orionauth_session_state=([^;]*)/);
+  var status = "changed";
+  if (cookie && cookie[1] === sessionState) {
+    status = "unchanged";
+  }
+  e.source.postMessage(status, e.origin);
+});
+</script>
+</body></html>`
+	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
 }

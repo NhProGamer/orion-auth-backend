@@ -25,6 +25,10 @@ type OAuthClient struct {
 	BackchannelLogoutSessionReq  bool           `gorm:"column:backchannel_logout_session_required;default:false" json:"backchannel_logout_session_required"`
 	FrontchannelLogoutURI        *string        `gorm:"type:varchar(512)" json:"frontchannel_logout_uri,omitempty"`
 	FrontchannelLogoutSessionReq bool           `gorm:"column:frontchannel_logout_session_required;default:false" json:"frontchannel_logout_session_required"`
+	SubjectType                  string         `gorm:"type:varchar(20);default:'public'" json:"subject_type"`
+	SectorIdentifierURI          *string        `gorm:"type:varchar(512)" json:"sector_identifier_uri,omitempty"`
+	UserinfoSignedResponseAlg    *string        `gorm:"type:varchar(10)" json:"userinfo_signed_response_alg,omitempty"`
+	RegistrationAccessTokenHash  *string        `gorm:"type:varchar(64)" json:"-"`
 	Active                       bool           `gorm:"default:true" json:"active"`
 }
 

@@ -396,6 +396,9 @@ type OpenIDConfiguration struct {
 	PushedAuthorizationRequestEndpoint         string   `json:"pushed_authorization_request_endpoint,omitempty"`
 	FrontchannelLogoutSupported                bool     `json:"frontchannel_logout_supported"`
 	FrontchannelLogoutSessionSupported         bool     `json:"frontchannel_logout_session_supported"`
+	CheckSessionIframe                         string   `json:"check_session_iframe,omitempty"`
+	UserinfoSigningAlgValuesSupported          []string `json:"userinfo_signing_alg_values_supported,omitempty"`
+	RegistrationEndpoint                       string   `json:"registration_endpoint,omitempty"`
 }
 
 func (s *Service) GetDiscovery() OpenIDConfiguration {
@@ -411,7 +414,7 @@ func (s *Service) GetDiscovery() OpenIDConfiguration {
 		EndSessionEndpoint:                s.issuer + "/end_session",
 		ResponseTypesSupported:            []string{"code", "code id_token", "code token", "code id_token token"},
 		GrantTypesSupported:               []string{"authorization_code", "client_credentials", "refresh_token", "urn:ietf:params:oauth:grant-type:device_code"},
-		SubjectTypesSupported:             []string{"public"},
+		SubjectTypesSupported:             []string{"public", "pairwise"},
 		IDTokenSigningAlgValuesSupported:  []string{"RS256"},
 		ScopesSupported:                   []string{"openid", "profile", "email", "phone", "address", "roles", "offline_access"},
 		TokenEndpointAuthMethodsSupported: []string{"client_secret_basic", "client_secret_post", "private_key_jwt", "none"},
@@ -436,6 +439,9 @@ func (s *Service) GetDiscovery() OpenIDConfiguration {
 		PushedAuthorizationRequestEndpoint:         s.issuer + "/par",
 		FrontchannelLogoutSupported:                true,
 		FrontchannelLogoutSessionSupported:         true,
+		CheckSessionIframe:                         s.issuer + "/check_session",
+		UserinfoSigningAlgValuesSupported:          []string{"RS256"},
+		RegistrationEndpoint:                       s.issuer + "/register",
 	}
 }
 
@@ -471,6 +477,15 @@ func (s *Service) enrichClaimsWithRoles(userID uuid.UUID, scopes []string, claim
 			return
 		}
 	}
+}
+
+// ComputePairwiseSub computes a pairwise pseudonymous subject identifier.
+// It uses HMAC-SHA256 with a server salt, the sector identifier, and the user ID.
+func ComputePairwiseSub(sectorIdentifier string, userID uuid.UUID, salt string) string {
+	key := []byte(salt)
+	data := sectorIdentifier + userID.String()
+	h := sha256.Sum256(append(key, []byte(data)...))
+	return base64.RawURLEncoding.EncodeToString(h[:])
 }
 
 // --- End Session (RP-Initiated Logout) ---
