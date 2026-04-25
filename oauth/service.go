@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -65,6 +66,8 @@ type IDTokenClaims struct {
 	Nonce           string
 	AuthTime        time.Time
 	ATHash          string
+	CHash           string
+	SHash           string
 	TTL             time.Duration
 	RequestedClaims string
 	ACR             string
@@ -194,8 +197,8 @@ type InitAuthorizeResponse struct {
 
 func (s *Service) InitAuthorize(client *model.OAuthClient, params InitAuthorizeParams) (*InitAuthorizeResponse, error) {
 	// Validate response_type
-	if params.ResponseType != "code" {
-		return nil, pkg.ErrUnsupportedResponseType("supported response_types: code")
+	if !isValidResponseType(params.ResponseType) {
+		return nil, pkg.ErrUnsupportedResponseType("supported response_types: code, code id_token, code token, code id_token token")
 	}
 
 	// Validate redirect_uri
@@ -653,6 +656,10 @@ type AuthorizeConsentResponse struct {
 	State        string `json:"state,omitempty"`
 	Issuer       string `json:"iss,omitempty"`
 	ResponseMode string `json:"response_mode,omitempty"`
+	AccessToken  string `json:"access_token,omitempty"`
+	TokenType    string `json:"token_type,omitempty"`
+	ExpiresIn    int    `json:"expires_in,omitempty"`
+	IDToken      string `json:"id_token,omitempty"`
 }
 
 func (s *Service) AuthorizeConsent(input AuthorizeConsentInput, ipAddress, userAgent string) (*AuthorizeConsentResponse, error) {
@@ -782,8 +789,88 @@ func (s *Service) completeAuthorize(req *model.AuthorizationRequest, ipAddress, 
 		resp.ResponseMode = *req.ResponseMode
 	}
 
+	// Hybrid flows: issue additional tokens in the authorization response
+	if isHybridResponseType(req.ResponseType) {
+		// Default to fragment for hybrid flows (OIDC Core Section 3.3)
+		if resp.ResponseMode == "" {
+			resp.ResponseMode = "fragment"
+		}
+
+		// Issue access token if response_type includes "token"
+		if responseTypeIncludes(req.ResponseType, "token") {
+			client, err := s.repo.findClient(req.ClientID.String())
+			if err != nil {
+				return nil, pkg.ErrServerError("failed to look up client")
+			}
+			rawAT, atHash, err := crypto.GenerateOpaqueToken()
+			if err != nil {
+				return nil, pkg.ErrServerError("failed to generate access token")
+			}
+			accessToken := &model.AccessToken{
+				ID:        atHash,
+				ClientID:  client.ID,
+				UserID:    req.UserID,
+				SessionID: &sess.ID,
+				Scopes:    req.Scopes,
+				Audience:  req.Audience,
+				ExpiresAt: time.Now().Add(time.Duration(client.AccessTokenTTL) * time.Second),
+			}
+			if err := s.repo.CreateAccessToken(accessToken); err != nil {
+				return nil, pkg.ErrServerError("failed to store access token")
+			}
+			resp.AccessToken = rawAT
+			resp.TokenType = "Bearer"
+			resp.ExpiresIn = client.AccessTokenTTL
+		}
+
+		// Issue ID token if response_type includes "id_token"
+		if responseTypeIncludes(req.ResponseType, "id_token") && s.idTokenGen != nil {
+			client, err := s.repo.findClient(req.ClientID.String())
+			if err != nil {
+				return nil, pkg.ErrServerError("failed to look up client")
+			}
+			var nonce string
+			if req.Nonce != nil {
+				nonce = *req.Nonce
+			}
+			authTime := time.Now()
+			if req.AuthTime != nil {
+				authTime = *req.AuthTime
+			}
+			acr, amr := computeACR(req.AuthMethods)
+			idTokenClaims := IDTokenClaims{
+				UserID:   *req.UserID,
+				ClientID: req.ClientID,
+				Scopes:   req.Scopes,
+				Nonce:    nonce,
+				AuthTime: authTime,
+				TTL:      time.Duration(client.IDTokenTTL) * time.Second,
+				ACR:      acr,
+				AMR:      amr,
+			}
+			idToken, err := s.generateHybridIDToken(idTokenClaims, rawCode, resp.AccessToken, resp.State)
+			if err != nil {
+				slog.Warn("failed to generate hybrid ID token", "error", err)
+			} else {
+				resp.IDToken = idToken
+			}
+		}
+	}
+
 	slog.Info("authorization code issued", "client_id", req.ClientID, "user_id", req.UserID)
 	return resp, nil
+}
+
+// generateHybridIDToken creates an ID token for hybrid flows with c_hash and optional at_hash/s_hash.
+func (s *Service) generateHybridIDToken(claims IDTokenClaims, code, accessToken, state string) (string, error) {
+	claims.CHash = computeATHash(code)
+	if accessToken != "" {
+		claims.ATHash = computeATHash(accessToken)
+	}
+	if state != "" {
+		claims.SHash = computeATHash(state)
+	}
+	return s.idTokenGen.GenerateIDToken(claims)
 }
 
 // --- Token Exchange: Authorization Code ---
@@ -1184,6 +1271,27 @@ func verifyPKCE(codeVerifier, codeChallenge string) bool {
 	h := sha256.Sum256([]byte(codeVerifier))
 	computed := base64.RawURLEncoding.EncodeToString(h[:])
 	return subtle.ConstantTimeCompare([]byte(computed), []byte(codeChallenge)) == 1
+}
+
+func isValidResponseType(rt string) bool {
+	switch rt {
+	case "code", "code id_token", "code token", "code id_token token":
+		return true
+	}
+	return false
+}
+
+func isHybridResponseType(rt string) bool {
+	return rt != "code" && isValidResponseType(rt)
+}
+
+func responseTypeIncludes(rt, part string) bool {
+	for _, p := range strings.Split(rt, " ") {
+		if p == part {
+			return true
+		}
+	}
+	return false
 }
 
 func computeACR(authMethods []string) (string, []string) {

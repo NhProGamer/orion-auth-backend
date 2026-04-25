@@ -21,6 +21,8 @@ func (a *IDTokenAdapter) GenerateIDToken(claims oauth.IDTokenClaims) (string, er
 		Nonce:           claims.Nonce,
 		AuthTime:        claims.AuthTime,
 		ATHash:          claims.ATHash,
+		CHash:           claims.CHash,
+		SHash:           claims.SHash,
 		TTL:             claims.TTL,
 		RequestedClaims: claims.RequestedClaims,
 		ACR:             claims.ACR,

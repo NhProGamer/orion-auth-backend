@@ -161,6 +161,8 @@ type IDTokenClaims struct {
 	Nonce           string
 	AuthTime        time.Time
 	ATHash          string // access token hash
+	CHash           string // authorization code hash (hybrid flows)
+	SHash           string // state hash (hybrid flows)
 	TTL             time.Duration
 	RequestedClaims string // JSON claims parameter from the authorization request
 	ACR             string
@@ -193,6 +195,13 @@ func (s *Service) GenerateIDToken(claims IDTokenClaims) (string, error) {
 
 	if claims.ATHash != "" {
 		jwtClaims["at_hash"] = claims.ATHash
+	}
+
+	if claims.CHash != "" {
+		jwtClaims["c_hash"] = claims.CHash
+	}
+	if claims.SHash != "" {
+		jwtClaims["s_hash"] = claims.SHash
 	}
 
 	if claims.ACR != "" {
@@ -359,30 +368,30 @@ func (s *Service) GetJWKS() JWKS {
 // --- Discovery ---
 
 type OpenIDConfiguration struct {
-	Issuer                            string   `json:"issuer"`
-	AuthorizationEndpoint             string   `json:"authorization_endpoint"`
-	TokenEndpoint                     string   `json:"token_endpoint"`
-	UserinfoEndpoint                  string   `json:"userinfo_endpoint"`
-	JwksURI                           string   `json:"jwks_uri"`
-	IntrospectionEndpoint             string   `json:"introspection_endpoint"`
-	RevocationEndpoint                string   `json:"revocation_endpoint"`
-	DeviceAuthorizationEndpoint       string   `json:"device_authorization_endpoint"`
-	EndSessionEndpoint                string   `json:"end_session_endpoint"`
-	ResponseTypesSupported            []string `json:"response_types_supported"`
-	GrantTypesSupported               []string `json:"grant_types_supported"`
-	SubjectTypesSupported             []string `json:"subject_types_supported"`
-	IDTokenSigningAlgValuesSupported  []string `json:"id_token_signing_alg_values_supported"`
-	ScopesSupported                   []string `json:"scopes_supported"`
-	TokenEndpointAuthMethodsSupported []string `json:"token_endpoint_auth_methods_supported"`
-	ClaimsSupported                   []string `json:"claims_supported"`
-	CodeChallengeMethodsSupported     []string `json:"code_challenge_methods_supported"`
-	ResponseModesSupported            []string `json:"response_modes_supported"`
-	RequestParameterSupported         bool     `json:"request_parameter_supported"`
-	RequestURIParameterSupported      bool     `json:"request_uri_parameter_supported"`
-	ClaimsParameterSupported          bool     `json:"claims_parameter_supported"`
-	BackchannelLogoutSupported                bool `json:"backchannel_logout_supported"`
-	BackchannelLogoutSessionSupported         bool `json:"backchannel_logout_session_supported"`
-	AuthorizationResponseIssParameterSupported bool `json:"authorization_response_iss_parameter_supported"`
+	Issuer                                     string   `json:"issuer"`
+	AuthorizationEndpoint                      string   `json:"authorization_endpoint"`
+	TokenEndpoint                              string   `json:"token_endpoint"`
+	UserinfoEndpoint                           string   `json:"userinfo_endpoint"`
+	JwksURI                                    string   `json:"jwks_uri"`
+	IntrospectionEndpoint                      string   `json:"introspection_endpoint"`
+	RevocationEndpoint                         string   `json:"revocation_endpoint"`
+	DeviceAuthorizationEndpoint                string   `json:"device_authorization_endpoint"`
+	EndSessionEndpoint                         string   `json:"end_session_endpoint"`
+	ResponseTypesSupported                     []string `json:"response_types_supported"`
+	GrantTypesSupported                        []string `json:"grant_types_supported"`
+	SubjectTypesSupported                      []string `json:"subject_types_supported"`
+	IDTokenSigningAlgValuesSupported           []string `json:"id_token_signing_alg_values_supported"`
+	ScopesSupported                            []string `json:"scopes_supported"`
+	TokenEndpointAuthMethodsSupported          []string `json:"token_endpoint_auth_methods_supported"`
+	ClaimsSupported                            []string `json:"claims_supported"`
+	CodeChallengeMethodsSupported              []string `json:"code_challenge_methods_supported"`
+	ResponseModesSupported                     []string `json:"response_modes_supported"`
+	RequestParameterSupported                  bool     `json:"request_parameter_supported"`
+	RequestURIParameterSupported               bool     `json:"request_uri_parameter_supported"`
+	ClaimsParameterSupported                   bool     `json:"claims_parameter_supported"`
+	BackchannelLogoutSupported                 bool     `json:"backchannel_logout_supported"`
+	BackchannelLogoutSessionSupported          bool     `json:"backchannel_logout_session_supported"`
+	AuthorizationResponseIssParameterSupported bool     `json:"authorization_response_iss_parameter_supported"`
 }
 
 func (s *Service) GetDiscovery() OpenIDConfiguration {
@@ -396,7 +405,7 @@ func (s *Service) GetDiscovery() OpenIDConfiguration {
 		RevocationEndpoint:                s.issuer + "/revoke",
 		DeviceAuthorizationEndpoint:       s.issuer + "/device_authorization",
 		EndSessionEndpoint:                s.issuer + "/end_session",
-		ResponseTypesSupported:            []string{"code"},
+		ResponseTypesSupported:            []string{"code", "code id_token", "code token", "code id_token token"},
 		GrantTypesSupported:               []string{"authorization_code", "client_credentials", "refresh_token", "urn:ietf:params:oauth:grant-type:device_code"},
 		SubjectTypesSupported:             []string{"public"},
 		IDTokenSigningAlgValuesSupported:  []string{"RS256"},
@@ -412,11 +421,11 @@ func (s *Service) GetDiscovery() OpenIDConfiguration {
 			"phone_number", "phone_number_verified",
 			"address", "updated_at", "roles", "groups",
 		},
-		CodeChallengeMethodsSupported:     []string{"S256"},
-		ResponseModesSupported:            []string{"query", "fragment", "form_post"},
-		RequestParameterSupported:         false,
-		RequestURIParameterSupported:      false,
-		ClaimsParameterSupported:          true,
+		CodeChallengeMethodsSupported:              []string{"S256"},
+		ResponseModesSupported:                     []string{"query", "fragment", "form_post"},
+		RequestParameterSupported:                  false,
+		RequestURIParameterSupported:               false,
+		ClaimsParameterSupported:                   true,
 		BackchannelLogoutSupported:                 true,
 		BackchannelLogoutSessionSupported:          true,
 		AuthorizationResponseIssParameterSupported: true,
