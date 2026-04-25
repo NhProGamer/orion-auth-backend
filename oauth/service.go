@@ -281,9 +281,9 @@ func (s *Service) InitAuthorize(client *model.OAuthClient, params InitAuthorizeP
 		return nil, pkg.ErrUnauthorizedClient("client is not authorized for authorization_code grant")
 	}
 
-	// Validate PKCE for public clients
-	if client.IsPublic && params.CodeChallenge == "" {
-		return nil, pkg.ErrInvalidRequest("PKCE (code_challenge) is required for public clients")
+	// OAuth 2.1: PKCE is required for ALL clients
+	if params.CodeChallenge == "" {
+		return nil, pkg.ErrInvalidRequest("PKCE (code_challenge) is required")
 	}
 
 	// Only S256 allowed

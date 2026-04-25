@@ -406,7 +406,7 @@ func TestInitAuthorize_Success(t *testing.T) {
 	svc := newTestService(oauthRepo, &mockUserRepo{}, &mockSessionRepo{})
 	client := newTestClient()
 
-	resp, err := svc.InitAuthorize(client, InitAuthorizeParams{RedirectURI: "https://example.com/callback", ResponseType: "code", Scope: "openid profile", State: "state123", Nonce: "nonce123"})
+	resp, err := svc.InitAuthorize(client, InitAuthorizeParams{RedirectURI: "https://example.com/callback", ResponseType: "code", Scope: "openid profile", State: "state123", Nonce: "nonce123", CodeChallenge: "test-challenge", CodeChallengeMethod: "S256"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -429,7 +429,7 @@ func TestInitAuthorize_FirstPartyNoConsent(t *testing.T) {
 	svc := newTestService(&mockOAuthRepo{}, &mockUserRepo{}, &mockSessionRepo{})
 	client := newFirstPartyClient()
 
-	resp, err := svc.InitAuthorize(client, InitAuthorizeParams{RedirectURI: "https://example.com/callback", ResponseType: "code", Scope: "openid"})
+	resp, err := svc.InitAuthorize(client, InitAuthorizeParams{RedirectURI: "https://example.com/callback", ResponseType: "code", Scope: "openid", CodeChallenge: "test-challenge", CodeChallengeMethod: "S256"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -463,9 +463,9 @@ func TestInitAuthorize_GrantTypeNotAllowed(t *testing.T) {
 	assertOAuthErrorCode(t, err, "unauthorized_client")
 }
 
-func TestInitAuthorize_PublicClientRequiresPKCE(t *testing.T) {
+func TestInitAuthorize_RequiresPKCE(t *testing.T) {
 	svc := newTestService(&mockOAuthRepo{}, &mockUserRepo{}, &mockSessionRepo{})
-	client := newPublicClient()
+	client := newTestClient()
 
 	_, err := svc.InitAuthorize(client, InitAuthorizeParams{RedirectURI: "https://example.com/callback", ResponseType: "code", Scope: "openid"})
 	assertOAuthErrorCode(t, err, "invalid_request")
@@ -504,7 +504,7 @@ func TestInitAuthorize_InvalidScopes(t *testing.T) {
 	svc := newTestService(&mockOAuthRepo{}, &mockUserRepo{}, &mockSessionRepo{})
 	client := newTestClient()
 
-	_, err := svc.InitAuthorize(client, InitAuthorizeParams{RedirectURI: "https://example.com/callback", ResponseType: "code", Scope: "unknown_scope"})
+	_, err := svc.InitAuthorize(client, InitAuthorizeParams{RedirectURI: "https://example.com/callback", ResponseType: "code", Scope: "unknown_scope", CodeChallenge: "test-challenge", CodeChallengeMethod: "S256"})
 	assertOAuthErrorCode(t, err, "invalid_scope")
 }
 
@@ -530,10 +530,11 @@ func TestInitAuthorize_PromptLogin(t *testing.T) {
 	client := newFirstPartyClient()
 
 	resp, err := svc.InitAuthorize(client, InitAuthorizeParams{
-		RedirectURI:  "https://example.com/callback",
-		ResponseType: "code",
-		Scope:        "openid",
-		Prompt:       "login",
+		RedirectURI:   "https://example.com/callback",
+		ResponseType:  "code",
+		Scope:         "openid",
+		CodeChallenge: "test-challenge",
+		Prompt:        "login",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -551,10 +552,11 @@ func TestInitAuthorize_PromptConsent(t *testing.T) {
 	client := newFirstPartyClient() // first-party normally skips consent
 
 	resp, err := svc.InitAuthorize(client, InitAuthorizeParams{
-		RedirectURI:  "https://example.com/callback",
-		ResponseType: "code",
-		Scope:        "openid",
-		Prompt:       "consent",
+		RedirectURI:   "https://example.com/callback",
+		ResponseType:  "code",
+		Scope:         "openid",
+		CodeChallenge: "test-challenge",
+		Prompt:        "consent",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -569,10 +571,11 @@ func TestInitAuthorize_PromptSelectAccount(t *testing.T) {
 	client := newTestClient()
 
 	_, err := svc.InitAuthorize(client, InitAuthorizeParams{
-		RedirectURI:  "https://example.com/callback",
-		ResponseType: "code",
-		Scope:        "openid",
-		Prompt:       "select_account",
+		RedirectURI:   "https://example.com/callback",
+		ResponseType:  "code",
+		Scope:         "openid",
+		CodeChallenge: "test-challenge",
+		Prompt:        "select_account",
 	})
 	assertOAuthErrorCode(t, err, "account_selection_required")
 }
@@ -582,10 +585,11 @@ func TestInitAuthorize_PromptNone_NoHint(t *testing.T) {
 	client := newTestClient()
 
 	_, err := svc.InitAuthorize(client, InitAuthorizeParams{
-		RedirectURI:  "https://example.com/callback",
-		ResponseType: "code",
-		Scope:        "openid",
-		Prompt:       "none",
+		RedirectURI:   "https://example.com/callback",
+		ResponseType:  "code",
+		Scope:         "openid",
+		CodeChallenge: "test-challenge",
+		Prompt:        "none",
 	})
 	assertOAuthErrorCode(t, err, "login_required")
 }
@@ -595,10 +599,11 @@ func TestInitAuthorize_InvalidPromptValue(t *testing.T) {
 	client := newTestClient()
 
 	_, err := svc.InitAuthorize(client, InitAuthorizeParams{
-		RedirectURI:  "https://example.com/callback",
-		ResponseType: "code",
-		Scope:        "openid",
-		Prompt:       "invalid_value",
+		RedirectURI:   "https://example.com/callback",
+		ResponseType:  "code",
+		Scope:         "openid",
+		CodeChallenge: "test-challenge",
+		Prompt:        "invalid_value",
 	})
 	assertOAuthErrorCode(t, err, "invalid_request")
 }
@@ -608,10 +613,11 @@ func TestInitAuthorize_InvalidDisplayValue(t *testing.T) {
 	client := newTestClient()
 
 	_, err := svc.InitAuthorize(client, InitAuthorizeParams{
-		RedirectURI:  "https://example.com/callback",
-		ResponseType: "code",
-		Scope:        "openid",
-		Display:      "invalid",
+		RedirectURI:   "https://example.com/callback",
+		ResponseType:  "code",
+		Scope:         "openid",
+		CodeChallenge: "test-challenge",
+		Display:       "invalid",
 	})
 	assertOAuthErrorCode(t, err, "invalid_request")
 }
@@ -621,10 +627,11 @@ func TestInitAuthorize_ValidDisplayValue(t *testing.T) {
 	client := newTestClient()
 
 	resp, err := svc.InitAuthorize(client, InitAuthorizeParams{
-		RedirectURI:  "https://example.com/callback",
-		ResponseType: "code",
-		Scope:        "openid",
-		Display:      "popup",
+		RedirectURI:   "https://example.com/callback",
+		ResponseType:  "code",
+		Scope:         "openid",
+		CodeChallenge: "test-challenge",
+		Display:       "popup",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -639,10 +646,11 @@ func TestInitAuthorize_LoginHintPassthrough(t *testing.T) {
 	client := newTestClient()
 
 	resp, err := svc.InitAuthorize(client, InitAuthorizeParams{
-		RedirectURI:  "https://example.com/callback",
-		ResponseType: "code",
-		Scope:        "openid",
-		LoginHint:    "user@example.com",
+		RedirectURI:   "https://example.com/callback",
+		ResponseType:  "code",
+		Scope:         "openid",
+		CodeChallenge: "test-challenge",
+		LoginHint:     "user@example.com",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -657,10 +665,11 @@ func TestInitAuthorize_UILocalesAccepted(t *testing.T) {
 	client := newTestClient()
 
 	_, err := svc.InitAuthorize(client, InitAuthorizeParams{
-		RedirectURI:  "https://example.com/callback",
-		ResponseType: "code",
-		Scope:        "openid",
-		UILocales:    "fr-FR en",
+		RedirectURI:   "https://example.com/callback",
+		ResponseType:  "code",
+		Scope:         "openid",
+		CodeChallenge: "test-challenge",
+		UILocales:     "fr-FR en",
 	})
 	if err != nil {
 		t.Fatalf("ui_locales should be accepted without error: %v", err)
@@ -672,10 +681,11 @@ func TestInitAuthorize_ACRValuesAccepted(t *testing.T) {
 	client := newTestClient()
 
 	_, err := svc.InitAuthorize(client, InitAuthorizeParams{
-		RedirectURI:  "https://example.com/callback",
-		ResponseType: "code",
-		Scope:        "openid",
-		ACRValues:    "urn:mace:incommon:iap:silver",
+		RedirectURI:   "https://example.com/callback",
+		ResponseType:  "code",
+		Scope:         "openid",
+		CodeChallenge: "test-challenge",
+		ACRValues:     "urn:mace:incommon:iap:silver",
 	})
 	if err != nil {
 		t.Fatalf("acr_values should be accepted without error: %v", err)
@@ -687,10 +697,11 @@ func TestInitAuthorize_InvalidMaxAge(t *testing.T) {
 	client := newTestClient()
 
 	_, err := svc.InitAuthorize(client, InitAuthorizeParams{
-		RedirectURI:  "https://example.com/callback",
-		ResponseType: "code",
-		Scope:        "openid",
-		MaxAge:       "not_a_number",
+		RedirectURI:   "https://example.com/callback",
+		ResponseType:  "code",
+		Scope:         "openid",
+		CodeChallenge: "test-challenge",
+		MaxAge:        "not_a_number",
 	})
 	assertOAuthErrorCode(t, err, "invalid_request")
 }
@@ -700,10 +711,11 @@ func TestInitAuthorize_InvalidClaimsJSON(t *testing.T) {
 	client := newTestClient()
 
 	_, err := svc.InitAuthorize(client, InitAuthorizeParams{
-		RedirectURI:  "https://example.com/callback",
-		ResponseType: "code",
-		Scope:        "openid",
-		Claims:       "not valid json",
+		RedirectURI:   "https://example.com/callback",
+		ResponseType:  "code",
+		Scope:         "openid",
+		CodeChallenge: "test-challenge",
+		Claims:        "not valid json",
 	})
 	assertOAuthErrorCode(t, err, "invalid_request")
 }
@@ -713,10 +725,11 @@ func TestInitAuthorize_ValidClaimsJSON(t *testing.T) {
 	client := newTestClient()
 
 	_, err := svc.InitAuthorize(client, InitAuthorizeParams{
-		RedirectURI:  "https://example.com/callback",
-		ResponseType: "code",
-		Scope:        "openid",
-		Claims:       `{"id_token":{"auth_time":{"essential":true}}}`,
+		RedirectURI:   "https://example.com/callback",
+		ResponseType:  "code",
+		Scope:         "openid",
+		CodeChallenge: "test-challenge",
+		Claims:        `{"id_token":{"auth_time":{"essential":true}}}`,
 	})
 	if err != nil {
 		t.Fatalf("valid claims JSON should be accepted: %v", err)
