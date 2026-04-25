@@ -20,6 +20,7 @@ type AuthorizationCode struct {
 	Audience            *string        `gorm:"type:varchar(512)" json:"audience,omitempty"`
 	ClaimsParam         *string        `gorm:"type:jsonb;column:claims_param" json:"-"`
 	AuthTime            *time.Time     `gorm:"type:timestamptz" json:"-"`
+	AuthMethods         pq.StringArray `gorm:"type:text[];default:'{}'" json:"-"`
 	ExpiresAt           time.Time      `gorm:"index;not null" json:"expires_at"`
 	Used                bool           `gorm:"default:false" json:"-"`
 	CreatedAt           time.Time      `gorm:"autoCreateTime" json:"created_at"`

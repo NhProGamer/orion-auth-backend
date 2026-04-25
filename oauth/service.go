@@ -67,6 +67,8 @@ type IDTokenClaims struct {
 	ATHash          string
 	TTL             time.Duration
 	RequestedClaims string
+	ACR             string
+	AMR             []string
 }
 
 type Service struct {
@@ -78,8 +80,8 @@ type Service struct {
 	idTokenGen        IDTokenGenerator
 	mfaValidator      MFAValidator
 	policyEvaluator   PolicyEvaluator
-	resourceValidator  ResourceValidator
-	idTokenValidator   IDTokenValidator
+	resourceValidator ResourceValidator
+	idTokenValidator  IDTokenValidator
 }
 
 func NewService(
@@ -157,29 +159,29 @@ type InitAuthorizeParams struct {
 	CodeChallengeMethod string
 	Audience            string
 	// OIDC Core parameters
-	Prompt       string
-	MaxAge       string
-	Display      string
-	UILocales    string
+	Prompt        string
+	MaxAge        string
+	Display       string
+	UILocales     string
 	ClaimsLocales string
-	ACRValues    string
-	LoginHint    string
-	Claims       string
-	IDTokenHint  string
-	ResponseMode string
+	ACRValues     string
+	LoginHint     string
+	Claims        string
+	IDTokenHint   string
+	ResponseMode  string
 }
 
 type InitAuthorizeResponse struct {
-	RequestID       uuid.UUID                `json:"request_id"`
-	ClientName      string                   `json:"client_name"`
-	ClientID        uuid.UUID                `json:"client_id"`
-	ScopesRequested []string                 `json:"scopes_requested"`
-	RequiresLogin   bool                     `json:"requires_login"`
-	RequiresConsent bool                     `json:"requires_consent"`
-	Resource        *ResourceInfo            `json:"resource,omitempty"`
-	LoginHint       string                   `json:"login_hint,omitempty"`
-	Display         string                   `json:"display,omitempty"`
-	Prompt          string                   `json:"prompt,omitempty"`
+	RequestID       uuid.UUID                 `json:"request_id"`
+	ClientName      string                    `json:"client_name"`
+	ClientID        uuid.UUID                 `json:"client_id"`
+	ScopesRequested []string                  `json:"scopes_requested"`
+	RequiresLogin   bool                      `json:"requires_login"`
+	RequiresConsent bool                      `json:"requires_consent"`
+	Resource        *ResourceInfo             `json:"resource,omitempty"`
+	LoginHint       string                    `json:"login_hint,omitempty"`
+	Display         string                    `json:"display,omitempty"`
+	Prompt          string                    `json:"prompt,omitempty"`
 	ResponseMode    string                    `json:"response_mode,omitempty"`
 	Redirect        *AuthorizeConsentResponse `json:"redirect,omitempty"`
 }
@@ -531,6 +533,7 @@ func (s *Service) AuthorizeLogin(input AuthorizeLoginInput, ipAddress, userAgent
 	}
 
 	req.UserID = &u.ID
+	req.AuthMethods = append(req.AuthMethods, "pwd")
 	now := time.Now()
 	if needsMFA {
 		// Don't mark as authenticated yet — MFA step required
@@ -593,6 +596,7 @@ func (s *Service) AuthorizeMFA(input AuthorizeMFAInput) (*AuthorizeLoginResponse
 	}
 
 	req.Authenticated = true
+	req.AuthMethods = append(req.AuthMethods, "otp")
 	now := time.Now()
 	req.AuthTime = &now
 
@@ -751,6 +755,9 @@ func (s *Service) completeAuthorize(req *model.AuthorizationRequest, ipAddress, 
 	if req.ClaimsParam != nil {
 		authCode.ClaimsParam = req.ClaimsParam
 	}
+	if len(req.AuthMethods) > 0 {
+		authCode.AuthMethods = req.AuthMethods
+	}
 
 	if err := s.repo.CreateAuthCode(authCode); err != nil {
 		return nil, pkg.ErrServerError("failed to create authorization code")
@@ -833,11 +840,14 @@ func (s *Service) ExchangeAuthorizationCode(client *model.OAuthClient, code, red
 		if authCode.ClaimsParam != nil {
 			requestedClaims = *authCode.ClaimsParam
 		}
+		acr, amr := computeACR(authCode.AuthMethods)
 		resp, err = s.issueTokensWithOpts(tx, client, &authCode.UserID, authCode.SessionID, authCode.Scopes, issueOpts{
 			nonce:           nonce,
 			authTime:        authTime,
 			audience:        authCode.Audience,
 			requestedClaims: requestedClaims,
+			acr:             acr,
+			amr:             amr,
 		})
 		return err
 	})
@@ -987,6 +997,8 @@ type issueOpts struct {
 	audience        *string
 	resourceID      *uuid.UUID
 	requestedClaims string
+	acr             string
+	amr             []string
 }
 
 func (s *Service) issueTokens(tx RepositoryInterface, client *model.OAuthClient, userID *uuid.UUID, sessionID *uuid.UUID, scopes pq.StringArray) (*TokenResponse, error) {
@@ -1133,6 +1145,8 @@ func (s *Service) issueTokensWithOpts(tx RepositoryInterface, client *model.OAut
 			ATHash:          atHashValue,
 			TTL:             time.Duration(client.IDTokenTTL) * time.Second,
 			RequestedClaims: opts.requestedClaims,
+			ACR:             opts.acr,
+			AMR:             opts.amr,
 		})
 		if err != nil {
 			slog.Warn("failed to generate ID token", "error", err)
@@ -1162,6 +1176,28 @@ func verifyPKCE(codeVerifier, codeChallenge string) bool {
 	h := sha256.Sum256([]byte(codeVerifier))
 	computed := base64.RawURLEncoding.EncodeToString(h[:])
 	return subtle.ConstantTimeCompare([]byte(computed), []byte(codeChallenge)) == 1
+}
+
+func computeACR(authMethods []string) (string, []string) {
+	if len(authMethods) == 0 {
+		return "", nil
+	}
+	amr := make([]string, len(authMethods))
+	copy(amr, authMethods)
+
+	hasOTP := false
+	for _, m := range authMethods {
+		if m == "otp" {
+			hasOTP = true
+			break
+		}
+	}
+
+	acr := "urn:orionauth:acr:pwd"
+	if hasOTP {
+		acr = "urn:orionauth:acr:mfa"
+	}
+	return acr, amr
 }
 
 func parseSpaceDelimited(s string) []string {

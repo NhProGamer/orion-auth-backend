@@ -163,6 +163,8 @@ type IDTokenClaims struct {
 	ATHash          string // access token hash
 	TTL             time.Duration
 	RequestedClaims string // JSON claims parameter from the authorization request
+	ACR             string
+	AMR             []string
 }
 
 func (s *Service) GenerateIDToken(claims IDTokenClaims) (string, error) {
@@ -191,6 +193,13 @@ func (s *Service) GenerateIDToken(claims IDTokenClaims) (string, error) {
 
 	if claims.ATHash != "" {
 		jwtClaims["at_hash"] = claims.ATHash
+	}
+
+	if claims.ACR != "" {
+		jwtClaims["acr"] = claims.ACR
+	}
+	if len(claims.AMR) > 0 {
+		jwtClaims["amr"] = claims.AMR
 	}
 
 	// Add user claims based on scopes
@@ -367,12 +376,12 @@ type OpenIDConfiguration struct {
 	TokenEndpointAuthMethodsSupported []string `json:"token_endpoint_auth_methods_supported"`
 	ClaimsSupported                   []string `json:"claims_supported"`
 	CodeChallengeMethodsSupported     []string `json:"code_challenge_methods_supported"`
-	ResponseModesSupported           []string `json:"response_modes_supported"`
-	RequestParameterSupported          bool     `json:"request_parameter_supported"`
-	RequestURIParameterSupported       bool     `json:"request_uri_parameter_supported"`
-	ClaimsParameterSupported           bool     `json:"claims_parameter_supported"`
-	BackchannelLogoutSupported         bool     `json:"backchannel_logout_supported"`
-	BackchannelLogoutSessionSupported  bool     `json:"backchannel_logout_session_supported"`
+	ResponseModesSupported            []string `json:"response_modes_supported"`
+	RequestParameterSupported         bool     `json:"request_parameter_supported"`
+	RequestURIParameterSupported      bool     `json:"request_uri_parameter_supported"`
+	ClaimsParameterSupported          bool     `json:"claims_parameter_supported"`
+	BackchannelLogoutSupported        bool     `json:"backchannel_logout_supported"`
+	BackchannelLogoutSessionSupported bool     `json:"backchannel_logout_session_supported"`
 }
 
 func (s *Service) GetDiscovery() OpenIDConfiguration {
@@ -394,6 +403,7 @@ func (s *Service) GetDiscovery() OpenIDConfiguration {
 		TokenEndpointAuthMethodsSupported: []string{"client_secret_basic", "client_secret_post", "none"},
 		ClaimsSupported: []string{
 			"sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "at_hash",
+			"acr", "amr",
 			"name", "given_name", "family_name", "middle_name", "nickname",
 			"preferred_username", "profile", "picture", "website",
 			"gender", "birthdate", "zoneinfo", "locale",
@@ -402,7 +412,7 @@ func (s *Service) GetDiscovery() OpenIDConfiguration {
 			"address", "updated_at", "roles", "groups",
 		},
 		CodeChallengeMethodsSupported:     []string{"S256"},
-		ResponseModesSupported:           []string{"query", "fragment", "form_post"},
+		ResponseModesSupported:            []string{"query", "fragment", "form_post"},
 		RequestParameterSupported:         false,
 		RequestURIParameterSupported:      false,
 		ClaimsParameterSupported:          true,
