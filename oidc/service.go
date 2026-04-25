@@ -486,6 +486,33 @@ func (s *Service) GetUserInfo(userID uuid.UUID, clientID uuid.UUID, scopes []str
 	return claims, nil
 }
 
+// GenerateUserInfoJWT signs the UserInfo claims as a JWT (RS256).
+func (s *Service) GenerateUserInfoJWT(claims map[string]any, clientID uuid.UUID) (string, error) {
+	s.mu.RLock()
+	key := s.activeKey
+	privKey := s.privateKey
+	s.mu.RUnlock()
+
+	if key == nil || privKey == nil {
+		return "", errors.New("no active signing key")
+	}
+
+	now := time.Now()
+	jwtClaims := jwt.MapClaims{
+		"iss": s.issuer,
+		"aud": clientID.String(),
+		"iat": now.Unix(),
+	}
+	for k, v := range claims {
+		jwtClaims[k] = v
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, jwtClaims)
+	token.Header["kid"] = key.ID.String()
+
+	return token.SignedString(privKey)
+}
+
 func (s *Service) enrichClaimsWithRoles(userID uuid.UUID, scopes []string, claims map[string]any) {
 	if s.rbacService == nil {
 		return

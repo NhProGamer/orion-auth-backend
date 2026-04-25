@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	"orion-auth-backend/middleware"
 	"orion-auth-backend/pkg"
@@ -74,6 +75,19 @@ func (h *Handler) UserInfo(c *gin.Context) {
 	if err != nil {
 		pkg.HandleError(c, err)
 		return
+	}
+
+	// Check if client requires signed UserInfo response
+	if clientID != uuid.Nil && h.service.clientFinder != nil {
+		if client, err := h.service.clientFinder.FindActiveByID(clientID); err == nil && client.UserinfoSignedResponseAlg != nil && *client.UserinfoSignedResponseAlg != "" {
+			jwtStr, err := h.service.GenerateUserInfoJWT(claims, clientID)
+			if err != nil {
+				pkg.HandleError(c, err)
+				return
+			}
+			c.Data(200, "application/jwt", []byte(jwtStr))
+			return
+		}
 	}
 
 	pkg.OK(c, claims)
