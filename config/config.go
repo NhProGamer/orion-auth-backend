@@ -15,7 +15,8 @@ type Config struct {
 	Argon2   Argon2Config   `mapstructure:"argon2"`
 	CORS     CORSConfig     `mapstructure:"cors"`
 	SMTP     SMTPConfig     `mapstructure:"smtp"`
-	Issuer   string         `mapstructure:"issuer"`
+	Issuer       string `mapstructure:"issuer"`
+	PairwiseSalt string `mapstructure:"pairwise_salt"`
 }
 
 type ServerConfig struct {

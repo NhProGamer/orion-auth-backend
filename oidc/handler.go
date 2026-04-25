@@ -67,9 +67,10 @@ func (h *Handler) UserInfo(c *gin.Context) {
 		return
 	}
 
+	clientID, _ := middleware.GetClientID(c)
 	scopes := middleware.GetScopes(c)
 
-	claims, err := h.service.GetUserInfo(userID, scopes)
+	claims, err := h.service.GetUserInfo(userID, clientID, scopes)
 	if err != nil {
 		pkg.HandleError(c, err)
 		return

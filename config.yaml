@@ -57,3 +57,4 @@ smtp:
   tls: false
 
 issuer: "http://localhost:8080"
+pairwise_salt: "change-me-in-production"

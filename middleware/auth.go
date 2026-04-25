@@ -17,12 +17,14 @@ const (
 	ContextUserID    = "user_id"
 	ContextSessionID = "session_id"
 	ContextTokenID   = "token_id"
+	ContextClientID  = "client_id"
 	ContextScopes    = "scopes"
 )
 
 // accessTokenRow is a lightweight struct for token lookup.
 type accessTokenRow struct {
 	ID        string    `gorm:"column:id"`
+	ClientID  string    `gorm:"column:client_id"`
 	UserID    *string   `gorm:"column:user_id"`
 	SessionID *string   `gorm:"column:session_id"`
 	Scopes    string    `gorm:"column:scopes"`
@@ -78,6 +80,9 @@ func BearerAuth(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		c.Set(ContextTokenID, token.ID)
+		if cid, err := uuid.Parse(token.ClientID); err == nil {
+			c.Set(ContextClientID, cid)
+		}
 		if token.UserID != nil {
 			uid, _ := uuid.Parse(*token.UserID)
 			c.Set(ContextUserID, uid)
@@ -100,6 +105,16 @@ func GetUserID(c *gin.Context) (uuid.UUID, bool) {
 	}
 	uid, ok := val.(uuid.UUID)
 	return uid, ok
+}
+
+// GetClientID extracts the client ID from the Gin context.
+func GetClientID(c *gin.Context) (uuid.UUID, bool) {
+	val, exists := c.Get(ContextClientID)
+	if !exists {
+		return uuid.Nil, false
+	}
+	cid, ok := val.(uuid.UUID)
+	return cid, ok
 }
 
 // GetSessionID extracts the session ID from the Gin context.

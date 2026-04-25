@@ -42,6 +42,7 @@ type Service struct {
 	sessionRevoker SessionRevoker
 	clientFinder   ClientFinder
 	issuer         string
+	pairwiseSalt   string
 
 	mu         sync.RWMutex
 	activeKey  *model.SigningKey
@@ -61,11 +62,12 @@ func (s *Service) SetClientFinder(cf ClientFinder) {
 	s.clientFinder = cf
 }
 
-func NewService(db *gorm.DB, userService *user.Service, issuer string) *Service {
+func NewService(db *gorm.DB, userService *user.Service, issuer string, pairwiseSalt string) *Service {
 	return &Service{
-		db:          db,
-		userService: userService,
-		issuer:      issuer,
+		db:           db,
+		userService:  userService,
+		issuer:       issuer,
+		pairwiseSalt: pairwiseSalt,
 	}
 }
 
@@ -156,18 +158,20 @@ func (s *Service) loadAllKeys() {
 // --- ID Token Generation ---
 
 type IDTokenClaims struct {
-	UserID          uuid.UUID
-	ClientID        uuid.UUID
-	Scopes          []string
-	Nonce           string
-	AuthTime        time.Time
-	ATHash          string // access token hash
-	CHash           string // authorization code hash (hybrid flows)
-	SHash           string // state hash (hybrid flows)
-	TTL             time.Duration
-	RequestedClaims string // JSON claims parameter from the authorization request
-	ACR             string
-	AMR             []string
+	UserID           uuid.UUID
+	ClientID         uuid.UUID
+	Scopes           []string
+	Nonce            string
+	AuthTime         time.Time
+	ATHash           string // access token hash
+	CHash            string // authorization code hash (hybrid flows)
+	SHash            string // state hash (hybrid flows)
+	TTL              time.Duration
+	RequestedClaims  string // JSON claims parameter from the authorization request
+	ACR              string
+	AMR              []string
+	SubjectType      string // "public" or "pairwise"
+	SectorIdentifier string // sector identifier for pairwise sub
 }
 
 func (s *Service) GenerateIDToken(claims IDTokenClaims) (string, error) {
@@ -181,9 +185,19 @@ func (s *Service) GenerateIDToken(claims IDTokenClaims) (string, error) {
 	}
 
 	now := time.Now()
+
+	sub := claims.UserID.String()
+	if claims.SubjectType == "pairwise" && s.pairwiseSalt != "" {
+		sector := claims.SectorIdentifier
+		if sector == "" {
+			sector = claims.ClientID.String()
+		}
+		sub = ComputePairwiseSub(sector, claims.UserID, s.pairwiseSalt)
+	}
+
 	jwtClaims := jwt.MapClaims{
 		"iss":       s.issuer,
-		"sub":       claims.UserID.String(),
+		"sub":       sub,
 		"aud":       claims.ClientID.String(),
 		"exp":       now.Add(claims.TTL).Unix(),
 		"iat":       now.Unix(),
@@ -447,13 +461,28 @@ func (s *Service) GetDiscovery() OpenIDConfiguration {
 
 // --- UserInfo ---
 
-func (s *Service) GetUserInfo(userID uuid.UUID, scopes []string) (map[string]any, error) {
+func (s *Service) GetUserInfo(userID uuid.UUID, clientID uuid.UUID, scopes []string) (map[string]any, error) {
 	u, err := s.userService.GetByID(userID)
 	if err != nil {
 		return nil, err
 	}
 	claims := u.OIDCClaims(scopes)
 	s.enrichClaimsWithRoles(userID, scopes, claims)
+
+	// Apply pairwise subject if the client uses it
+	if s.clientFinder != nil && clientID != uuid.Nil {
+		if client, err := s.clientFinder.FindActiveByID(clientID); err == nil && client.SubjectType == "pairwise" {
+			sector := ""
+			if client.SectorIdentifierURI != nil {
+				sector = *client.SectorIdentifierURI
+			}
+			if sector == "" {
+				sector = clientID.String()
+			}
+			claims["sub"] = ComputePairwiseSub(sector, userID, s.pairwiseSalt)
+		}
+	}
+
 	return claims, nil
 }
 

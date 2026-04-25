@@ -60,18 +60,20 @@ type IDTokenValidator interface {
 
 // IDTokenClaims mirrors oidc.IDTokenClaims to avoid circular imports.
 type IDTokenClaims struct {
-	UserID          uuid.UUID
-	ClientID        uuid.UUID
-	Scopes          []string
-	Nonce           string
-	AuthTime        time.Time
-	ATHash          string
-	CHash           string
-	SHash           string
-	TTL             time.Duration
-	RequestedClaims string
-	ACR             string
-	AMR             []string
+	UserID           uuid.UUID
+	ClientID         uuid.UUID
+	Scopes           []string
+	Nonce            string
+	AuthTime         time.Time
+	ATHash           string
+	CHash            string
+	SHash            string
+	TTL              time.Duration
+	RequestedClaims  string
+	ACR              string
+	AMR              []string
+	SubjectType      string
+	SectorIdentifier string
 }
 
 type Service struct {
@@ -908,15 +910,21 @@ func (s *Service) completeAuthorize(req *model.AuthorizationRequest, ipAddress, 
 				authTime = *req.AuthTime
 			}
 			acr, amr := computeACR(req.AuthMethods)
+			sectorID := ""
+			if client.SectorIdentifierURI != nil {
+				sectorID = *client.SectorIdentifierURI
+			}
 			idTokenClaims := IDTokenClaims{
-				UserID:   *req.UserID,
-				ClientID: req.ClientID,
-				Scopes:   req.Scopes,
-				Nonce:    nonce,
-				AuthTime: authTime,
-				TTL:      time.Duration(client.IDTokenTTL) * time.Second,
-				ACR:      acr,
-				AMR:      amr,
+				UserID:           *req.UserID,
+				ClientID:         req.ClientID,
+				Scopes:           req.Scopes,
+				Nonce:            nonce,
+				AuthTime:         authTime,
+				TTL:              time.Duration(client.IDTokenTTL) * time.Second,
+				ACR:              acr,
+				AMR:              amr,
+				SubjectType:      client.SubjectType,
+				SectorIdentifier: sectorID,
 			}
 			idToken, err := s.generateHybridIDToken(idTokenClaims, rawCode, resp.AccessToken, resp.State)
 			if err != nil {
@@ -1301,17 +1309,24 @@ func (s *Service) issueTokensWithOpts(tx RepositoryInterface, client *model.OAut
 			authTime = time.Now()
 		}
 
+		sectorID := ""
+		if client.SectorIdentifierURI != nil {
+			sectorID = *client.SectorIdentifierURI
+		}
+
 		idToken, err := s.idTokenGen.GenerateIDToken(IDTokenClaims{
-			UserID:          *userID,
-			ClientID:        client.ID,
-			Scopes:          scopes,
-			Nonce:           opts.nonce,
-			AuthTime:        authTime,
-			ATHash:          atHashValue,
-			TTL:             time.Duration(client.IDTokenTTL) * time.Second,
-			RequestedClaims: opts.requestedClaims,
-			ACR:             opts.acr,
-			AMR:             opts.amr,
+			UserID:           *userID,
+			ClientID:         client.ID,
+			Scopes:           scopes,
+			Nonce:            opts.nonce,
+			AuthTime:         authTime,
+			ATHash:           atHashValue,
+			TTL:              time.Duration(client.IDTokenTTL) * time.Second,
+			RequestedClaims:  opts.requestedClaims,
+			ACR:              opts.acr,
+			AMR:              opts.amr,
+			SubjectType:      client.SubjectType,
+			SectorIdentifier: sectorID,
 		})
 		if err != nil {
 			slog.Warn("failed to generate ID token", "error", err)

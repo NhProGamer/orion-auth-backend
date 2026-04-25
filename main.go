@@ -90,7 +90,7 @@ func main() {
 	sessionService := session.NewService(sessionRepo, cfg.Auth)
 	clientService := client.NewService(clientRepo, hasher)
 	oauthService := oauth.NewService(oauthRepo, userService, sessionService, hasher, cfg.Auth)
-	oidcService := oidc.NewService(db, userService, cfg.Issuer)
+	oidcService := oidc.NewService(db, userService, cfg.Issuer, cfg.PairwiseSalt)
 	mfaService := mfa.NewService(mfaRepo, hasher)
 	rbacService := rbac.NewService(rbacRepo)
 	auditService := audit.NewService(db)
