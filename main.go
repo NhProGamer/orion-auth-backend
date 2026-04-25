@@ -238,7 +238,8 @@ func setupRouter(
 
 	// OAuth2 endpoints (root level, rate limited)
 	oauthRL := middleware.NewRateLimiter(10, 3)
-	clientAuthMiddleware := middleware.ClientAuth(db, hasher)
+	jwksCache := middleware.NewJWKSCache()
+	clientAuthMiddleware := middleware.ClientAuth(db, hasher, cfg.Issuer+"/token", jwksCache)
 	oauthHandler.RegisterRoutes(router, clientAuthMiddleware, oauthRL.Middleware(), cfg.Issuer)
 
 	// OIDC endpoints (root level)

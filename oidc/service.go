@@ -401,7 +401,7 @@ func (s *Service) GetDiscovery() OpenIDConfiguration {
 		SubjectTypesSupported:             []string{"public"},
 		IDTokenSigningAlgValuesSupported:  []string{"RS256"},
 		ScopesSupported:                   []string{"openid", "profile", "email", "phone", "address", "roles", "offline_access"},
-		TokenEndpointAuthMethodsSupported: []string{"client_secret_basic", "client_secret_post", "none"},
+		TokenEndpointAuthMethodsSupported: []string{"client_secret_basic", "client_secret_post", "private_key_jwt", "none"},
 		ClaimsSupported: []string{
 			"sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "at_hash",
 			"acr", "amr",

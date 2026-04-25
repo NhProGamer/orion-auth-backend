@@ -4,9 +4,11 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"math/big"
 )
 
 const rsaKeyBits = 2048
@@ -56,4 +58,24 @@ func ParseRSAPublicKey(pemStr string) (*rsa.PublicKey, error) {
 		return nil, errors.New("not an RSA public key")
 	}
 	return rsaPub, nil
+}
+
+// ParseJWKToRSAPublicKey constructs an RSA public key from JWK n and e values (base64url-encoded).
+func ParseJWKToRSAPublicKey(nB64, eB64 string) (*rsa.PublicKey, error) {
+	nBytes, err := base64.RawURLEncoding.DecodeString(nB64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode JWK n: %w", err)
+	}
+	eBytes, err := base64.RawURLEncoding.DecodeString(eB64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode JWK e: %w", err)
+	}
+
+	n := new(big.Int).SetBytes(nBytes)
+	e := new(big.Int).SetBytes(eBytes)
+
+	return &rsa.PublicKey{
+		N: n,
+		E: int(e.Int64()),
+	}, nil
 }
