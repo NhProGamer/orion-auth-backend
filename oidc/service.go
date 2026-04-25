@@ -527,7 +527,8 @@ func (s *Service) EndSession(params EndSessionParams) (*EndSessionResponse, erro
 }
 
 // GenerateLogoutToken creates a logout_token JWT for Back-Channel Logout.
-func (s *Service) GenerateLogoutToken(userID, clientID uuid.UUID) (string, error) {
+// If sessionRequired is true and sessionID is provided, the sid claim is included.
+func (s *Service) GenerateLogoutToken(userID, clientID uuid.UUID, sessionRequired bool, sessionID *uuid.UUID) (string, error) {
 	s.mu.RLock()
 	key := s.activeKey
 	privKey := s.privateKey
@@ -551,6 +552,10 @@ func (s *Service) GenerateLogoutToken(userID, clientID uuid.UUID) (string, error
 		},
 	}
 
+	if sessionRequired && sessionID != nil {
+		claims["sid"] = sessionID.String()
+	}
+
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	token.Header["kid"] = key.ID.String()
 
@@ -570,7 +575,7 @@ func (s *Service) dispatchBackchannelLogout(userID uuid.UUID) {
 			continue
 		}
 		go func(c model.OAuthClient) {
-			logoutToken, err := s.GenerateLogoutToken(userID, c.ID)
+			logoutToken, err := s.GenerateLogoutToken(userID, c.ID, c.BackchannelLogoutSessionReq, nil)
 			if err != nil {
 				slog.Error("failed to generate logout token", "client_id", c.ID, "error", err)
 				return
