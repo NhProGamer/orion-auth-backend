@@ -65,3 +65,9 @@ func (r *Repository) FindClientsWithBackchannelLogout(userID uuid.UUID) ([]model
 	).Find(&clients).Error
 	return clients, err
 }
+
+func (r *Repository) FindClientsWithFrontchannelLogout() ([]model.OAuthClient, error) {
+	var clients []model.OAuthClient
+	err := r.db.Where("frontchannel_logout_uri IS NOT NULL AND active = TRUE").Find(&clients).Error
+	return clients, err
+}

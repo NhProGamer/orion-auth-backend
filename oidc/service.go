@@ -32,6 +32,7 @@ type SessionRevoker interface {
 type ClientFinder interface {
 	FindActiveByID(id uuid.UUID) (*model.OAuthClient, error)
 	FindClientsWithBackchannelLogout(userID uuid.UUID) ([]model.OAuthClient, error)
+	FindClientsWithFrontchannelLogout() ([]model.OAuthClient, error)
 }
 
 type Service struct {
@@ -391,8 +392,10 @@ type OpenIDConfiguration struct {
 	ClaimsParameterSupported                   bool     `json:"claims_parameter_supported"`
 	BackchannelLogoutSupported                 bool     `json:"backchannel_logout_supported"`
 	BackchannelLogoutSessionSupported          bool     `json:"backchannel_logout_session_supported"`
-	AuthorizationResponseIssParameterSupported bool   `json:"authorization_response_iss_parameter_supported"`
-	PushedAuthorizationRequestEndpoint        string `json:"pushed_authorization_request_endpoint,omitempty"`
+	AuthorizationResponseIssParameterSupported bool     `json:"authorization_response_iss_parameter_supported"`
+	PushedAuthorizationRequestEndpoint         string   `json:"pushed_authorization_request_endpoint,omitempty"`
+	FrontchannelLogoutSupported                bool     `json:"frontchannel_logout_supported"`
+	FrontchannelLogoutSessionSupported         bool     `json:"frontchannel_logout_session_supported"`
 }
 
 func (s *Service) GetDiscovery() OpenIDConfiguration {
@@ -430,7 +433,9 @@ func (s *Service) GetDiscovery() OpenIDConfiguration {
 		BackchannelLogoutSupported:                 true,
 		BackchannelLogoutSessionSupported:          true,
 		AuthorizationResponseIssParameterSupported: true,
-		PushedAuthorizationRequestEndpoint:        s.issuer + "/par",
+		PushedAuthorizationRequestEndpoint:         s.issuer + "/par",
+		FrontchannelLogoutSupported:                true,
+		FrontchannelLogoutSessionSupported:         true,
 	}
 }
 
@@ -478,8 +483,9 @@ type EndSessionParams struct {
 }
 
 type EndSessionResponse struct {
-	RedirectURI string `json:"redirect_uri,omitempty"`
-	LoggedOut   bool   `json:"logged_out"`
+	RedirectURI            string   `json:"redirect_uri,omitempty"`
+	LoggedOut              bool     `json:"logged_out"`
+	FrontchannelLogoutURIs []string `json:"frontchannel_logout_uris,omitempty"`
 }
 
 func (s *Service) EndSession(params EndSessionParams) (*EndSessionResponse, error) {
@@ -509,6 +515,16 @@ func (s *Service) EndSession(params EndSessionParams) (*EndSessionResponse, erro
 	}
 
 	resp := &EndSessionResponse{LoggedOut: true}
+
+	// Front-Channel Logout: collect iframe URLs for RPs
+	if s.clientFinder != nil {
+		fcClients, _ := s.clientFinder.FindClientsWithFrontchannelLogout()
+		for _, c := range fcClients {
+			if c.FrontchannelLogoutURI != nil {
+				resp.FrontchannelLogoutURIs = append(resp.FrontchannelLogoutURIs, *c.FrontchannelLogoutURI)
+			}
+		}
+	}
 
 	// Validate post_logout_redirect_uri
 	if params.PostLogoutRedirectURI != "" {
