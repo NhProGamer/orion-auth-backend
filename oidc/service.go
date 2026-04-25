@@ -380,8 +380,9 @@ type OpenIDConfiguration struct {
 	RequestParameterSupported         bool     `json:"request_parameter_supported"`
 	RequestURIParameterSupported      bool     `json:"request_uri_parameter_supported"`
 	ClaimsParameterSupported          bool     `json:"claims_parameter_supported"`
-	BackchannelLogoutSupported        bool     `json:"backchannel_logout_supported"`
-	BackchannelLogoutSessionSupported bool     `json:"backchannel_logout_session_supported"`
+	BackchannelLogoutSupported                bool `json:"backchannel_logout_supported"`
+	BackchannelLogoutSessionSupported         bool `json:"backchannel_logout_session_supported"`
+	AuthorizationResponseIssParameterSupported bool `json:"authorization_response_iss_parameter_supported"`
 }
 
 func (s *Service) GetDiscovery() OpenIDConfiguration {
@@ -416,8 +417,9 @@ func (s *Service) GetDiscovery() OpenIDConfiguration {
 		RequestParameterSupported:         false,
 		RequestURIParameterSupported:      false,
 		ClaimsParameterSupported:          true,
-		BackchannelLogoutSupported:        true,
-		BackchannelLogoutSessionSupported: true,
+		BackchannelLogoutSupported:                 true,
+		BackchannelLogoutSessionSupported:          true,
+		AuthorizationResponseIssParameterSupported: true,
 	}
 }
 

@@ -125,6 +125,7 @@ func main() {
 	oauthService.SetMFAValidator(mfaService)
 	oauthService.SetPolicyEvaluator(policy.NewOAuthAdapter(policyService))
 	oauthService.SetResourceValidator(resourceService)
+	oauthService.SetIssuer(cfg.Issuer)
 	oidcService.SetRBACService(rbacService)
 	oidcService.SetSessionRevoker(sessionService)
 	oidcService.SetClientFinder(clientRepo)

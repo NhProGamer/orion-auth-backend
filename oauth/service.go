@@ -77,6 +77,7 @@ type Service struct {
 	sessionService    *session.Service
 	hasher            *crypto.Argon2Hasher
 	cfg               config.AuthConfig
+	issuer            string
 	idTokenGen        IDTokenGenerator
 	mfaValidator      MFAValidator
 	policyEvaluator   PolicyEvaluator
@@ -123,6 +124,11 @@ func (s *Service) SetResourceValidator(v ResourceValidator) {
 // SetIDTokenValidator sets the ID token validator (called after init to break circular dep).
 func (s *Service) SetIDTokenValidator(v IDTokenValidator) {
 	s.idTokenValidator = v
+}
+
+// SetIssuer sets the issuer URL for authorization response iss parameter (RFC 9207).
+func (s *Service) SetIssuer(issuer string) {
+	s.issuer = issuer
 }
 
 // TokenResponse is the standard OAuth2 token response.
@@ -645,6 +651,7 @@ type AuthorizeConsentResponse struct {
 	RedirectURI  string `json:"redirect_uri"`
 	Code         string `json:"code,omitempty"`
 	State        string `json:"state,omitempty"`
+	Issuer       string `json:"iss,omitempty"`
 	ResponseMode string `json:"response_mode,omitempty"`
 }
 
@@ -766,6 +773,7 @@ func (s *Service) completeAuthorize(req *model.AuthorizationRequest, ipAddress, 
 	resp := &AuthorizeConsentResponse{
 		RedirectURI: req.RedirectURI,
 		Code:        rawCode,
+		Issuer:      s.issuer,
 	}
 	if req.State != nil {
 		resp.State = *req.State
