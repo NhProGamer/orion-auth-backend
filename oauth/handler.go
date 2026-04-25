@@ -23,6 +23,14 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
+// setSessionStateCookie sets the session_state cookie for OIDC Session Management.
+func setSessionStateCookie(c *gin.Context, resp *AuthorizeConsentResponse) {
+	if resp != nil && resp.SessionState != "" {
+		c.SetSameSite(http.SameSiteNoneMode)
+		c.SetCookie("orionauth_session_state", resp.SessionState, 0, "/", "", true, false)
+	}
+}
+
 func (h *Handler) SetAuditService(s *audit.Service) {
 	h.auditService = s
 }
@@ -219,6 +227,7 @@ func (h *Handler) AuthorizeLogin(c *gin.Context) {
 			pkg.HandleError(c, err)
 			return
 		}
+		setSessionStateCookie(c, codeResp)
 		c.JSON(http.StatusOK, codeResp)
 		return
 	}
@@ -256,6 +265,7 @@ func (h *Handler) AuthorizeMFA(c *gin.Context) {
 			pkg.HandleError(c, err)
 			return
 		}
+		setSessionStateCookie(c, codeResp)
 		c.JSON(http.StatusOK, codeResp)
 		return
 	}
@@ -291,6 +301,7 @@ func (h *Handler) AuthorizeConsent(c *gin.Context) {
 		})
 	}
 
+	setSessionStateCookie(c, resp)
 	pkg.OK(c, resp)
 }
 

@@ -5,8 +5,10 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"log/slog"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -727,6 +729,7 @@ type AuthorizeConsentResponse struct {
 	Code         string `json:"code,omitempty"`
 	State        string `json:"state,omitempty"`
 	Issuer       string `json:"iss,omitempty"`
+	SessionState string `json:"session_state,omitempty"`
 	ResponseMode string `json:"response_mode,omitempty"`
 	AccessToken  string `json:"access_token,omitempty"`
 	TokenType    string `json:"token_type,omitempty"`
@@ -860,6 +863,9 @@ func (s *Service) completeAuthorize(req *model.AuthorizationRequest, ipAddress, 
 	if req.ResponseMode != nil {
 		resp.ResponseMode = *req.ResponseMode
 	}
+
+	// Compute session_state (OIDC Session Management 1.0)
+	resp.SessionState = computeSessionState(req.ClientID.String(), req.RedirectURI, sess.ID.String())
 
 	// Hybrid flows: issue additional tokens in the authorization response
 	if isHybridResponseType(req.ResponseType) {
@@ -1399,6 +1405,24 @@ func computeACR(authMethods []string) (string, []string) {
 		acr = "urn:orionauth:acr:mfa"
 	}
 	return acr, amr
+}
+
+// computeSessionState implements OIDC Session Management session_state calculation.
+// session_state = SHA256(client_id + " " + origin + " " + session_id + " " + salt) + "." + salt
+func computeSessionState(clientID, redirectURI, sessionID string) string {
+	origin := extractOrigin(redirectURI)
+	salt, _ := crypto.GenerateRandomString(16)
+	data := clientID + " " + origin + " " + sessionID + " " + salt
+	hash := sha256.Sum256([]byte(data))
+	return hex.EncodeToString(hash[:]) + "." + salt
+}
+
+func extractOrigin(uri string) string {
+	u, err := url.Parse(uri)
+	if err != nil {
+		return uri
+	}
+	return u.Scheme + "://" + u.Host
 }
 
 func parseSpaceDelimited(s string) []string {
