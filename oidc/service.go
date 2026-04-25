@@ -32,7 +32,7 @@ type SessionRevoker interface {
 type ClientFinder interface {
 	FindActiveByID(id uuid.UUID) (*model.OAuthClient, error)
 	FindClientsWithBackchannelLogout(userID uuid.UUID) ([]model.OAuthClient, error)
-	FindClientsWithFrontchannelLogout() ([]model.OAuthClient, error)
+	FindClientsWithFrontchannelLogout(userID uuid.UUID) ([]model.OAuthClient, error)
 }
 
 type Service struct {
@@ -587,9 +587,9 @@ func (s *Service) EndSession(params EndSessionParams) (*EndSessionResponse, erro
 
 	resp := &EndSessionResponse{LoggedOut: true}
 
-	// Front-Channel Logout: collect iframe URLs for RPs
-	if s.clientFinder != nil {
-		fcClients, _ := s.clientFinder.FindClientsWithFrontchannelLogout()
+	// Front-Channel Logout: collect iframe URLs for RPs with active consents for this user
+	if userID != nil && s.clientFinder != nil {
+		fcClients, _ := s.clientFinder.FindClientsWithFrontchannelLogout(*userID)
 		for _, c := range fcClients {
 			if c.FrontchannelLogoutURI != nil {
 				resp.FrontchannelLogoutURIs = append(resp.FrontchannelLogoutURIs, *c.FrontchannelLogoutURI)
