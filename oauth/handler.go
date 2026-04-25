@@ -43,6 +43,9 @@ func (h *Handler) RegisterRoutes(router *gin.Engine, clientAuth, rateLimiter gin
 	router.POST("/device/verify", rateLimiter, h.DeviceVerify)
 	router.POST("/device/approve", rateLimiter, h.DeviceApprove)
 
+	// Pushed Authorization Requests (RFC 9126)
+	router.POST("/par", rateLimiter, clientAuth, h.PushedAuthorization)
+
 	// Introspection and revocation (client auth required)
 	router.POST("/introspect", rateLimiter, clientAuth, h.Introspect)
 	router.POST("/revoke", rateLimiter, clientAuth, h.Revoke)
@@ -65,6 +68,22 @@ func (h *Handler) RegisterRoutes(router *gin.Engine, clientAuth, rateLimiter gin
 // @Failure 400 {object} map[string]any
 // @Router /authorize [get]
 func (h *Handler) Authorize(c *gin.Context) {
+	// PAR support: if request_uri is present, load params from stored PAR
+	if requestURI := c.Query("request_uri"); requestURI != "" {
+		clientID := c.Query("client_id")
+		if clientID == "" {
+			pkg.HandleError(c, pkg.ErrInvalidRequest("missing client_id"))
+			return
+		}
+		resp, err := h.service.InitAuthorizeFromPAR(requestURI, clientID)
+		if err != nil {
+			pkg.HandleError(c, err)
+			return
+		}
+		pkg.OK(c, resp)
+		return
+	}
+
 	clientID := c.Query("client_id")
 	if clientID == "" {
 		pkg.HandleError(c, pkg.ErrInvalidRequest("missing client_id"))
@@ -104,6 +123,44 @@ func (h *Handler) Authorize(c *gin.Context) {
 	}
 
 	pkg.OK(c, resp)
+}
+
+// PushedAuthorization handles Pushed Authorization Requests (RFC 9126).
+func (h *Handler) PushedAuthorization(c *gin.Context) {
+	client, ok := middleware.GetOAuthClient(c)
+	if !ok {
+		pkg.HandleError(c, pkg.ErrInvalidClient("missing client"))
+		return
+	}
+
+	params := InitAuthorizeParams{
+		RedirectURI:         c.PostForm("redirect_uri"),
+		ResponseType:        c.PostForm("response_type"),
+		Scope:               c.PostForm("scope"),
+		State:               c.PostForm("state"),
+		Nonce:               c.PostForm("nonce"),
+		CodeChallenge:       c.PostForm("code_challenge"),
+		CodeChallengeMethod: c.PostForm("code_challenge_method"),
+		Audience:            c.PostForm("audience"),
+		Prompt:              c.PostForm("prompt"),
+		MaxAge:              c.PostForm("max_age"),
+		Display:             c.PostForm("display"),
+		UILocales:           c.PostForm("ui_locales"),
+		ClaimsLocales:       c.PostForm("claims_locales"),
+		ACRValues:           c.PostForm("acr_values"),
+		LoginHint:           c.PostForm("login_hint"),
+		Claims:              c.PostForm("claims"),
+		IDTokenHint:         c.PostForm("id_token_hint"),
+		ResponseMode:        c.PostForm("response_mode"),
+	}
+
+	resp, err := h.service.CreatePAR(client, params)
+	if err != nil {
+		pkg.HandleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusCreated, resp)
 }
 
 // AuthorizeLogin handles the login step of the authorize flow.

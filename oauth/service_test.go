@@ -49,6 +49,9 @@ type mockOAuthRepo struct {
 	findDeviceCodeFn               func(codeHash string) (*model.DeviceCode, error)
 	findDeviceCodeByUserCodeFn     func(userCode string) (*model.DeviceCode, error)
 	updateDeviceCodeFn             func(dc *model.DeviceCode) error
+	createPARFn                    func(par *model.PushedAuthorizationRequest) error
+	findPARFn                      func(requestURI string) (*model.PushedAuthorizationRequest, error)
+	deletePARFn                    func(requestURI string) error
 }
 
 func (m *mockOAuthRepo) findClient(clientIDStr string) (*model.OAuthClient, error) {
@@ -200,6 +203,24 @@ func (m *mockOAuthRepo) FindDeviceCodeByUserCode(userCode string) (*model.Device
 func (m *mockOAuthRepo) UpdateDeviceCode(dc *model.DeviceCode) error {
 	if m.updateDeviceCodeFn != nil {
 		return m.updateDeviceCodeFn(dc)
+	}
+	return nil
+}
+func (m *mockOAuthRepo) CreatePAR(par *model.PushedAuthorizationRequest) error {
+	if m.createPARFn != nil {
+		return m.createPARFn(par)
+	}
+	return nil
+}
+func (m *mockOAuthRepo) FindPAR(requestURI string) (*model.PushedAuthorizationRequest, error) {
+	if m.findPARFn != nil {
+		return m.findPARFn(requestURI)
+	}
+	return nil, nil
+}
+func (m *mockOAuthRepo) DeletePAR(requestURI string) error {
+	if m.deletePARFn != nil {
+		return m.deletePARFn(requestURI)
 	}
 	return nil
 }

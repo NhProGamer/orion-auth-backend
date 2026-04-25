@@ -47,6 +47,11 @@ type RepositoryInterface interface {
 	FindDeviceCodeByUserCode(userCode string) (*model.DeviceCode, error)
 	UpdateDeviceCode(dc *model.DeviceCode) error
 
+	// Pushed Authorization Requests
+	CreatePAR(par *model.PushedAuthorizationRequest) error
+	FindPAR(requestURI string) (*model.PushedAuthorizationRequest, error)
+	DeletePAR(requestURI string) error
+
 	// Transactions
 	Transaction(fn func(tx RepositoryInterface) error) error
 }

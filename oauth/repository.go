@@ -186,6 +186,25 @@ func (r *Repository) UpdateDeviceCode(dc *model.DeviceCode) error {
 	return r.db.Save(dc).Error
 }
 
+// --- Pushed Authorization Requests ---
+
+func (r *Repository) CreatePAR(par *model.PushedAuthorizationRequest) error {
+	return r.db.Create(par).Error
+}
+
+func (r *Repository) FindPAR(requestURI string) (*model.PushedAuthorizationRequest, error) {
+	var par model.PushedAuthorizationRequest
+	err := r.db.Where("request_uri = ? AND expires_at > ?", requestURI, time.Now()).First(&par).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &par, err
+}
+
+func (r *Repository) DeletePAR(requestURI string) error {
+	return r.db.Delete(&model.PushedAuthorizationRequest{}, "request_uri = ?", requestURI).Error
+}
+
 // --- Transactions ---
 
 func (r *Repository) Transaction(fn func(tx RepositoryInterface) error) error {

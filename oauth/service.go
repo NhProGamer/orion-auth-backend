@@ -195,6 +195,76 @@ type InitAuthorizeResponse struct {
 	Redirect        *AuthorizeConsentResponse `json:"redirect,omitempty"`
 }
 
+// --- Pushed Authorization Requests (RFC 9126) ---
+
+type PARResponse struct {
+	RequestURI string `json:"request_uri"`
+	ExpiresIn  int    `json:"expires_in"`
+}
+
+func (s *Service) CreatePAR(client *model.OAuthClient, params InitAuthorizeParams) (*PARResponse, error) {
+	// Validate the params (same as InitAuthorize but don't execute)
+	if !isValidResponseType(params.ResponseType) {
+		return nil, pkg.ErrUnsupportedResponseType("invalid response_type")
+	}
+	if !client.HasRedirectURI(params.RedirectURI) {
+		return nil, pkg.ErrInvalidRequest("invalid redirect_uri")
+	}
+
+	paramsJSON, err := json.Marshal(params)
+	if err != nil {
+		return nil, pkg.ErrServerError("failed to serialize PAR params")
+	}
+
+	requestURI := "urn:ietf:params:oauth:request_uri:" + uuid.Must(uuid.NewV7()).String()
+	expiresIn := 60
+
+	par := &model.PushedAuthorizationRequest{
+		RequestURI: requestURI,
+		ClientID:   client.ID,
+		Params:     string(paramsJSON),
+		ExpiresAt:  time.Now().Add(time.Duration(expiresIn) * time.Second),
+	}
+
+	if err := s.repo.CreatePAR(par); err != nil {
+		return nil, pkg.ErrServerError("failed to store PAR")
+	}
+
+	return &PARResponse{
+		RequestURI: requestURI,
+		ExpiresIn:  expiresIn,
+	}, nil
+}
+
+func (s *Service) InitAuthorizeFromPAR(requestURI, clientIDStr string) (*InitAuthorizeResponse, error) {
+	par, err := s.repo.FindPAR(requestURI)
+	if err != nil || par == nil {
+		return nil, pkg.ErrInvalidRequest("invalid or expired request_uri")
+	}
+
+	// Verify client_id matches
+	if par.ClientID.String() != clientIDStr {
+		return nil, pkg.ErrInvalidRequest("client_id mismatch")
+	}
+
+	// Delete PAR (one-time use)
+	_ = s.repo.DeletePAR(requestURI)
+
+	// Deserialize params
+	var params InitAuthorizeParams
+	if err := json.Unmarshal([]byte(par.Params), &params); err != nil {
+		return nil, pkg.ErrServerError("failed to parse PAR params")
+	}
+
+	// Look up client and proceed with normal authorize flow
+	client, err := s.repo.findClient(clientIDStr)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.InitAuthorize(client, params)
+}
+
 func (s *Service) InitAuthorize(client *model.OAuthClient, params InitAuthorizeParams) (*InitAuthorizeResponse, error) {
 	// Validate response_type
 	if !isValidResponseType(params.ResponseType) {
