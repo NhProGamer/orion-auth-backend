@@ -16,6 +16,7 @@ type OAuthClient struct {
 	TokenAuthMethod              string         `gorm:"type:varchar(50);default:'client_secret_basic'" json:"token_auth_method"`
 	IsPublic                     bool           `gorm:"default:false" json:"is_public"`
 	IsFirstParty                 bool           `gorm:"default:false" json:"is_first_party"`
+	RequirePKCE                  bool           `gorm:"default:true" json:"require_pkce"`
 	JWKSUri                      *string        `gorm:"type:varchar(512)" json:"jwks_uri,omitempty"`
 	AccessTokenTTL               int            `gorm:"default:3600" json:"access_token_ttl"`
 	RefreshTokenTTL              int            `gorm:"default:86400" json:"refresh_token_ttl"`
