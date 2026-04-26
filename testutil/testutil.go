@@ -49,6 +49,7 @@ func TestClient() *model.OAuthClient {
 		TokenAuthMethod: "client_secret_basic",
 		IsPublic:        false,
 		IsFirstParty:    false,
+		RequirePKCE:     true,
 		AccessTokenTTL:  3600,
 		RefreshTokenTTL: 86400,
 		IDTokenTTL:      3600,

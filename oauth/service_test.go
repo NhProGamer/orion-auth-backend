@@ -471,6 +471,29 @@ func TestInitAuthorize_RequiresPKCE(t *testing.T) {
 	assertOAuthErrorCode(t, err, "invalid_request")
 }
 
+func TestInitAuthorize_ConfidentialClientPKCEOptional(t *testing.T) {
+	svc := newTestService(&mockOAuthRepo{}, &mockUserRepo{}, &mockSessionRepo{})
+	client := newTestClient()
+	client.RequirePKCE = false
+
+	resp, err := svc.InitAuthorize(client, InitAuthorizeParams{RedirectURI: "https://example.com/callback", ResponseType: "code", Scope: "openid"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.RequestID == uuid.Nil {
+		t.Fatal("expected non-nil request ID")
+	}
+}
+
+func TestInitAuthorize_PublicClientPKCEAlwaysRequired(t *testing.T) {
+	svc := newTestService(&mockOAuthRepo{}, &mockUserRepo{}, &mockSessionRepo{})
+	client := newPublicClient()
+	client.RequirePKCE = false
+
+	_, err := svc.InitAuthorize(client, InitAuthorizeParams{RedirectURI: "https://example.com/callback", ResponseType: "code", Scope: "openid"})
+	assertOAuthErrorCode(t, err, "invalid_request")
+}
+
 func TestInitAuthorize_OnlyS256Accepted(t *testing.T) {
 	svc := newTestService(&mockOAuthRepo{}, &mockUserRepo{}, &mockSessionRepo{})
 	client := newTestClient()
