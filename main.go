@@ -26,6 +26,7 @@ import (
 	"orion-auth-backend/database"
 	_ "orion-auth-backend/docs"
 	"orion-auth-backend/email"
+	emailtemplates "orion-auth-backend/email/templates"
 	"orion-auth-backend/federation"
 	"orion-auth-backend/invitation"
 	"orion-auth-backend/mfa"
@@ -241,6 +242,9 @@ func setupRouter(
 	router.GET("/health", healthCheck)
 	router.GET("/ready", readinessCheck(db))
 
+	// Email assets (logos used by transactional emails)
+	router.GET("/email-assets/:name", emailAssetHandler)
+
 	// OAuth2 endpoints (root level, rate limited)
 	oauthRL := middleware.NewRateLimiter(10, 3)
 	jwksCache := middleware.NewJWKSCache()
@@ -450,6 +454,18 @@ func healthCheck(c *gin.Context) {
 		"status":  "ok",
 		"service": "orion-auth-backend",
 	})
+}
+
+func emailAssetHandler(c *gin.Context) {
+	name := c.Param("name")
+	data, err := emailtemplates.Assets.ReadFile("assets/" + name)
+	if err != nil {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	c.Header("Content-Type", "image/svg+xml")
+	c.Header("Cache-Control", "public, max-age=86400, immutable")
+	c.Data(http.StatusOK, "image/svg+xml", data)
 }
 
 func readinessCheck(db *gorm.DB) gin.HandlerFunc {
