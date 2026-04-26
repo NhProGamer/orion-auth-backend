@@ -30,6 +30,7 @@ type CreateInput struct {
 	TokenAuthMethod *string  `json:"token_auth_method"`
 	IsPublic        bool     `json:"is_public"`
 	IsFirstParty    bool     `json:"is_first_party"`
+	RequirePKCE     *bool    `json:"require_pkce"`
 	AccessTokenTTL  *int     `json:"access_token_ttl"`
 	RefreshTokenTTL *int     `json:"refresh_token_ttl"`
 	IDTokenTTL      *int     `json:"id_token_ttl"`
@@ -44,6 +45,7 @@ type UpdateInput struct {
 	Scopes          []string `json:"scopes"`
 	TokenAuthMethod *string  `json:"token_auth_method"`
 	IsFirstParty    *bool    `json:"is_first_party"`
+	RequirePKCE     *bool    `json:"require_pkce"`
 	AccessTokenTTL  *int     `json:"access_token_ttl"`
 	RefreshTokenTTL *int     `json:"refresh_token_ttl"`
 	IDTokenTTL      *int     `json:"id_token_ttl"`
@@ -79,7 +81,11 @@ func (s *Service) Create(input CreateInput) (*CreateResponse, error) {
 		TokenAuthMethod: authMethod,
 		IsPublic:        input.IsPublic,
 		IsFirstParty:    input.IsFirstParty,
+		RequirePKCE:     true,
 		Active:          true,
+	}
+	if input.RequirePKCE != nil {
+		client.RequirePKCE = *input.RequirePKCE
 	}
 
 	if input.AccessTokenTTL != nil {
@@ -156,6 +162,9 @@ func (s *Service) Update(id uuid.UUID, input UpdateInput) (*model.OAuthClient, e
 	}
 	if input.IsFirstParty != nil {
 		client.IsFirstParty = *input.IsFirstParty
+	}
+	if input.RequirePKCE != nil {
+		client.RequirePKCE = *input.RequirePKCE
 	}
 	if input.AccessTokenTTL != nil {
 		client.AccessTokenTTL = *input.AccessTokenTTL
