@@ -2,6 +2,7 @@ package oidc
 
 import (
 	"net/http"
+	"net/url"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -94,14 +95,17 @@ func (h *Handler) UserInfo(c *gin.Context) {
 }
 
 // EndSession handles RP-Initiated Logout (OIDC RP-Initiated Logout 1.0).
+// Performs session revocation and back-channel logout dispatch, then redirects
+// the user agent to the AuthUI logout page where front-channel iframes are
+// rendered and the user is offered a "return to app" link if a valid
+// post_logout_redirect_uri was provided.
 // @Summary End session / logout
 // @Tags OIDC
-// @Produce json
 // @Param id_token_hint query string false "Previously issued ID Token"
 // @Param post_logout_redirect_uri query string false "URL to redirect after logout"
 // @Param state query string false "Opaque value for the RP"
 // @Param client_id query string false "Client ID"
-// @Success 200 {object} map[string]any
+// @Success 302 "Redirect to AuthUI logout page"
 // @Router /end_session [get]
 func (h *Handler) EndSession(c *gin.Context) {
 	resp, err := h.service.EndSession(EndSessionParams{
@@ -115,7 +119,19 @@ func (h *Handler) EndSession(c *gin.Context) {
 		return
 	}
 
-	pkg.OK(c, resp)
+	q := url.Values{}
+	if resp.RedirectURI != "" {
+		q.Set("redirect_uri", resp.RedirectURI)
+	}
+	for _, uri := range resp.FrontchannelLogoutURIs {
+		q.Add("frontchannel_logout_uris", uri)
+	}
+
+	target := "/ui/logout"
+	if encoded := q.Encode(); encoded != "" {
+		target += "?" + encoded
+	}
+	c.Redirect(http.StatusFound, target)
 }
 
 // ListKeys returns all signing keys.
