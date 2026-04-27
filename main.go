@@ -165,7 +165,7 @@ func main() {
 	dcrHandler := client.NewDCRHandler(clientService)
 
 	// Router
-	router := setupRouter(cfg, db, hasher, authRateLimiter, rbacService, userHandler, sessionHandler, clientHandler, oauthHandler, oidcHandler, mfaHandler, rbacHandler, auditHandler, fedHandler, invHandler, policyHandler, resourceHandler, dcrHandler)
+	router := setupRouter(cfg, db, hasher, authRateLimiter, rbacService, policyService, userHandler, sessionHandler, clientHandler, oauthHandler, oidcHandler, mfaHandler, rbacHandler, auditHandler, fedHandler, invHandler, policyHandler, resourceHandler, dcrHandler)
 
 	// Server
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
@@ -208,6 +208,7 @@ func setupRouter(
 	hasher *crypto.Argon2Hasher,
 	authRL *middleware.RateLimiter,
 	rbacService *rbac.Service,
+	policyService *policy.Service,
 	userHandler *user.Handler,
 	sessionHandler *session.Handler,
 	clientHandler *client.Handler,
@@ -249,7 +250,7 @@ func setupRouter(
 	// OAuth2 endpoints (root level, rate limited)
 	oauthRL := middleware.NewRateLimiter(10, 3)
 	jwksCache := middleware.NewJWKSCache()
-	clientAuthMiddleware := middleware.ClientAuth(db, hasher, cfg.Issuer+"/token", jwksCache)
+	clientAuthMiddleware := middleware.ClientAuth(db, hasher, cfg.Issuer+"/token", jwksCache, newPolicyDeciderAdapter(policyService))
 	oauthHandler.RegisterRoutes(router, clientAuthMiddleware, oauthRL.Middleware(), cfg.Issuer)
 
 	// Dynamic Client Registration (RFC 7591)
@@ -421,6 +422,25 @@ func seedAdminClient(db *gorm.DB, issuer string) {
 	slog.Warn("Client ID: " + adminClientID)
 	slog.Warn("Public client (no secret, PKCE required)")
 	slog.Warn("========================================")
+}
+
+// policyDeciderAdapter adapts policy.Service to the middleware.PolicyEvaluator
+// interface (returns deny + reason rather than the full policy.EvalResult). It
+// keeps the middleware package free of any direct dependency on policy.
+type policyDeciderAdapter struct {
+	svc *policy.Service
+}
+
+func newPolicyDeciderAdapter(svc *policy.Service) *policyDeciderAdapter {
+	return &policyDeciderAdapter{svc: svc}
+}
+
+func (a *policyDeciderAdapter) Evaluate(ctx context.Context, policyType string, input map[string]any) (bool, string, error) {
+	r, err := a.svc.Evaluate(ctx, policyType, input)
+	if err != nil || r == nil {
+		return false, "", err
+	}
+	return r.Deny, r.DenyReason, nil
 }
 
 // federationListerAdapter adapts federation.Service to invitation.FederationLister.

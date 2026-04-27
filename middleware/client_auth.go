@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -13,14 +14,25 @@ import (
 	"orion-auth-backend/crypto"
 	"orion-auth-backend/model"
 	"orion-auth-backend/pkg"
+	"orion-auth-backend/policy/inputs"
 )
 
 const ContextOAuthClient = "oauth_client"
 
+// PolicyEvaluator is a narrow interface the ClientAuth middleware uses to
+// evaluate client_auth policies. It is satisfied by an adapter on
+// policy.Service in main.go — kept here to avoid an import cycle.
+type PolicyEvaluator interface {
+	Evaluate(ctx context.Context, policyType string, input map[string]any) (deny bool, reason string, err error)
+}
+
 // ClientAuth authenticates OAuth2 clients using client_secret_basic,
 // client_secret_post, client_assertion (private_key_jwt / client_secret_jwt),
 // or no auth (public clients).
-func ClientAuth(db *gorm.DB, hasher *crypto.Argon2Hasher, tokenEndpoint string, jwksCache *JWKSCache) gin.HandlerFunc {
+//
+// If evaluator is non-nil, client_auth policies are evaluated after a
+// successful credential check. A deny aborts the request with invalid_client.
+func ClientAuth(db *gorm.DB, hasher *crypto.Argon2Hasher, tokenEndpoint string, jwksCache *JWKSCache, evaluator PolicyEvaluator) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var clientID uuid.UUID
 		var clientSecret string
@@ -137,6 +149,31 @@ func ClientAuth(db *gorm.DB, hasher *crypto.Argon2Hasher, tokenEndpoint string, 
 			match, err := hasher.Verify(clientSecret, *oauthClient.SecretHash)
 			if err != nil || !match {
 				pkg.HandleError(c, pkg.ErrInvalidClient("invalid client credentials"))
+				c.Abort()
+				return
+			}
+		}
+
+		// Evaluate client_auth policies (optional)
+		if evaluator != nil {
+			if authMethod == "" {
+				if jwtAuthenticated {
+					authMethod = "private_key_jwt"
+				} else {
+					authMethod = "none"
+				}
+			}
+			pInput := inputs.BuildClientAuthInput(
+				&oauthClient,
+				authMethod,
+				c.Request.Method,
+				c.Request.URL.Path,
+				c.ClientIP(),
+				c.GetHeader("User-Agent"),
+			)
+			deny, reason, err := evaluator.Evaluate(c.Request.Context(), "client_auth", pInput)
+			if err == nil && deny {
+				pkg.HandleError(c, pkg.ErrInvalidClient(reason))
 				c.Abort()
 				return
 			}

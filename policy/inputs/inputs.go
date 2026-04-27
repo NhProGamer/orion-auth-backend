@@ -73,6 +73,24 @@ func BuildTokenIssuanceInput(c *model.OAuthClient, u *model.User, scopes []strin
 	return input
 }
 
+// BuildClientAuthInput is used by the ClientAuth middleware right after a
+// client is successfully authenticated on /token, /introspect, /revoke, /par,
+// /device_authorization. authMethod is one of: client_secret_basic,
+// client_secret_post, private_key_jwt, none.
+func BuildClientAuthInput(c *model.OAuthClient, authMethod, method, path, ipAddress, userAgent string) map[string]any {
+	return map[string]any{
+		"client":      clientFields(c),
+		"auth_method": authMethod,
+		"request": map[string]any{
+			"method": method,
+			"path":   path,
+		},
+		"ip_address": ipAddress,
+		"user_agent": userAgent,
+		"time":       timeFields(),
+	}
+}
+
 // BuildAdminAPIInput is used by the RequirePolicy middleware on /api/v1/admin/*
 // (admin_api policy type). Only deny is consulted; modify is ignored.
 func BuildAdminAPIInput(userID uuid.UUID, permissions []string, method, path, ipAddress string) map[string]any {
