@@ -1193,23 +1193,14 @@ func (s *Service) issueTokensWithOpts(tx RepositoryInterface, client *model.OAut
 				return nil, pkg.ErrAccessDenied(result.DenyReason)
 			}
 			if result.Modify != nil {
-				if ttl, ok := result.Modify["access_token_ttl"]; ok {
-					if v, ok := ttl.(json.Number); ok {
-						if n, err := v.Int64(); err == nil {
-							client.AccessTokenTTL = int(n)
-						}
-					} else if v, ok := ttl.(float64); ok {
-						client.AccessTokenTTL = int(v)
-					}
+				if n, ok := readModifyInt(result.Modify, "access_token_ttl"); ok {
+					client.AccessTokenTTL = n
 				}
-				if ttl, ok := result.Modify["refresh_token_ttl"]; ok {
-					if v, ok := ttl.(json.Number); ok {
-						if n, err := v.Int64(); err == nil {
-							client.RefreshTokenTTL = int(n)
-						}
-					} else if v, ok := ttl.(float64); ok {
-						client.RefreshTokenTTL = int(v)
-					}
+				if n, ok := readModifyInt(result.Modify, "refresh_token_ttl"); ok {
+					client.RefreshTokenTTL = n
+				}
+				if narrowed, ok := readModifyScopes(result.Modify, scopes); ok {
+					scopes = narrowed
 				}
 			}
 		}
