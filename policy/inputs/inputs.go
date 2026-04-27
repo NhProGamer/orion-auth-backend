@@ -107,6 +107,24 @@ func BuildConsentInput(u *model.User, c *model.OAuthClient, requestedScopes, gra
 	return input
 }
 
+// BuildDeviceApprovalInput is used right before a user-approved device code is
+// marked authorized (device_approval policy type). Useful to enforce additional
+// auth, restrict device approval by IP/UA fingerprint, or by time of day.
+func BuildDeviceApprovalInput(u *model.User, c *model.OAuthClient, scopes []string, userCode, ipAddress, userAgent string) map[string]any {
+	input := map[string]any{
+		"user":       userFields(u),
+		"scopes":     scopes,
+		"user_code":  userCode,
+		"ip_address": ipAddress,
+		"user_agent": userAgent,
+		"time":       timeFields(),
+	}
+	if c != nil {
+		input["client"] = clientFields(c)
+	}
+	return input
+}
+
 // BuildIntrospectInput is used at /introspect right after the token is
 // resolved. A deny here causes the response to look like an inactive token
 // (per RFC 7662 — the caller learns nothing) which is the security-correct

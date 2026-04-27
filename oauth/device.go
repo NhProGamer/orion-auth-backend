@@ -1,6 +1,7 @@
 package oauth
 
 import (
+	"context"
 	"crypto/rand"
 	"log/slog"
 	"math/big"
@@ -12,6 +13,7 @@ import (
 	"orion-auth-backend/crypto"
 	"orion-auth-backend/model"
 	"orion-auth-backend/pkg"
+	"orion-auth-backend/policy/inputs"
 	"orion-auth-backend/session"
 )
 
@@ -128,6 +130,24 @@ func (s *Service) DeviceApprove(input DeviceApproveInput, userID uuid.UUID, ipAd
 	if !input.Approved {
 		dc.Status = "denied"
 		return s.repo.UpdateDeviceCode(dc)
+	}
+
+	// Evaluate device_approval policies
+	if s.policyEvaluator != nil {
+		var u *model.User
+		if s.userService != nil {
+			u, _ = s.userService.GetByID(userID)
+		}
+		client, _ := s.repo.findClient(dc.ClientID.String())
+		if u != nil {
+			pInput := inputs.BuildDeviceApprovalInput(u, client, []string(dc.Scopes), dc.UserCode, ipAddress, userAgent)
+			result, pErr := s.policyEvaluator.Evaluate(context.Background(), "device_approval", pInput)
+			if pErr != nil {
+				slog.Warn("device_approval policy evaluation failed", "error", pErr)
+			} else if result != nil && result.Deny {
+				return pkg.ErrAccessDenied(result.DenyReason)
+			}
+		}
 	}
 
 	// Create session

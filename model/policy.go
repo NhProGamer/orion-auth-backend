@@ -8,6 +8,7 @@ const (
 	PolicyTypeConsent       = "consent"
 	PolicyTypeRefresh       = "refresh"
 	PolicyTypeIntrospect    = "introspect"
+	PolicyTypeDeviceApproval = "device_approval"
 	PolicyTypeCustom        = "custom"
 )
 
