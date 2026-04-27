@@ -6,6 +6,7 @@ import (
 
 	"orion-auth-backend/audit"
 	"orion-auth-backend/pkg"
+	"orion-auth-backend/policy/inputs"
 )
 
 type Handler struct {
@@ -24,6 +25,7 @@ func (h *Handler) SetAuditService(s *audit.Service) {
 func (h *Handler) RegisterRoutes(admin *gin.RouterGroup) {
 	admin.POST("/policies", h.CreatePolicy)
 	admin.GET("/policies", h.ListPolicies)
+	admin.GET("/policies/schemas", h.GetSchemas)
 	admin.GET("/policies/stats", h.GetStats)
 	admin.POST("/policies/replay", h.Replay)
 	admin.GET("/policies/:id", h.GetPolicy)
@@ -31,6 +33,17 @@ func (h *Handler) RegisterRoutes(admin *gin.RouterGroup) {
 	admin.DELETE("/policies/:id", h.DeletePolicy)
 	admin.POST("/policies/test", h.TestPolicy)
 	admin.POST("/policies/validate", h.ValidatePolicy)
+}
+
+// GetSchemas godoc
+// @Summary      Per-type input/modify field catalog for autocomplete
+// @Tags         Admin - Policies
+// @Produce      json
+// @Success      200 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/admin/policies/schemas [get]
+func (h *Handler) GetSchemas(c *gin.Context) {
+	pkg.OK(c, gin.H{"data": inputs.Schemas()})
 }
 
 // Replay godoc
