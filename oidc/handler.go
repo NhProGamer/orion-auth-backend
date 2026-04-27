@@ -144,7 +144,7 @@ func (h *Handler) EndSession(c *gin.Context) {
 // @Router /api/v1/admin/keys [get]
 func (h *Handler) ListKeys(c *gin.Context) {
 	jwks := h.service.GetJWKS()
-	pkg.OK(c, gin.H{"keys": jwks.Keys})
+	pkg.List(c, jwks.Keys, len(jwks.Keys))
 }
 
 // RotateKey generates a new signing key.

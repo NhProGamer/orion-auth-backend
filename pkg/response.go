@@ -49,6 +49,18 @@ type PaginatedResponse struct {
 	TotalPages int   `json:"total_pages"`
 }
 
+// List sends a list response in the standard paginated envelope shape, with
+// total = count and a single page. Use this for endpoints whose underlying
+// repository does not (yet) support pagination but whose response shape must
+// remain consistent with paginated endpoints.
+func List(c *gin.Context, items any, count int) {
+	perPage := count
+	if perPage == 0 {
+		perPage = 1
+	}
+	Paginated(c, items, int64(count), 1, perPage)
+}
+
 // Paginated sends a paginated response.
 func Paginated(c *gin.Context, data any, total int64, page, perPage int) {
 	totalPages := int(total) / perPage

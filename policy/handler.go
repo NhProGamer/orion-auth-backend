@@ -105,7 +105,7 @@ func (h *Handler) ListPolicies(c *gin.Context) {
 		pkg.HandleError(c, pkg.ErrInternal("failed to list policies"))
 		return
 	}
-	pkg.OK(c, gin.H{"policies": policies})
+	pkg.List(c, policies, len(policies))
 }
 
 // UpdatePolicy godoc

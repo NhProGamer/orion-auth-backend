@@ -68,7 +68,7 @@ func (h *Handler) List(c *gin.Context) {
 		result = append(result, entry)
 	}
 
-	pkg.OK(c, gin.H{"sessions": result})
+	pkg.List(c, result, len(result))
 }
 
 // Revoke godoc

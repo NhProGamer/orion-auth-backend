@@ -105,7 +105,7 @@ func (h *Handler) ListRoles(c *gin.Context) {
 		pkg.HandleError(c, pkg.ErrInternal("failed to list roles"))
 		return
 	}
-	pkg.OK(c, gin.H{"roles": roles})
+	pkg.List(c, roles, len(roles))
 }
 
 // UpdateRole godoc
@@ -228,7 +228,7 @@ func (h *Handler) ListPermissions(c *gin.Context) {
 		pkg.HandleError(c, pkg.ErrInternal("failed to list permissions"))
 		return
 	}
-	pkg.OK(c, gin.H{"permissions": perms})
+	pkg.List(c, perms, len(perms))
 }
 
 // AssignRole godoc
@@ -327,5 +327,5 @@ func (h *Handler) GetUserRoles(c *gin.Context) {
 		pkg.HandleError(c, pkg.ErrInternal("failed to get user roles"))
 		return
 	}
-	pkg.OK(c, gin.H{"roles": roles})
+	pkg.List(c, roles, len(roles))
 }

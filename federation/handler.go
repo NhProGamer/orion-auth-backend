@@ -120,7 +120,7 @@ func (h *Handler) ListLinkedAccounts(c *gin.Context) {
 		return
 	}
 
-	pkg.OK(c, gin.H{"linked_accounts": links})
+	pkg.List(c, links, len(links))
 }
 
 // UnlinkAccount godoc
@@ -203,7 +203,7 @@ func (h *Handler) ListProviders(c *gin.Context) {
 		pkg.HandleError(c, pkg.ErrInternal("failed to list providers"))
 		return
 	}
-	pkg.OK(c, gin.H{"providers": providers})
+	pkg.List(c, providers, len(providers))
 }
 
 // UpdateProvider godoc

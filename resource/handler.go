@@ -333,7 +333,7 @@ func (h *Handler) GetClientPermissions(c *gin.Context) {
 		return
 	}
 
-	pkg.OK(c, gin.H{"permissions": perms})
+	pkg.List(c, perms, len(perms))
 }
 
 // SetRolePermissions godoc
@@ -399,5 +399,5 @@ func (h *Handler) GetRolePermissions(c *gin.Context) {
 		return
 	}
 
-	pkg.OK(c, gin.H{"permissions": perms})
+	pkg.List(c, perms, len(perms))
 }
