@@ -20,6 +20,7 @@ import (
 	"orion-auth-backend/crypto"
 	"orion-auth-backend/model"
 	"orion-auth-backend/pkg"
+	"orion-auth-backend/policy/inputs"
 	"orion-auth-backend/session"
 	"orion-auth-backend/user"
 )
@@ -577,16 +578,7 @@ func (s *Service) AuthorizeLogin(input AuthorizeLoginInput, ipAddress, userAgent
 
 	// Evaluate login policies
 	if s.policyEvaluator != nil {
-		pInput := map[string]any{
-			"user": map[string]any{
-				"id":             u.ID.String(),
-				"email":          u.Email,
-				"email_verified": u.EmailVerified,
-				"active":         u.Active,
-			},
-			"ip_address": ipAddress,
-			"user_agent": userAgent,
-		}
+		pInput := inputs.BuildLoginInput(u, nil, ipAddress, userAgent)
 		result, pErr := s.policyEvaluator.Evaluate(context.Background(), "login", pInput)
 		if pErr != nil {
 			slog.Warn("login policy evaluation failed", "error", pErr)
@@ -1192,23 +1184,7 @@ func (s *Service) issueTokensWithOpts(tx RepositoryInterface, client *model.OAut
 		if s.userService != nil {
 			u, _ = s.userService.GetByID(*userID)
 		}
-		pInput := map[string]any{
-			"client": map[string]any{
-				"id":             client.ID.String(),
-				"name":           client.Name,
-				"is_public":      client.IsPublic,
-				"is_first_party": client.IsFirstParty,
-			},
-			"scopes": []string(scopes),
-		}
-		if u != nil {
-			pInput["user"] = map[string]any{
-				"id":             u.ID.String(),
-				"email":          u.Email,
-				"email_verified": u.EmailVerified,
-				"active":         u.Active,
-			}
-		}
+		pInput := inputs.BuildTokenIssuanceInput(client, u, []string(scopes), "")
 		result, pErr := s.policyEvaluator.Evaluate(context.Background(), "token_issuance", pInput)
 		if pErr != nil {
 			slog.Warn("token issuance policy evaluation failed", "error", pErr)
