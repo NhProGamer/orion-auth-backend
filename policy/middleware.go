@@ -7,6 +7,7 @@ import (
 
 	"orion-auth-backend/middleware"
 	"orion-auth-backend/pkg"
+	"orion-auth-backend/policy/inputs"
 	"orion-auth-backend/rbac"
 )
 
@@ -26,7 +27,7 @@ func RequirePolicy(policySvc *Service, rbacSvc *rbac.Service) gin.HandlerFunc {
 			return
 		}
 
-		input := BuildAdminAPIInput(userID, permissions, c.Request.Method, c.Request.URL.Path, c.ClientIP())
+		input := inputs.BuildAdminAPIInput(userID, permissions, c.Request.Method, c.Request.URL.Path, c.ClientIP())
 		result, err := policySvc.Evaluate(context.Background(), "admin_api", input)
 		if err != nil {
 			c.Next()
