@@ -137,7 +137,7 @@ type ProfileMetadata struct {
 	FamilyName        *string       `json:"family_name,omitempty"`
 	MiddleName        *string       `json:"middle_name,omitempty"`
 	Nickname          *string       `json:"nickname,omitempty"`
-	PreferredUsername  *string       `json:"preferred_username,omitempty"`
+	PreferredUsername *string       `json:"preferred_username,omitempty"`
 	ProfileURL        *string       `json:"profile,omitempty"`
 	Website           *string       `json:"website,omitempty"`
 	Gender            *string       `json:"gender,omitempty"`
