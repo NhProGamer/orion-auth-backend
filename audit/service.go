@@ -64,6 +64,7 @@ func (s *Service) Log(entry LogEntry) {
 }
 
 type QueryInput struct {
+	ID      *uuid.UUID
 	UserID  *uuid.UUID
 	Action  string
 	From    *time.Time
@@ -78,6 +79,9 @@ func (s *Service) Query(input QueryInput) ([]model.AuditLog, int64, error) {
 
 	query := s.db.Model(&model.AuditLog{})
 
+	if input.ID != nil {
+		query = query.Where("id = ?", *input.ID)
+	}
 	if input.UserID != nil {
 		query = query.Where("user_id = ?", *input.UserID)
 	}

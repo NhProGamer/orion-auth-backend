@@ -2,6 +2,7 @@ package policy
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"time"
 
@@ -11,6 +12,10 @@ import (
 	"orion-auth-backend/model"
 	"orion-auth-backend/pkg"
 )
+
+func unmarshalMeta(raw json.RawMessage, out *map[string]any) error {
+	return json.Unmarshal(raw, out)
+}
 
 type Service struct {
 	repo         RepositoryInterface
@@ -215,6 +220,7 @@ func (s *Service) Evaluate(ctx context.Context, policyType string, input map[str
 				"policy_type": policyType,
 				"policy_name": result.PolicyName,
 				"reason":      result.DenyReason,
+				"input":       input,
 			},
 		})
 	}
@@ -244,6 +250,67 @@ func extractString(input map[string]any, key string) string {
 		return v
 	}
 	return ""
+}
+
+// --- Replay ---
+
+// ReplayResult represents what would happen now if the same input were
+// re-evaluated against the currently active policies of the same type.
+type ReplayResult struct {
+	OriginalDeny   bool           `json:"original_deny"`
+	OriginalReason string         `json:"original_reason,omitempty"`
+	Type           string         `json:"type"`
+	Input          map[string]any `json:"input"`
+	Now            *EvalResult    `json:"now"`
+}
+
+// Replay fetches a policy.denied audit log, extracts the original input, and
+// re-evaluates it against currently active policies. Useful to verify a fix
+// or to understand whether a policy still denies the same context.
+func (s *Service) Replay(auditLogID uuid.UUID) (*ReplayResult, error) {
+	if s.auditService == nil {
+		return nil, pkg.ErrInternal("audit service not configured")
+	}
+	logs, _, err := s.auditService.Query(audit.QueryInput{
+		Page:    1,
+		PerPage: 1,
+		Action:  audit.ActionPolicyDenied,
+		ID:      &auditLogID,
+	})
+	if err != nil || len(logs) == 0 {
+		return nil, pkg.ErrNotFound("audit log not found")
+	}
+	log := logs[0]
+
+	var meta map[string]any
+	if len(log.Metadata) > 0 {
+		if err := unmarshalMeta(log.Metadata, &meta); err != nil {
+			return nil, pkg.ErrInternal("invalid audit metadata")
+		}
+	}
+
+	rawInput, ok := meta["input"].(map[string]any)
+	if !ok {
+		return nil, pkg.ErrBadRequest("audit log has no captured input — only denies recorded after this feature was deployed are replayable")
+	}
+	policyType, _ := meta["policy_type"].(string)
+	if policyType == "" {
+		return nil, pkg.ErrBadRequest("audit log has no policy_type")
+	}
+
+	now, err := s.engine.Evaluate(context.Background(), policyType, rawInput)
+	if err != nil {
+		return nil, err
+	}
+
+	originalReason, _ := meta["reason"].(string)
+	return &ReplayResult{
+		OriginalDeny:   true,
+		OriginalReason: originalReason,
+		Type:           policyType,
+		Input:          rawInput,
+		Now:            now,
+	}, nil
 }
 
 // --- Stats ---

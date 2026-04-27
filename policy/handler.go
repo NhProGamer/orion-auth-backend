@@ -25,11 +25,44 @@ func (h *Handler) RegisterRoutes(admin *gin.RouterGroup) {
 	admin.POST("/policies", h.CreatePolicy)
 	admin.GET("/policies", h.ListPolicies)
 	admin.GET("/policies/stats", h.GetStats)
+	admin.POST("/policies/replay", h.Replay)
 	admin.GET("/policies/:id", h.GetPolicy)
 	admin.PATCH("/policies/:id", h.UpdatePolicy)
 	admin.DELETE("/policies/:id", h.DeletePolicy)
 	admin.POST("/policies/test", h.TestPolicy)
 	admin.POST("/policies/validate", h.ValidatePolicy)
+}
+
+// Replay godoc
+// @Summary      Re-evaluate a past denial against current policies
+// @Tags         Admin - Policies
+// @Accept       json
+// @Produce      json
+// @Param        body body object true "Replay payload {audit_log_id}"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} map[string]any
+// @Failure      404 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/admin/policies/replay [post]
+func (h *Handler) Replay(c *gin.Context) {
+	var body struct {
+		AuditLogID string `json:"audit_log_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		pkg.HandleError(c, pkg.ErrBadRequest("invalid request body: "+err.Error()))
+		return
+	}
+	id, err := uuid.Parse(body.AuditLogID)
+	if err != nil {
+		pkg.HandleError(c, pkg.ErrBadRequest("invalid audit_log_id"))
+		return
+	}
+	result, err := h.service.Replay(id)
+	if err != nil {
+		pkg.HandleError(c, err)
+		return
+	}
+	pkg.OK(c, result)
 }
 
 // GetStats godoc
