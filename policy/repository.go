@@ -2,10 +2,12 @@ package policy
 
 import (
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
+	"orion-auth-backend/audit"
 	"orion-auth-backend/model"
 )
 
@@ -69,4 +71,78 @@ func (r *Repository) Update(policy *model.Policy) error {
 
 func (r *Repository) Delete(id uuid.UUID) error {
 	return r.db.Delete(&model.Policy{}, "id = ?", id).Error
+}
+
+// Aggregated decision stats sourced from the audit_logs table.
+
+type StatsBucket struct {
+	Key   string `json:"key"`
+	Count int64  `json:"count"`
+}
+
+type Stats struct {
+	WindowFrom    time.Time         `json:"window_from"`
+	WindowTo      time.Time         `json:"window_to"`
+	TotalDenies   int64             `json:"total_denies"`
+	ByPolicyName  []StatsBucket     `json:"by_policy_name"`
+	ByPolicyType  []StatsBucket     `json:"by_policy_type"`
+	RecentDenies  []model.AuditLog  `json:"recent_denies"`
+}
+
+// Stats aggregates policy denial audit logs in the given window.
+// limit caps both top-N buckets and recent denies; recent default 10.
+func (r *Repository) Stats(from, to time.Time, limit int) (*Stats, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	scope := r.db.Model(&model.AuditLog{}).
+		Where("action = ?", audit.ActionPolicyDenied).
+		Where("created_at >= ? AND created_at < ?", from, to)
+
+	var total int64
+	if err := scope.Count(&total).Error; err != nil {
+		return nil, err
+	}
+
+	byName, err := r.aggregate(from, to, "metadata->>'policy_name'", limit)
+	if err != nil {
+		return nil, err
+	}
+	byType, err := r.aggregate(from, to, "metadata->>'policy_type'", limit)
+	if err != nil {
+		return nil, err
+	}
+
+	var recent []model.AuditLog
+	if err := r.db.Model(&model.AuditLog{}).
+		Where("action = ?", audit.ActionPolicyDenied).
+		Where("created_at >= ? AND created_at < ?", from, to).
+		Order("created_at DESC").
+		Limit(limit).
+		Find(&recent).Error; err != nil {
+		return nil, err
+	}
+
+	return &Stats{
+		WindowFrom:   from,
+		WindowTo:     to,
+		TotalDenies:  total,
+		ByPolicyName: byName,
+		ByPolicyType: byType,
+		RecentDenies: recent,
+	}, nil
+}
+
+func (r *Repository) aggregate(from, to time.Time, expr string, limit int) ([]StatsBucket, error) {
+	var rows []StatsBucket
+	err := r.db.Model(&model.AuditLog{}).
+		Select(expr+" AS key, COUNT(*) AS count").
+		Where("action = ?", audit.ActionPolicyDenied).
+		Where("created_at >= ? AND created_at < ?", from, to).
+		Where(expr + " IS NOT NULL").
+		Group("key").
+		Order("count DESC").
+		Limit(limit).
+		Scan(&rows).Error
+	return rows, err
 }

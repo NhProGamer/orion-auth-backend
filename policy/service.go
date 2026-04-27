@@ -3,6 +3,7 @@ package policy
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -243,6 +244,17 @@ func extractString(input map[string]any, key string) string {
 		return v
 	}
 	return ""
+}
+
+// --- Stats ---
+
+func (s *Service) GetStats(fromDays int, limit int) (*Stats, error) {
+	if fromDays <= 0 {
+		fromDays = 7
+	}
+	now := time.Now()
+	from := now.Add(-time.Duration(fromDays) * 24 * time.Hour)
+	return s.repo.Stats(from, now, limit)
 }
 
 // --- Startup ---

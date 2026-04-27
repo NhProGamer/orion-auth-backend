@@ -24,11 +24,50 @@ func (h *Handler) SetAuditService(s *audit.Service) {
 func (h *Handler) RegisterRoutes(admin *gin.RouterGroup) {
 	admin.POST("/policies", h.CreatePolicy)
 	admin.GET("/policies", h.ListPolicies)
+	admin.GET("/policies/stats", h.GetStats)
 	admin.GET("/policies/:id", h.GetPolicy)
 	admin.PATCH("/policies/:id", h.UpdatePolicy)
 	admin.DELETE("/policies/:id", h.DeletePolicy)
 	admin.POST("/policies/test", h.TestPolicy)
 	admin.POST("/policies/validate", h.ValidatePolicy)
+}
+
+// GetStats godoc
+// @Summary      Aggregated stats on policy denials
+// @Tags         Admin - Policies
+// @Produce      json
+// @Param        days query int false "Window size in days (default 7)"
+// @Param        limit query int false "Top-N + recent items cap (default 10)"
+// @Success      200 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/admin/policies/stats [get]
+func (h *Handler) GetStats(c *gin.Context) {
+	days := parseIntQuery(c, "days", 7)
+	limit := parseIntQuery(c, "limit", 10)
+	stats, err := h.service.GetStats(days, limit)
+	if err != nil {
+		pkg.HandleError(c, pkg.ErrInternal("failed to compute stats"))
+		return
+	}
+	pkg.OK(c, stats)
+}
+
+func parseIntQuery(c *gin.Context, key string, def int) int {
+	raw := c.Query(key)
+	if raw == "" {
+		return def
+	}
+	n := 0
+	for _, ch := range raw {
+		if ch < '0' || ch > '9' {
+			return def
+		}
+		n = n*10 + int(ch-'0')
+	}
+	if n == 0 {
+		return def
+	}
+	return n
 }
 
 // CreatePolicy godoc

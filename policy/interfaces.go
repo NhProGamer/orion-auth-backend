@@ -1,6 +1,8 @@
 package policy
 
 import (
+	"time"
+
 	"github.com/google/uuid"
 
 	"orion-auth-backend/model"
@@ -16,4 +18,5 @@ type RepositoryInterface interface {
 	ListAllActive() ([]model.Policy, error)
 	Update(policy *model.Policy) error
 	Delete(id uuid.UUID) error
+	Stats(from, to time.Time, limit int) (*Stats, error)
 }
