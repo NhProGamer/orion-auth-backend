@@ -1164,6 +1164,31 @@ func (s *Service) ExchangeRefreshToken(client *model.OAuthClient, refreshTokenRa
 			}
 		}
 
+		// Evaluate refresh policies (velocity, time-of-day, scope re-eval)
+		if s.policyEvaluator != nil {
+			var u *model.User
+			if s.userService != nil {
+				u, _ = s.userService.GetByID(rt.UserID)
+			}
+			pInput := inputs.BuildRefreshInput(u, client, requestedScopes, []string(grantedScopes), rt.SessionID.String(), "")
+			result, pErr := s.policyEvaluator.Evaluate(context.Background(), "refresh", pInput)
+			if pErr != nil {
+				slog.Warn("refresh policy evaluation failed", "error", pErr)
+			} else if result != nil {
+				if result.Deny {
+					return pkg.ErrAccessDenied(result.DenyReason)
+				}
+				if result.Modify != nil {
+					if narrowed, ok := readModifyScopes(result.Modify, grantedScopes); ok {
+						grantedScopes = narrowed
+						if len(grantedScopes) == 0 {
+							return pkg.ErrAccessDenied("policy narrowed all scopes")
+						}
+					}
+				}
+			}
+		}
+
 		// Rotate: mark old RT
 		if err := tx.RotateRefreshToken(rtHash); err != nil {
 			return pkg.ErrServerError("failed to rotate refresh token")

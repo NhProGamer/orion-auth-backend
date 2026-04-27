@@ -73,6 +73,24 @@ func BuildTokenIssuanceInput(c *model.OAuthClient, u *model.User, scopes []strin
 	return input
 }
 
+// BuildRefreshInput is used at refresh token exchange (refresh policy type).
+// Useful to bound refresh velocity, time-of-day, or scope re-evaluation
+// independently from token_issuance.
+func BuildRefreshInput(u *model.User, c *model.OAuthClient, requestedScopes, grantedScopes []string, sessionID string, ipAddress string) map[string]any {
+	input := map[string]any{
+		"client":           clientFields(c),
+		"scopes_requested": requestedScopes,
+		"scopes_granted":   grantedScopes,
+		"session_id":       sessionID,
+		"ip_address":       ipAddress,
+		"time":             timeFields(),
+	}
+	if u != nil {
+		input["user"] = userFields(u)
+	}
+	return input
+}
+
 // BuildConsentInput is used right before user consent is recorded for an
 // authorization request (consent policy type). modify.scopes can narrow the
 // granted scopes further.
