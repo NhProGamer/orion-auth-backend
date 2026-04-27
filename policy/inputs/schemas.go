@@ -29,6 +29,8 @@ var (
 		{Path: "user.email", Type: "string"},
 		{Path: "user.email_verified", Type: "boolean"},
 		{Path: "user.active", Type: "boolean"},
+		{Path: "user.roles", Type: "array", Description: "Role names assigned to the user, e.g. \"friends\""},
+		{Path: "user.permissions", Type: "array", Description: "Effective permission strings, e.g. \"clients:read\""},
 	}
 	clientFieldDefs = []FieldDef{
 		{Path: "client.id", Type: "string"},

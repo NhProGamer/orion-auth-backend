@@ -126,6 +126,7 @@ func main() {
 	oauthService.SetIDTokenGenerator(oidc.NewIDTokenAdapter(oidcService))
 	oauthService.SetMFAValidator(mfaService)
 	oauthService.SetPolicyEvaluator(policy.NewOAuthAdapter(policyService))
+	oauthService.SetRoleProvider(newRoleProviderAdapter(rbacService))
 	oauthService.SetResourceValidator(resourceService)
 	oauthService.SetIssuer(cfg.Issuer)
 	oidcService.SetRBACService(rbacService)
@@ -441,6 +442,32 @@ func (a *policyDeciderAdapter) Evaluate(ctx context.Context, policyType string, 
 		return false, "", err
 	}
 	return r.Deny, r.DenyReason, nil
+}
+
+// roleProviderAdapter adapts rbac.Service to oauth.RoleProvider, exposing
+// just role names (not full Role objects) so the policy input stays string-flat.
+type roleProviderAdapter struct {
+	svc *rbac.Service
+}
+
+func newRoleProviderAdapter(svc *rbac.Service) *roleProviderAdapter {
+	return &roleProviderAdapter{svc: svc}
+}
+
+func (a *roleProviderAdapter) GetUserRoleNames(userID uuid.UUID) ([]string, error) {
+	roles, err := a.svc.GetUserRoles(userID)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, len(roles))
+	for i, r := range roles {
+		names[i] = r.Name
+	}
+	return names, nil
+}
+
+func (a *roleProviderAdapter) GetUserPermissions(userID uuid.UUID) ([]string, error) {
+	return a.svc.GetUserPermissions(userID)
 }
 
 // federationListerAdapter adapts federation.Service to invitation.FederationLister.

@@ -61,6 +61,13 @@ type IDTokenValidator interface {
 	ValidateIDToken(tokenString string) (uuid.UUID, error)
 }
 
+// RoleProvider supplies role and permission names for a user. Used to enrich
+// policy inputs without coupling oauth to the rbac package.
+type RoleProvider interface {
+	GetUserRoleNames(userID uuid.UUID) ([]string, error)
+	GetUserPermissions(userID uuid.UUID) ([]string, error)
+}
+
 // IDTokenClaims mirrors oidc.IDTokenClaims to avoid circular imports.
 type IDTokenClaims struct {
 	UserID           uuid.UUID
@@ -92,6 +99,7 @@ type Service struct {
 	policyEvaluator   PolicyEvaluator
 	resourceValidator ResourceValidator
 	idTokenValidator  IDTokenValidator
+	roleProvider      RoleProvider
 }
 
 func NewService(
@@ -133,6 +141,29 @@ func (s *Service) SetResourceValidator(v ResourceValidator) {
 // SetIDTokenValidator sets the ID token validator (called after init to break circular dep).
 func (s *Service) SetIDTokenValidator(v IDTokenValidator) {
 	s.idTokenValidator = v
+}
+
+// SetRoleProvider wires the source of roles + permissions used to enrich
+// policy inputs. Optional — when absent, input.user.roles and .permissions
+// remain empty arrays.
+func (s *Service) SetRoleProvider(p RoleProvider) {
+	s.roleProvider = p
+}
+
+// loadRoles fetches role + permission names for the given user, returning empty
+// slices when the role provider isn't configured or the lookup fails. Errors
+// are intentionally swallowed: a policy decision should not block on RBAC IO.
+func (s *Service) loadRoles(userID uuid.UUID) (roles, permissions []string) {
+	if s.roleProvider == nil {
+		return nil, nil
+	}
+	if r, err := s.roleProvider.GetUserRoleNames(userID); err == nil {
+		roles = r
+	}
+	if p, err := s.roleProvider.GetUserPermissions(userID); err == nil {
+		permissions = p
+	}
+	return roles, permissions
 }
 
 // SetIssuer sets the issuer URL for authorization response iss parameter (RFC 9207).
@@ -579,7 +610,8 @@ func (s *Service) AuthorizeLogin(input AuthorizeLoginInput, ipAddress, userAgent
 
 	// Evaluate login policies
 	if s.policyEvaluator != nil {
-		pInput := inputs.BuildLoginInput(u, nil, ipAddress, userAgent)
+		roles, perms := s.loadRoles(u.ID)
+		pInput := inputs.BuildLoginInput(u, nil, roles, perms, ipAddress, userAgent)
 		result, pErr := s.policyEvaluator.Evaluate(context.Background(), "login", pInput)
 		if pErr != nil {
 			slog.Warn("login policy evaluation failed", "error", pErr)
@@ -612,7 +644,8 @@ func (s *Service) AuthorizeLogin(input AuthorizeLoginInput, ipAddress, userAgent
 	// Evaluate MFA policies — may force MFA on or off based on context.
 	if s.policyEvaluator != nil {
 		client, _ := s.repo.findClient(req.ClientID.String())
-		pInput := inputs.BuildMFAInput(u, client, []string(req.Scopes), hasMFA, ipAddress, userAgent)
+		roles, perms := s.loadRoles(u.ID)
+		pInput := inputs.BuildMFAInput(u, client, roles, perms, []string(req.Scopes), hasMFA, ipAddress, userAgent)
 		result, pErr := s.policyEvaluator.Evaluate(context.Background(), "mfa", pInput)
 		if pErr != nil {
 			slog.Warn("mfa policy evaluation failed", "error", pErr)
@@ -780,7 +813,8 @@ func (s *Service) AuthorizeConsent(input AuthorizeConsentInput, ipAddress, userA
 		}
 		client, _ := s.repo.findClient(req.ClientID.String())
 		if u != nil && client != nil {
-			pInput := inputs.BuildConsentInput(u, client, []string(req.Scopes), grantedScopes, ipAddress, userAgent)
+			roles, perms := s.loadRoles(u.ID)
+			pInput := inputs.BuildConsentInput(u, client, roles, perms, []string(req.Scopes), grantedScopes, ipAddress, userAgent)
 			result, pErr := s.policyEvaluator.Evaluate(context.Background(), "consent", pInput)
 			if pErr != nil {
 				slog.Warn("consent policy evaluation failed", "error", pErr)
@@ -1190,7 +1224,8 @@ func (s *Service) ExchangeRefreshToken(client *model.OAuthClient, refreshTokenRa
 			if s.userService != nil {
 				u, _ = s.userService.GetByID(rt.UserID)
 			}
-			pInput := inputs.BuildRefreshInput(u, client, requestedScopes, []string(grantedScopes), rt.SessionID.String(), "")
+			roles, perms := s.loadRoles(rt.UserID)
+			pInput := inputs.BuildRefreshInput(u, client, roles, perms, requestedScopes, []string(grantedScopes), rt.SessionID.String(), "")
 			result, pErr := s.policyEvaluator.Evaluate(context.Background(), "refresh", pInput)
 			if pErr != nil {
 				slog.Warn("refresh policy evaluation failed", "error", pErr)
@@ -1259,7 +1294,8 @@ func (s *Service) issueTokensWithOpts(tx RepositoryInterface, client *model.OAut
 		if s.userService != nil {
 			u, _ = s.userService.GetByID(*userID)
 		}
-		pInput := inputs.BuildTokenIssuanceInput(client, u, []string(scopes), "")
+		roles, perms := s.loadRoles(*userID)
+		pInput := inputs.BuildTokenIssuanceInput(client, u, roles, perms, []string(scopes), "")
 		result, pErr := s.policyEvaluator.Evaluate(context.Background(), "token_issuance", pInput)
 		if pErr != nil {
 			slog.Warn("token issuance policy evaluation failed", "error", pErr)

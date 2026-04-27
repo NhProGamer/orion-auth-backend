@@ -34,6 +34,22 @@ func userFields(u *model.User) map[string]any {
 	}
 }
 
+// userFieldsWithRoles returns userFields enriched with roles + permissions.
+// Pass nil/empty slices when roles aren't loaded — the keys are still set so
+// rules using `not "x" in input.user.roles` behave predictably.
+func userFieldsWithRoles(u *model.User, roles, permissions []string) map[string]any {
+	f := userFields(u)
+	if roles == nil {
+		roles = []string{}
+	}
+	if permissions == nil {
+		permissions = []string{}
+	}
+	f["roles"] = roles
+	f["permissions"] = permissions
+	return f
+}
+
 func clientFields(c *model.OAuthClient) map[string]any {
 	return map[string]any{
 		"id":             c.ID.String(),
@@ -44,9 +60,9 @@ func clientFields(c *model.OAuthClient) map[string]any {
 }
 
 // BuildLoginInput is used at user authentication time (login policy type).
-func BuildLoginInput(u *model.User, c *model.OAuthClient, ipAddress, userAgent string) map[string]any {
+func BuildLoginInput(u *model.User, c *model.OAuthClient, roles, permissions []string, ipAddress, userAgent string) map[string]any {
 	input := map[string]any{
-		"user":       userFields(u),
+		"user":       userFieldsWithRoles(u, roles, permissions),
 		"ip_address": ipAddress,
 		"user_agent": userAgent,
 		"time":       timeFields(),
@@ -59,8 +75,8 @@ func BuildLoginInput(u *model.User, c *model.OAuthClient, ipAddress, userAgent s
 
 // BuildTokenIssuanceInput is used right before access/refresh tokens are issued
 // (token_issuance policy type). Modify result fields supported by the call
-// site: access_token_ttl, refresh_token_ttl (both as seconds).
-func BuildTokenIssuanceInput(c *model.OAuthClient, u *model.User, scopes []string, ipAddress string) map[string]any {
+// site: access_token_ttl, refresh_token_ttl, scopes, claims.
+func BuildTokenIssuanceInput(c *model.OAuthClient, u *model.User, roles, permissions, scopes []string, ipAddress string) map[string]any {
 	input := map[string]any{
 		"client":     clientFields(c),
 		"scopes":     scopes,
@@ -68,7 +84,7 @@ func BuildTokenIssuanceInput(c *model.OAuthClient, u *model.User, scopes []strin
 		"time":       timeFields(),
 	}
 	if u != nil {
-		input["user"] = userFields(u)
+		input["user"] = userFieldsWithRoles(u, roles, permissions)
 	}
 	return input
 }
@@ -76,7 +92,7 @@ func BuildTokenIssuanceInput(c *model.OAuthClient, u *model.User, scopes []strin
 // BuildRefreshInput is used at refresh token exchange (refresh policy type).
 // Useful to bound refresh velocity, time-of-day, or scope re-evaluation
 // independently from token_issuance.
-func BuildRefreshInput(u *model.User, c *model.OAuthClient, requestedScopes, grantedScopes []string, sessionID string, ipAddress string) map[string]any {
+func BuildRefreshInput(u *model.User, c *model.OAuthClient, roles, permissions, requestedScopes, grantedScopes []string, sessionID, ipAddress string) map[string]any {
 	input := map[string]any{
 		"client":           clientFields(c),
 		"scopes_requested": requestedScopes,
@@ -86,7 +102,7 @@ func BuildRefreshInput(u *model.User, c *model.OAuthClient, requestedScopes, gra
 		"time":             timeFields(),
 	}
 	if u != nil {
-		input["user"] = userFields(u)
+		input["user"] = userFieldsWithRoles(u, roles, permissions)
 	}
 	return input
 }
@@ -94,9 +110,9 @@ func BuildRefreshInput(u *model.User, c *model.OAuthClient, requestedScopes, gra
 // BuildConsentInput is used right before user consent is recorded for an
 // authorization request (consent policy type). modify.scopes can narrow the
 // granted scopes further.
-func BuildConsentInput(u *model.User, c *model.OAuthClient, requestedScopes, grantedScopes []string, ipAddress, userAgent string) map[string]any {
+func BuildConsentInput(u *model.User, c *model.OAuthClient, roles, permissions, requestedScopes, grantedScopes []string, ipAddress, userAgent string) map[string]any {
 	input := map[string]any{
-		"user":             userFields(u),
+		"user":             userFieldsWithRoles(u, roles, permissions),
 		"client":           clientFields(c),
 		"scopes_requested": requestedScopes,
 		"scopes_granted":   grantedScopes,
@@ -114,9 +130,9 @@ func BuildConsentInput(u *model.User, c *model.OAuthClient, requestedScopes, gra
 // Supported modify field:
 //   modify.require_mfa: bool — overrides the default "needsMFA = hasMFA"
 //   If true and !hasMFA the call site denies with "MFA required but not enrolled".
-func BuildMFAInput(u *model.User, c *model.OAuthClient, scopes []string, hasMFA bool, ipAddress, userAgent string) map[string]any {
+func BuildMFAInput(u *model.User, c *model.OAuthClient, roles, permissions, scopes []string, hasMFA bool, ipAddress, userAgent string) map[string]any {
 	input := map[string]any{
-		"user":       userFields(u),
+		"user":       userFieldsWithRoles(u, roles, permissions),
 		"scopes":     scopes,
 		"has_mfa":    hasMFA,
 		"ip_address": ipAddress,
@@ -132,9 +148,9 @@ func BuildMFAInput(u *model.User, c *model.OAuthClient, scopes []string, hasMFA 
 // BuildDeviceApprovalInput is used right before a user-approved device code is
 // marked authorized (device_approval policy type). Useful to enforce additional
 // auth, restrict device approval by IP/UA fingerprint, or by time of day.
-func BuildDeviceApprovalInput(u *model.User, c *model.OAuthClient, scopes []string, userCode, ipAddress, userAgent string) map[string]any {
+func BuildDeviceApprovalInput(u *model.User, c *model.OAuthClient, roles, permissions, scopes []string, userCode, ipAddress, userAgent string) map[string]any {
 	input := map[string]any{
-		"user":       userFields(u),
+		"user":       userFieldsWithRoles(u, roles, permissions),
 		"scopes":     scopes,
 		"user_code":  userCode,
 		"ip_address": ipAddress,

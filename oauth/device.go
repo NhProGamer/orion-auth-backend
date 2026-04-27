@@ -140,7 +140,8 @@ func (s *Service) DeviceApprove(input DeviceApproveInput, userID uuid.UUID, ipAd
 		}
 		client, _ := s.repo.findClient(dc.ClientID.String())
 		if u != nil {
-			pInput := inputs.BuildDeviceApprovalInput(u, client, []string(dc.Scopes), dc.UserCode, ipAddress, userAgent)
+			roles, perms := s.loadRoles(userID)
+			pInput := inputs.BuildDeviceApprovalInput(u, client, roles, perms, []string(dc.Scopes), dc.UserCode, ipAddress, userAgent)
 			result, pErr := s.policyEvaluator.Evaluate(context.Background(), "device_approval", pInput)
 			if pErr != nil {
 				slog.Warn("device_approval policy evaluation failed", "error", pErr)
