@@ -6,17 +6,25 @@ import (
 
 	"github.com/google/uuid"
 
+	"orion-auth-backend/audit"
 	"orion-auth-backend/model"
 	"orion-auth-backend/pkg"
 )
 
 type Service struct {
-	repo   RepositoryInterface
-	engine *Engine
+	repo         RepositoryInterface
+	engine       *Engine
+	auditService *audit.Service
 }
 
 func NewService(repo RepositoryInterface, engine *Engine) *Service {
 	return &Service{repo: repo, engine: engine}
+}
+
+// SetAuditService wires audit logging for policy denials. Optional — denies
+// are still returned to callers if no audit service is provided.
+func (s *Service) SetAuditService(a *audit.Service) {
+	s.auditService = a
 }
 
 // --- Input DTOs ---
@@ -191,7 +199,50 @@ func (s *Service) ValidateRego(rego string) error {
 // --- Evaluation ---
 
 func (s *Service) Evaluate(ctx context.Context, policyType string, input map[string]any) (*EvalResult, error) {
-	return s.engine.Evaluate(ctx, policyType, input)
+	result, err := s.engine.Evaluate(ctx, policyType, input)
+	if err != nil {
+		return nil, err
+	}
+	if result != nil && result.Deny && s.auditService != nil {
+		s.auditService.Log(audit.LogEntry{
+			UserID:    extractUUID(input, "user", "id"),
+			ClientID:  extractUUID(input, "client", "id"),
+			Action:    audit.ActionPolicyDenied,
+			IPAddress: extractString(input, "ip_address"),
+			UserAgent: extractString(input, "user_agent"),
+			Metadata: map[string]any{
+				"policy_type": policyType,
+				"policy_name": result.PolicyName,
+				"reason":      result.DenyReason,
+			},
+		})
+	}
+	return result, nil
+}
+
+// extractUUID pulls a UUID from input["section"]["field"] if present and parseable.
+// Returns nil otherwise — the input map is untyped JSON so each lookup may miss.
+func extractUUID(input map[string]any, section, field string) *uuid.UUID {
+	sub, ok := input[section].(map[string]any)
+	if !ok {
+		return nil
+	}
+	raw, ok := sub[field].(string)
+	if !ok {
+		return nil
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		return nil
+	}
+	return &id
+}
+
+func extractString(input map[string]any, key string) string {
+	if v, ok := input[key].(string); ok {
+		return v
+	}
+	return ""
 }
 
 // --- Startup ---

@@ -103,6 +103,7 @@ func main() {
 	policyRepo := policy.NewRepository(db)
 	policyEngine := policy.NewEngine()
 	policyService := policy.NewService(policyRepo, policyEngine)
+	policyService.SetAuditService(auditService)
 	if err := policyService.LoadAll(); err != nil {
 		slog.Error("failed to load policies", "error", err)
 		os.Exit(1)
