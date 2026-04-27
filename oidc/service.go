@@ -172,6 +172,7 @@ type IDTokenClaims struct {
 	AMR              []string
 	SubjectType      string // "public" or "pairwise"
 	SectorIdentifier string // sector identifier for pairwise sub
+	ExtraClaims      map[string]any
 }
 
 func (s *Service) GenerateIDToken(claims IDTokenClaims) (string, error) {
@@ -239,6 +240,12 @@ func (s *Service) GenerateIDToken(claims IDTokenClaims) (string, error) {
 
 	s.enrichClaimsWithRoles(claims.UserID, claims.Scopes, jwtClaims)
 
+	// Inject extra claims from token_issuance policy modify. Reserved JWT/OIDC
+	// claim names are protected from override to keep tokens spec-conformant.
+	if len(claims.ExtraClaims) > 0 {
+		applyExtraClaims(jwtClaims, claims.ExtraClaims)
+	}
+
 	// Honor the claims parameter (OIDC Core Section 5.5)
 	if claims.RequestedClaims != "" && u != nil {
 		s.applyRequestedClaims(claims.RequestedClaims, "id_token", u, jwtClaims)
@@ -248,6 +255,24 @@ func (s *Service) GenerateIDToken(claims IDTokenClaims) (string, error) {
 	token.Header["kid"] = key.ID.String()
 
 	return token.SignedString(privKey)
+}
+
+// reservedIDTokenClaims is the set of claim names a policy may not override
+// via modify.claims — these are spec-mandated or computed by the issuer.
+var reservedIDTokenClaims = map[string]bool{
+	"iss": true, "sub": true, "aud": true, "exp": true, "iat": true,
+	"auth_time": true, "nonce": true, "at_hash": true, "c_hash": true,
+	"s_hash": true, "acr": true, "amr": true,
+}
+
+// applyExtraClaims merges extra claims into jwtClaims, skipping reserved keys.
+func applyExtraClaims(jwtClaims jwt.MapClaims, extra map[string]any) {
+	for k, v := range extra {
+		if reservedIDTokenClaims[k] {
+			continue
+		}
+		jwtClaims[k] = v
+	}
 }
 
 // applyRequestedClaims parses the claims parameter JSON and adds requested claims

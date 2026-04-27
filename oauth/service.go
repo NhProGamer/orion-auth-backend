@@ -77,6 +77,7 @@ type IDTokenClaims struct {
 	AMR              []string
 	SubjectType      string
 	SectorIdentifier string
+	ExtraClaims      map[string]any // custom claims injected via policy modify
 }
 
 type Service struct {
@@ -1179,6 +1180,7 @@ func (s *Service) issueTokens(tx RepositoryInterface, client *model.OAuthClient,
 
 func (s *Service) issueTokensWithOpts(tx RepositoryInterface, client *model.OAuthClient, userID *uuid.UUID, sessionID *uuid.UUID, scopes pq.StringArray, opts issueOpts) (*TokenResponse, error) {
 	// Evaluate token issuance policies
+	var policyExtraClaims map[string]any
 	if s.policyEvaluator != nil && userID != nil {
 		var u *model.User
 		if s.userService != nil {
@@ -1201,6 +1203,9 @@ func (s *Service) issueTokensWithOpts(tx RepositoryInterface, client *model.OAut
 				}
 				if narrowed, ok := readModifyScopes(result.Modify, scopes); ok {
 					scopes = narrowed
+				}
+				if extra, ok := result.Modify["claims"].(map[string]any); ok {
+					policyExtraClaims = extra
 				}
 			}
 		}
@@ -1301,6 +1306,7 @@ func (s *Service) issueTokensWithOpts(tx RepositoryInterface, client *model.OAut
 			AMR:              opts.amr,
 			SubjectType:      client.SubjectType,
 			SectorIdentifier: sectorID,
+			ExtraClaims:      policyExtraClaims,
 		})
 		if err != nil {
 			slog.Warn("failed to generate ID token", "error", err)

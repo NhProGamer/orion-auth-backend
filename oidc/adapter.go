@@ -29,5 +29,6 @@ func (a *IDTokenAdapter) GenerateIDToken(claims oauth.IDTokenClaims) (string, er
 		AMR:              claims.AMR,
 		SubjectType:      claims.SubjectType,
 		SectorIdentifier: claims.SectorIdentifier,
+		ExtraClaims:      claims.ExtraClaims,
 	})
 }
