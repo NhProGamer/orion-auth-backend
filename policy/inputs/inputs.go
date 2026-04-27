@@ -107,6 +107,28 @@ func BuildConsentInput(u *model.User, c *model.OAuthClient, requestedScopes, gra
 	return input
 }
 
+// BuildMFAInput is used at login time to decide whether MFA is required.
+// hasMFA indicates whether the user has actually enrolled MFA — useful so a
+// policy can force MFA only when the user has the means to satisfy it.
+//
+// Supported modify field:
+//   modify.require_mfa: bool — overrides the default "needsMFA = hasMFA"
+//   If true and !hasMFA the call site denies with "MFA required but not enrolled".
+func BuildMFAInput(u *model.User, c *model.OAuthClient, scopes []string, hasMFA bool, ipAddress, userAgent string) map[string]any {
+	input := map[string]any{
+		"user":       userFields(u),
+		"scopes":     scopes,
+		"has_mfa":    hasMFA,
+		"ip_address": ipAddress,
+		"user_agent": userAgent,
+		"time":       timeFields(),
+	}
+	if c != nil {
+		input["client"] = clientFields(c)
+	}
+	return input
+}
+
 // BuildDeviceApprovalInput is used right before a user-approved device code is
 // marked authorized (device_approval policy type). Useful to enforce additional
 // auth, restrict device approval by IP/UA fingerprint, or by time of day.

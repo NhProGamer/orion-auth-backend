@@ -603,10 +603,30 @@ func (s *Service) AuthorizeLogin(input AuthorizeLoginInput, ipAddress, userAgent
 	}
 
 	// Check if user has MFA enabled
-	var needsMFA bool
+	hasMFA := false
 	if s.mfaValidator != nil {
-		hasMFA, _ := s.mfaValidator.HasMFA(u.ID)
-		needsMFA = hasMFA
+		hasMFA, _ = s.mfaValidator.HasMFA(u.ID)
+	}
+	needsMFA := hasMFA
+
+	// Evaluate MFA policies — may force MFA on or off based on context.
+	if s.policyEvaluator != nil {
+		client, _ := s.repo.findClient(req.ClientID.String())
+		pInput := inputs.BuildMFAInput(u, client, []string(req.Scopes), hasMFA, ipAddress, userAgent)
+		result, pErr := s.policyEvaluator.Evaluate(context.Background(), "mfa", pInput)
+		if pErr != nil {
+			slog.Warn("mfa policy evaluation failed", "error", pErr)
+		} else if result != nil {
+			if result.Deny {
+				return nil, pkg.ErrAccessDenied(result.DenyReason)
+			}
+			if v, ok := readModifyBool(result.Modify, "require_mfa"); ok {
+				if v && !hasMFA {
+					return nil, pkg.ErrAccessDenied("multi-factor authentication required but not enrolled")
+				}
+				needsMFA = v
+			}
+		}
 	}
 
 	req.UserID = &u.ID

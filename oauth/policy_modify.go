@@ -6,6 +6,18 @@ import (
 	"github.com/lib/pq"
 )
 
+// readModifyBool extracts a boolean value from a policy Modify map.
+// Returns (v, true) only if the value is present and is a bool.
+func readModifyBool(modify map[string]any, key string) (bool, bool) {
+	if modify == nil {
+		return false, false
+	}
+	if v, ok := modify[key].(bool); ok {
+		return v, true
+	}
+	return false, false
+}
+
 // readModifyInt extracts an integer value from a policy Modify map. The map is
 // untyped JSON so values may arrive as json.Number or float64 depending on the
 // decoder. Returns (n, true) only if the value is present and convertible.

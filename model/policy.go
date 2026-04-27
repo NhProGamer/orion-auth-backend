@@ -7,9 +7,10 @@ const (
 	PolicyTypeAdminAPI      = "admin_api"
 	PolicyTypeConsent       = "consent"
 	PolicyTypeRefresh       = "refresh"
-	PolicyTypeIntrospect    = "introspect"
+	PolicyTypeIntrospect     = "introspect"
 	PolicyTypeDeviceApproval = "device_approval"
-	PolicyTypeCustom        = "custom"
+	PolicyTypeMFA            = "mfa"
+	PolicyTypeCustom         = "custom"
 )
 
 type Policy struct {
