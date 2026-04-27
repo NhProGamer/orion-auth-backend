@@ -107,6 +107,32 @@ func BuildConsentInput(u *model.User, c *model.OAuthClient, requestedScopes, gra
 	return input
 }
 
+// BuildIntrospectInput is used at /introspect right after the token is
+// resolved. A deny here causes the response to look like an inactive token
+// (per RFC 7662 — the caller learns nothing) which is the security-correct
+// behavior for "this client may not introspect that token".
+func BuildIntrospectInput(tokenType, tokenClientID, tokenUserID string, scopes []string, audience *string, requestingClientID, ipAddress string) map[string]any {
+	token := map[string]any{
+		"type":      tokenType,
+		"client_id": tokenClientID,
+		"scopes":    scopes,
+	}
+	if tokenUserID != "" {
+		token["user_id"] = tokenUserID
+	}
+	if audience != nil {
+		token["audience"] = *audience
+	}
+	return map[string]any{
+		"token": token,
+		"requesting_client": map[string]any{
+			"id": requestingClientID,
+		},
+		"ip_address": ipAddress,
+		"time":       timeFields(),
+	}
+}
+
 // BuildClientAuthInput is used by the ClientAuth middleware right after a
 // client is successfully authenticated on /token, /introspect, /revoke, /par,
 // /device_authorization. authMethod is one of: client_secret_basic,

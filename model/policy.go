@@ -7,6 +7,7 @@ const (
 	PolicyTypeAdminAPI      = "admin_api"
 	PolicyTypeConsent       = "consent"
 	PolicyTypeRefresh       = "refresh"
+	PolicyTypeIntrospect    = "introspect"
 	PolicyTypeCustom        = "custom"
 )
 

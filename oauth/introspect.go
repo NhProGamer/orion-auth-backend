@@ -1,6 +1,8 @@
 package oauth
 
 import (
+	"context"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -8,6 +10,7 @@ import (
 	"orion-auth-backend/crypto"
 	"orion-auth-backend/model"
 	"orion-auth-backend/pkg"
+	"orion-auth-backend/policy/inputs"
 )
 
 // IntrospectResponse represents the RFC 7662 introspection response.
@@ -43,7 +46,7 @@ func (s *Service) Introspect(token, tokenTypeHint, issuer string, requestingClie
 	if tokenTypeHint == "" || tokenTypeHint == "refresh_token" {
 		rt, err := s.repo.FindRefreshToken(tokenHash)
 		if err == nil && rt != nil {
-			return s.introspectRefreshToken(rt, issuer), nil
+			return s.introspectRefreshToken(rt, issuer, requestingClientID), nil
 		}
 	}
 
@@ -53,6 +56,10 @@ func (s *Service) Introspect(token, tokenTypeHint, issuer string, requestingClie
 
 func (s *Service) introspectAccessToken(at *model.AccessToken, issuer string, requestingClientID uuid.UUID) *IntrospectResponse {
 	if !at.IsValid() {
+		return &IntrospectResponse{Active: false}
+	}
+
+	if s.deniedByIntrospectPolicy("access_token", at.ClientID, at.UserID, []string(at.Scopes), at.Audience, requestingClientID) {
 		return &IntrospectResponse{Active: false}
 	}
 
@@ -84,8 +91,40 @@ func (s *Service) introspectAccessToken(at *model.AccessToken, issuer string, re
 	return resp
 }
 
-func (s *Service) introspectRefreshToken(rt *model.RefreshToken, issuer string) *IntrospectResponse {
+// deniedByIntrospectPolicy evaluates introspect policies. A deny means the
+// requesting client may not learn anything about this token — RFC 7662 says
+// the response should look identical to "token unknown".
+func (s *Service) deniedByIntrospectPolicy(tokenType string, tokenClientID uuid.UUID, tokenUserID *uuid.UUID, scopes []string, audience *string, requestingClientID uuid.UUID) bool {
+	if s.policyEvaluator == nil {
+		return false
+	}
+	uid := ""
+	if tokenUserID != nil {
+		uid = tokenUserID.String()
+	}
+	pInput := inputs.BuildIntrospectInput(
+		tokenType,
+		tokenClientID.String(),
+		uid,
+		scopes,
+		audience,
+		requestingClientID.String(),
+		"",
+	)
+	result, pErr := s.policyEvaluator.Evaluate(context.Background(), "introspect", pInput)
+	if pErr != nil {
+		slog.Warn("introspect policy evaluation failed", "error", pErr)
+		return false
+	}
+	return result != nil && result.Deny
+}
+
+func (s *Service) introspectRefreshToken(rt *model.RefreshToken, issuer string, requestingClientID uuid.UUID) *IntrospectResponse {
 	if rt.Revoked || rt.WasRotated() || rt.ExpiresAt.Before(time.Now()) {
+		return &IntrospectResponse{Active: false}
+	}
+
+	if s.deniedByIntrospectPolicy("refresh_token", rt.ClientID, &rt.UserID, []string(rt.Scopes), rt.Audience, requestingClientID) {
 		return &IntrospectResponse{Active: false}
 	}
 
