@@ -73,6 +73,22 @@ func BuildTokenIssuanceInput(c *model.OAuthClient, u *model.User, scopes []strin
 	return input
 }
 
+// BuildConsentInput is used right before user consent is recorded for an
+// authorization request (consent policy type). modify.scopes can narrow the
+// granted scopes further.
+func BuildConsentInput(u *model.User, c *model.OAuthClient, requestedScopes, grantedScopes []string, ipAddress, userAgent string) map[string]any {
+	input := map[string]any{
+		"user":             userFields(u),
+		"client":           clientFields(c),
+		"scopes_requested": requestedScopes,
+		"scopes_granted":   grantedScopes,
+		"ip_address":       ipAddress,
+		"user_agent":       userAgent,
+		"time":             timeFields(),
+	}
+	return input
+}
+
 // BuildClientAuthInput is used by the ClientAuth middleware right after a
 // client is successfully authenticated on /token, /introspect, /revoke, /par,
 // /device_authorization. authMethod is one of: client_secret_basic,

@@ -752,6 +752,34 @@ func (s *Service) AuthorizeConsent(input AuthorizeConsentInput, ipAddress, userA
 		return nil, pkg.ErrInvalidScope("no valid scopes granted")
 	}
 
+	// Evaluate consent policies — they may deny outright or narrow grantedScopes.
+	if s.policyEvaluator != nil {
+		var u *model.User
+		if s.userService != nil {
+			u, _ = s.userService.GetByID(*req.UserID)
+		}
+		client, _ := s.repo.findClient(req.ClientID.String())
+		if u != nil && client != nil {
+			pInput := inputs.BuildConsentInput(u, client, []string(req.Scopes), grantedScopes, ipAddress, userAgent)
+			result, pErr := s.policyEvaluator.Evaluate(context.Background(), "consent", pInput)
+			if pErr != nil {
+				slog.Warn("consent policy evaluation failed", "error", pErr)
+			} else if result != nil {
+				if result.Deny {
+					return nil, pkg.ErrAccessDenied(result.DenyReason)
+				}
+				if result.Modify != nil {
+					if narrowed, ok := readModifyScopes(result.Modify, pq.StringArray(grantedScopes)); ok {
+						grantedScopes = []string(narrowed)
+						if len(grantedScopes) == 0 {
+							return nil, pkg.ErrAccessDenied("policy narrowed all scopes")
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Store/update consent
 	consent, _ := s.repo.FindActiveConsent(*req.UserID, req.ClientID)
 	if consent == nil {
