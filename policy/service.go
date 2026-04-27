@@ -32,7 +32,7 @@ func (s *Service) SetAuditService(a *audit.Service) {
 type CreatePolicyInput struct {
 	Name        string  `json:"name" binding:"required"`
 	Description *string `json:"description"`
-	Type        string  `json:"type" binding:"required,oneof=token_issuance login client_auth admin_api custom"`
+	Type        string  `json:"type" binding:"required,oneof=token_issuance login client_auth admin_api consent refresh custom"`
 	Rego        string  `json:"rego" binding:"required"`
 	Priority    *int    `json:"priority"`
 	Active      *bool   `json:"active"`

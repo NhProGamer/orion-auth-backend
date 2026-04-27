@@ -5,6 +5,8 @@ const (
 	PolicyTypeLogin         = "login"
 	PolicyTypeClientAuth    = "client_auth"
 	PolicyTypeAdminAPI      = "admin_api"
+	PolicyTypeConsent       = "consent"
+	PolicyTypeRefresh       = "refresh"
 	PolicyTypeCustom        = "custom"
 )
 
