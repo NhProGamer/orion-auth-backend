@@ -34,15 +34,20 @@
 
 ## Client Repository
 - Create, FindByID, FindActiveByID, Update, List(page, perPage), Delete(active=false)
+- FindClientsWithBackchannelLogout(userID) — clients with backchannel URI for a given user's consents
+- FindClientsWithFrontchannelLogout() — all active clients with frontchannel URI
 
 ## OAuth Service (oauth/service.go)
-**Dependencies**: Repository, UserService, SessionService, Argon2Hasher, AuthConfig
-**Interfaces**: IDTokenGenerator (from OIDC adapter), MFAValidator (from MFA service)
-- Authorization flow: InitAuthorize, AuthorizeLogin, AuthorizeMFA, AuthorizeConsent, CompleteAuthorizeFirstParty
+**Dependencies**: Repository, UserService, SessionService, Argon2Hasher, AuthConfig, issuer
+**Interfaces**: IDTokenGenerator (from OIDC adapter), MFAValidator (from MFA service), PolicyEvaluator, ResourceValidator, IDTokenValidator
+- Authorization flow: InitAuthorize, InitAuthorizeFromPAR, AuthorizeLogin, AuthorizeMFA, AuthorizeConsent, CompleteAuthorizeFirstParty
+- PAR: CreatePAR (RFC 9126)
 - Token exchange: ExchangeAuthorizationCode, ExchangeClientCredentials, ExchangeRefreshToken, ExchangeDeviceCode
 - Token management: Introspect, Revoke
 - Device flow: InitDeviceAuthorization, DeviceVerify, DeviceApprove
-- Internal: issueTokens, issueTokensWithOpts, completeAuthorize, completeImplicit
+- Hybrid flows: generateHybridIDToken (c_hash, s_hash, at_hash)
+- ACR/AMR: computeACR from AuthMethods tracked through the flow
+- Internal: issueTokens, issueTokensWithOpts, completeAuthorize, isValidResponseType, isHybridResponseType
 
 ## OAuth Repository
 - Auth requests: Create/Find/Update/Delete AuthRequest
@@ -51,17 +56,23 @@
 - Refresh tokens: Create/Find/Rotate/RevokeFamiliy/RevokeBySession
 - Consent: FindActive/Create/Update
 - Device codes: Create/Find/FindByUserCode/Update
+- PAR: CreatePAR/FindPAR/DeletePAR
 - Transaction(fn) for atomic operations
 - findClient(clientIDStr)
 
 ## OIDC Service (oidc/service.go)
-**Dependencies**: *gorm.DB, UserService, issuer string
+**Dependencies**: *gorm.DB, UserService, RBACService, SessionRevoker, ClientFinder, issuer string
 - EnsureSigningKey() — loads or generates RSA 2048-bit key pair
 - RotateKey() — new key, deactivate old with 24h grace period
-- GenerateIDToken(IDTokenClaims) → JWT string (RS256, includes user claims per scope)
+- GenerateIDToken(IDTokenClaims) → JWT string (RS256, includes acr/amr/c_hash/s_hash/at_hash + user claims per scope)
 - GetJWKS() → JWKS (all active/non-expired keys)
-- GetDiscovery() → OpenIDConfiguration
+- GetDiscovery() → OpenIDConfiguration (full OIDC + OAuth 2.1 capabilities)
 - GetUserInfo(userID, scopes) → map of claims
+- ValidateIDToken(tokenString) → userID (for id_token_hint)
+- EndSession(params) → EndSessionResponse (with frontchannel_logout_uris)
+- GenerateLogoutToken(userID, clientID, sessionRequired, sessionID) → logout JWT
+- dispatchBackchannelLogout(userID) — async POST to RP backchannel URIs
+- ComputePairwiseSub(sectorIdentifier, userID, salt) → pairwise sub string
 - Thread-safe with sync.RWMutex
 
 ## MFA Service (mfa/service.go)
@@ -99,6 +110,13 @@
 **Dependencies**: *gorm.DB (direct, no repository)
 - Log(LogEntry) — async, non-blocking, serializes metadata to JSON
 - Query(QueryInput) → paginated results with filters (UserID, Action, From, To, Page, PerPage)
+
+## DCR Handler (client/dcr_handler.go)
+**Dependencies**: Client Service
+- Register(DCRRequest) → DCRResponse — Dynamic Client Registration (RFC 7591)
+- Accepts client_name, redirect_uris, grant_types, response_types, token_endpoint_auth_method
+- Returns client_id, client_secret, registration_access_token
+- Route: POST /register
 
 ## Federation Service (federation/service.go)
 **Dependencies**: Repository, issuer string

@@ -70,10 +70,26 @@
 - Returns token response when approved
 
 ## 5. Implicit Flow (REMOVED - OAuth 2.1)
-- Triggered when response_type=token in /authorize flow
-- Returns access_token directly in AuthorizeConsentResponse
-- No refresh token, no authorization code
-- Handled via completeImplicit() internal method
+- Removed for OAuth 2.1 compliance
+
+## 5b. Hybrid Flows (OIDC Core Section 3.3)
+- response_type=code id_token: returns code + ID token (with c_hash) in fragment
+- response_type=code token: returns code + access token in fragment
+- response_type=code id_token token: returns code + ID token (with c_hash, at_hash) + access token in fragment
+- Default response_mode is fragment for all hybrid flows
+- s_hash included in ID token when state is present
+- PKCE still enforced for the code component
+
+## 5c. Pushed Authorization Requests (PAR - RFC 9126)
+- POST /par with client auth: stores authorization params server-side
+- Returns request_uri (urn:ietf:params:oauth:request_uri:<uuid>) + expires_in (60s)
+- GET /authorize?request_uri=...&client_id=... loads stored params
+- One-time use, deleted after consumption
+
+## 5d. Request Objects (JAR - RFC 9101)
+- GET /authorize?request=<JWT>&client_id=... 
+- JWT claims override query params
+- Parsed without signature verification (claims extracted as params)
 
 ## Token Issuance Details
 - Access tokens: opaque (32 random bytes, base64url), stored as SHA-256 hash
@@ -100,6 +116,10 @@
 - MFA integration in authorization flow
 - First-party client auto-consent
 - ID token validation for prompt=none and end_session flows
+- acr/amr claims tracking auth methods through the flow (pwd, otp)
+- Authorization response includes iss parameter (RFC 9207)
+- Back-channel logout includes sid claim when backchannel_logout_session_required is true
+- Front-channel logout via iframes in EndSession response
 
 ## OIDC Core Parameters (in /authorize)
 - **prompt**: none (silent auth via id_token_hint), login (force re-auth), consent (force consent even for first-party), select_account (returns error)

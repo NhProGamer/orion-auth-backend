@@ -19,6 +19,8 @@
 | POST | /device_authorization | ClientAuth | RFC 8628 device code initiation |
 | POST | /device/verify | None | Device code user verification |
 | POST | /device/approve | None | Device code user approval |
+| POST | /par | ClientAuth | Pushed Authorization Request (RFC 9126) |
+| POST | /register | None | Dynamic Client Registration (RFC 7591) |
 
 ## OIDC Endpoints (root level)
 | Method | Path | Auth | Description |
@@ -28,6 +30,7 @@
 | GET | /userinfo | Bearer | User info claims |
 | POST | /userinfo | Bearer | User info claims |
 | GET | /end_session | None | RP-Initiated Logout (OIDC) |
+| GET | /check_session | None | OIDC Session Management iframe |
 
 ## Public API Routes (/api/v1, rate limited)
 | Method | Path | Auth | Description |
@@ -92,17 +95,24 @@
 - **RBAC RequirePermission/RequireAnyPermission**: Checks user permissions via role assignments
 
 ## OIDC Discovery Values
-- Response Types: ["code"]
+- Response Types: ["code", "code id_token", "code token", "code id_token token"]
 - Grant Types: ["authorization_code", "client_credentials", "refresh_token", "urn:ietf:params:oauth:grant-type:device_code"]
-- Subject Type: ["public"]
+- Subject Type: ["public", "pairwise"]
 - ID Token Signing: ["RS256"]
 - Scopes: ["openid", "profile", "email", "roles", "offline_access"]
-- Token Auth Methods: ["client_secret_basic", "client_secret_post", "none"]
-- Claims: ["sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "at_hash", "name", "email", "email_verified", "picture", "phone_number", "updated_at", "roles", "groups"]
+- Token Auth Methods: ["client_secret_basic", "client_secret_post", "private_key_jwt", "none"]
+- Claims: ["sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "at_hash", "acr", "amr", "c_hash", "s_hash", "name", "given_name", "family_name", "middle_name", "nickname", "preferred_username", "profile", "picture", "website", "gender", "birthdate", "zoneinfo", "locale", "email", "email_verified", "phone_number", "phone_number_verified", "address", "updated_at", "roles", "groups"]
 - Code Challenge Methods: ["S256"]
 - End Session Endpoint: /end_session
-- request_parameter_supported: false
+- request_parameter_supported: true
 - request_uri_parameter_supported: false
+- authorization_response_iss_parameter_supported: true
+- pushed_authorization_request_endpoint: /par
+- frontchannel_logout_supported: true
+- frontchannel_logout_session_supported: true
+- check_session_iframe: /check_session
+- userinfo_signing_alg_values_supported: ["RS256"]
+- registration_endpoint: /register
 - claims_parameter_supported: true
 
 ## OIDC Core Parameters Supported in /authorize

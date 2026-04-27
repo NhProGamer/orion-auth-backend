@@ -43,8 +43,24 @@ BaseModel: ID (uuid PK), CreatedAt, UpdatedAt
 - AccessTokenTTL (int, default 3600)
 - RefreshTokenTTL (int, default 86400)
 - IDTokenTTL (int, default 3600)
+- PostLogoutRedirectURIs (pq.StringArray, text[])
+- BackchannelLogoutURI (*string, varchar 512)
+- BackchannelLogoutSessionReq (bool, default false)
+- FrontchannelLogoutURI (*string, varchar 512)
+- FrontchannelLogoutSessionReq (bool, default false)
+- SubjectType (string, varchar 20, default "public")
+- SectorIdentifierURI (*string, varchar 512)
+- UserinfoSignedResponseAlg (*string, varchar 10)
+- RegistrationAccessTokenHash (*string, varchar 64, json:"-")
 - Active (bool, default true)
-- Methods: HasGrantType(), HasScope(), HasRedirectURI(), ValidateScopes()
+- Methods: HasGrantType(), HasScope(), HasRedirectURI(), HasPostLogoutRedirectURI(), ValidateScopes()
+
+### PushedAuthorizationRequest (table: pushed_authorization_requests)
+- RequestURI (varchar 128, PK, format: urn:ietf:params:oauth:request_uri:<uuid>)
+- ClientID (uuid, not null)
+- Params (jsonb, stores serialized InitAuthorizeParams)
+- ExpiresAt, CreatedAt
+- Methods: IsExpired()
 
 ### AccessToken (table: access_tokens)
 - ID (varchar 64, PK — SHA-256 hash)
@@ -67,6 +83,8 @@ BaseModel: ID (uuid PK), CreatedAt, UpdatedAt
 - Scopes (pq.StringArray)
 - CodeChallenge (*string, varchar 128), CodeChallengeMethod (*string, varchar 10)
 - Nonce (*string, varchar 128), SessionID (*uuid)
+- AuthTime (*time.Time), AuthMethods (pq.StringArray)
+- ClaimsParam (*string, jsonb)
 - ExpiresAt, Used (default false), CreatedAt
 - Methods: IsValid(), HasPKCE()
 
@@ -77,6 +95,7 @@ BaseModel: ID (uuid PK), CreatedAt, UpdatedAt
 - CodeChallenge (*string), CodeChallengeMethod (*string)
 - UserID (*uuid), Authenticated (default false), ConsentGiven (default false)
 - ExpiresAt
+- AuthMethods (pq.StringArray, tracks pwd/otp/fed during auth flow)
 - Methods: IsExpired(), IsReady()
 
 ### Session (table: sessions)
