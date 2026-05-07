@@ -608,10 +608,17 @@ func (s *Service) AuthorizeLogin(input AuthorizeLoginInput, ipAddress, userAgent
 		return nil, err
 	}
 
+	// Load the requesting client once — login, mfa and consent policies all
+	// benefit from input.client.* so authors can write per-client rules.
+	client, err := s.repo.findClient(req.ClientID.String())
+	if err != nil {
+		return nil, pkg.ErrServerError("failed to look up client")
+	}
+
 	// Evaluate login policies
 	if s.policyEvaluator != nil {
 		roles, perms := s.loadRoles(u.ID)
-		pInput := inputs.BuildLoginInput(u, nil, roles, perms, ipAddress, userAgent)
+		pInput := inputs.BuildLoginInput(u, client, roles, perms, ipAddress, userAgent)
 		result, pErr := s.policyEvaluator.Evaluate(context.Background(), "login", pInput)
 		if pErr != nil {
 			slog.Warn("login policy evaluation failed", "error", pErr)
@@ -626,11 +633,6 @@ func (s *Service) AuthorizeLogin(input AuthorizeLoginInput, ipAddress, userAgent
 	if consent != nil && consent.CoversScopes(req.Scopes) {
 		needsConsent = false
 	} else {
-		// First-party clients skip consent
-		client, err := s.repo.findClient(req.ClientID.String())
-		if err != nil {
-			return nil, pkg.ErrServerError("failed to look up client")
-		}
 		needsConsent = !client.IsFirstParty
 	}
 
@@ -643,7 +645,6 @@ func (s *Service) AuthorizeLogin(input AuthorizeLoginInput, ipAddress, userAgent
 
 	// Evaluate MFA policies — may force MFA on or off based on context.
 	if s.policyEvaluator != nil {
-		client, _ := s.repo.findClient(req.ClientID.String())
 		roles, perms := s.loadRoles(u.ID)
 		pInput := inputs.BuildMFAInput(u, client, roles, perms, []string(req.Scopes), hasMFA, ipAddress, userAgent)
 		result, pErr := s.policyEvaluator.Evaluate(context.Background(), "mfa", pInput)
