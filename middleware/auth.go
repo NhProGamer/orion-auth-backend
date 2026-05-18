@@ -21,44 +21,64 @@ const (
 	ContextScopes    = "scopes"
 )
 
-// accessTokenRow is a lightweight struct for token lookup.
-type accessTokenRow struct {
+// AccessTokenRow is a lightweight struct for token lookup. Exported so other
+// middleware (RequireClientScope, future audience-gated middlewares) can
+// reuse LookupAccessToken without duplicating the schema mapping.
+type AccessTokenRow struct {
 	ID        string    `gorm:"column:id"`
 	ClientID  string    `gorm:"column:client_id"`
 	UserID    *string   `gorm:"column:user_id"`
 	SessionID *string   `gorm:"column:session_id"`
 	Scopes    string    `gorm:"column:scopes"`
+	Audience  *string   `gorm:"column:audience"`
 	ExpiresAt time.Time `gorm:"column:expires_at"`
 	Revoked   bool      `gorm:"column:revoked"`
+}
+
+// LookupAccessToken hashes the raw bearer and returns the matching row if it
+// is non-revoked and unexpired. Returns (nil, nil) when no such token exists.
+// Shared by BearerAuth and RequireClientScope.
+func LookupAccessToken(db *gorm.DB, raw string) (*AccessTokenRow, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	hash := hashTokenSHA256(raw)
+	var row AccessTokenRow
+	err := db.Table("access_tokens").
+		Where("id = ? AND revoked = FALSE AND expires_at > ?", hash, time.Now()).
+		First(&row).Error
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
+// ParseBearer extracts the raw token from an `Authorization: Bearer …` header.
+// Returns "" if the header is missing or malformed.
+func ParseBearer(authHeader string) string {
+	if authHeader == "" {
+		return ""
+	}
+	parts := strings.SplitN(authHeader, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") || parts[1] == "" {
+		return ""
+	}
+	return parts[1]
 }
 
 // BearerAuth validates the Bearer token from the Authorization header.
 // It looks up the token hash in the access_tokens table.
 func BearerAuth(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			pkg.HandleError(c, pkg.ErrUnauthorized("missing authorization header"))
+		raw := ParseBearer(c.GetHeader("Authorization"))
+		if raw == "" {
+			pkg.HandleError(c, pkg.ErrUnauthorized("missing or invalid authorization header"))
 			c.Abort()
 			return
 		}
 
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") || parts[1] == "" {
-			pkg.HandleError(c, pkg.ErrUnauthorized("invalid authorization header format"))
-			c.Abort()
-			return
-		}
-
-		rawToken := parts[1]
-		tokenHash := hashTokenSHA256(rawToken)
-
-		var token accessTokenRow
-		err := db.Table("access_tokens").
-			Where("id = ? AND revoked = FALSE AND expires_at > ?", tokenHash, time.Now()).
-			First(&token).Error
-
-		if err != nil {
+		token, err := LookupAccessToken(db, raw)
+		if err != nil || token == nil {
 			pkg.HandleError(c, pkg.ErrUnauthorized("invalid or expired token"))
 			c.Abort()
 			return
