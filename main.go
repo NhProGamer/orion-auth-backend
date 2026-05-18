@@ -18,6 +18,7 @@ import (
 
 	"orion-auth-backend/account"
 	"orion-auth-backend/audit"
+	"orion-auth-backend/m2m"
 	"orion-auth-backend/model"
 
 	swaggerFiles "github.com/swaggo/files"
@@ -190,6 +191,18 @@ func main() {
 	accountHandler := account.NewHandler(accountService)
 	accountHandler.SetReauthService(reauthService)
 
+	// M2M: programmatic user-admin API consumed by services authenticated in
+	// client_credentials with audience urn:orion:m2m.
+	m2mUserService := m2m.NewUserService(
+		userService,
+		rbacService,
+		sessionService,
+		mfaService,
+		passkeyService,
+		fedService,
+	)
+	m2mHandler := m2m.NewHandler(m2mUserService)
+
 	// Policy gate for account_action policies (deny-on-self-service rules).
 	accountPolicyGate := account.NewPolicyGate(
 		userService,
@@ -214,6 +227,7 @@ func main() {
 	reauthHandler.SetAuditService(auditService)
 	passkeyHandler.SetAuditService(auditService)
 	accountHandler.SetAuditService(auditService)
+	m2mHandler.SetAuditService(auditService)
 
 	// Dynamic Client Registration handler
 	dcrHandler := client.NewDCRHandler(clientService)
@@ -243,6 +257,7 @@ func main() {
 		reauthHandler:     reauthHandler,
 		passkeyHandler:    passkeyHandler,
 		accountHandler:    accountHandler,
+		m2mHandler:        m2mHandler,
 		dcrHandler:        dcrHandler,
 	})
 
@@ -305,6 +320,7 @@ type setupRouterArgs struct {
 	reauthHandler   *reauth.Handler
 	passkeyHandler  *passkey.Handler
 	accountHandler  *account.Handler
+	m2mHandler      *m2m.Handler
 	dcrHandler      *client.DCRHandler
 }
 
@@ -405,6 +421,22 @@ func setupRouter(a setupRouterArgs) *gin.Engine {
 		chainMW(deleteAccountPerm, policyGateDeleteAccount),
 		requireReauth,
 	)
+
+	// M2M API routes — services authenticated in client_credentials with
+	// audience urn:orion:m2m. Each sub-group carries its own scope gate.
+	const m2mAudience = "urn:orion:m2m"
+	m2mBase := router.Group("/api/v1/m2m")
+	m2mRead := m2mBase.Group("")
+	m2mRead.Use(middleware.RequireClientScope(db, "m2m:users:read", m2mAudience))
+	m2mWrite := m2mBase.Group("")
+	m2mWrite.Use(middleware.RequireClientScope(db, "m2m:users:write", m2mAudience))
+	m2mDelete := m2mBase.Group("")
+	m2mDelete.Use(middleware.RequireClientScope(db, "m2m:users:delete", m2mAudience))
+	m2mManageAuth := m2mBase.Group("")
+	m2mManageAuth.Use(middleware.RequireClientScope(db, "m2m:users:manage_auth", m2mAudience))
+	m2mManageRoles := m2mBase.Group("")
+	m2mManageRoles.Use(middleware.RequireClientScope(db, "m2m:users:manage_roles", m2mAudience))
+	a.m2mHandler.RegisterRoutes(m2mRead, m2mWrite, m2mDelete, m2mManageAuth, m2mManageRoles)
 
 	// Admin API routes (authenticated + RBAC)
 	adminBase := router.Group("/api/v1/admin")
