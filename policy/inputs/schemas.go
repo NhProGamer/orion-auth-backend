@@ -173,6 +173,20 @@ func Schemas() map[string]TypeSchema {
 				{Path: "require_mfa", Type: "boolean", Description: "Override default \"needsMFA = has_mfa\". If true and has_mfa is false, login is denied."},
 			},
 		},
+		"account_action": {
+			Input: concat(
+				userFieldDefs,
+				[]FieldDef{
+					{Path: "action", Type: "string", Description: "One of: update_profile, change_email, change_password, manage_mfa, manage_passkeys, manage_linked_accounts, delete_account"},
+					{Path: "has_mfa", Type: "boolean"},
+					{Path: "has_passkey", Type: "boolean"},
+					{Path: "account_age_days", Type: "number", Description: "Days since account creation"},
+					{Path: "ip_address", Type: "string"},
+					{Path: "user_agent", Type: "string"},
+				},
+				timeFieldDefs,
+			),
+		},
 		"custom": {},
 	}
 }

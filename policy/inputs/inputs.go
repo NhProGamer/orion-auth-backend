@@ -207,6 +207,24 @@ func BuildClientAuthInput(c *model.OAuthClient, authMethod, method, path, ipAddr
 	}
 }
 
+// BuildAccountActionInput is used by the account self-service middleware
+// (account_action policy type). Only deny is consulted; modify is ignored.
+// action is one of: update_profile, change_email, change_password, manage_mfa,
+// manage_passkeys, manage_linked_accounts, delete_account.
+func BuildAccountActionInput(u *model.User, roles, permissions []string, action string, hasMFA, hasPasskey bool, accountAgeDays int, ipAddress, userAgent string) map[string]any {
+	input := map[string]any{
+		"user":              userFieldsWithRoles(u, roles, permissions),
+		"action":            action,
+		"has_mfa":           hasMFA,
+		"has_passkey":       hasPasskey,
+		"account_age_days":  accountAgeDays,
+		"ip_address":        ipAddress,
+		"user_agent":        userAgent,
+		"time":              timeFields(),
+	}
+	return input
+}
+
 // BuildAdminAPIInput is used by the RequirePolicy middleware on /api/v1/admin/*
 // (admin_api policy type). Only deny is consulted; modify is ignored.
 func BuildAdminAPIInput(userID uuid.UUID, permissions []string, method, path, ipAddress string) map[string]any {
