@@ -65,7 +65,7 @@ func (h *Handler) RegisterRoutes(
 // @Summary Start passkey registration
 // @Tags    Account
 // @Produce json
-// @Success 200 {object} passkey.BeginRegistrationResponse
+// @Success 200 {object} map[string]any "challenge_id (uuid) + options (PublicKeyCredentialCreationOptions JSON)"
 // @Security BearerAuth
 // @Router  /api/v1/me/passkeys/register/begin [post]
 func (h *Handler) RegisterBegin(c *gin.Context) {
@@ -215,7 +215,7 @@ func (h *Handler) Delete(c *gin.Context) {
 // @Summary  Start a passkey-based reauth challenge
 // @Tags     Account
 // @Produce  json
-// @Success  200 {object} passkey.BeginLoginResponse
+// @Success  200 {object} map[string]any "challenge_id (uuid) + options (PublicKeyCredentialRequestOptions JSON)"
 // @Security BearerAuth
 // @Router   /api/v1/me/passkeys/reauth/begin [post]
 func (h *Handler) ReauthBegin(c *gin.Context) {
@@ -236,7 +236,7 @@ func (h *Handler) ReauthBegin(c *gin.Context) {
 // @Summary  Begin usernameless passkey login (public)
 // @Tags     Account
 // @Produce  json
-// @Success  200 {object} passkey.BeginLoginResponse
+// @Success  200 {object} map[string]any "challenge_id (uuid) + options (PublicKeyCredentialRequestOptions JSON)"
 // @Router   /api/v1/me/passkeys/login/begin [post]
 func (h *Handler) LoginBegin(c *gin.Context) {
 	resp, err := h.service.BeginLogin()
