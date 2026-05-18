@@ -226,6 +226,40 @@ func (s *Service) UpdateProfile(id uuid.UUID, input UpdateProfileInput) (*model.
 	return user, nil
 }
 
+// VerifyPassword returns true iff the supplied plaintext matches the user's
+// stored hash. Used by the reauth package to validate password-based step-up.
+func (s *Service) VerifyPassword(id uuid.UUID, password string) (bool, error) {
+	user, err := s.repo.FindByID(id)
+	if err != nil {
+		return false, err
+	}
+	if user == nil {
+		return false, nil
+	}
+	return s.hasher.Verify(password, user.PasswordHash)
+}
+
+// UpdateFields is a thin pass-through used by the account package to apply
+// targeted partial updates (e.g. email change, deletion scheduling).
+func (s *Service) UpdateFields(id uuid.UUID, fields map[string]any) error {
+	return s.repo.UpdateFields(id, fields)
+}
+
+// FindByEmailChangeToken proxies to the repository.
+func (s *Service) FindByEmailChangeToken(tokenHash string) (*model.User, error) {
+	return s.repo.FindByEmailChangeToken(tokenHash)
+}
+
+// FindByDeletionToken proxies to the repository.
+func (s *Service) FindByDeletionToken(tokenHash string) (*model.User, error) {
+	return s.repo.FindByDeletionToken(tokenHash)
+}
+
+// FindByEmail proxies to the repository.
+func (s *Service) FindByEmail(email string) (*model.User, error) {
+	return s.repo.FindByEmail(email)
+}
+
 func (s *Service) ChangePassword(id uuid.UUID, input ChangePasswordInput) error {
 	if len(input.NewPassword) < s.cfg.PasswordMinLen {
 		return pkg.ErrBadRequest(fmt.Sprintf("password must be at least %d characters", s.cfg.PasswordMinLen))

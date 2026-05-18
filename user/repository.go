@@ -79,3 +79,21 @@ func (r *Repository) FindByVerifyToken(tokenHash string) (*model.User, error) {
 	}
 	return &user, err
 }
+
+func (r *Repository) FindByEmailChangeToken(tokenHash string) (*model.User, error) {
+	var user model.User
+	err := r.db.Where("email_change_token = ? AND email_change_expires_at > NOW()", tokenHash).First(&user).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &user, err
+}
+
+func (r *Repository) FindByDeletionToken(tokenHash string) (*model.User, error) {
+	var user model.User
+	err := r.db.Where("deletion_token = ? AND deletion_purge_after > NOW()", tokenHash).First(&user).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &user, err
+}

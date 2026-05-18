@@ -17,4 +17,6 @@ type RepositoryInterface interface {
 	Delete(id uuid.UUID) error
 	FindByResetToken(tokenHash string) (*model.User, error)
 	FindByVerifyToken(tokenHash string) (*model.User, error)
+	FindByEmailChangeToken(tokenHash string) (*model.User, error)
+	FindByDeletionToken(tokenHash string) (*model.User, error)
 }
