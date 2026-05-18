@@ -489,10 +489,16 @@ func seedAdminUser(db *gorm.DB, userService *user.Service, rbacService *rbac.Ser
 		return
 	}
 
-	password, err := crypto.GenerateRandomString(16)
-	if err != nil {
-		slog.Error("failed to generate admin password", "error", err)
-		return
+	password := os.Getenv("ORION_ADMIN_PASSWORD")
+	passwordFromEnv := password != ""
+
+	if !passwordFromEnv {
+		generated, err := crypto.GenerateRandomString(16)
+		if err != nil {
+			slog.Error("failed to generate admin password", "error", err)
+			return
+		}
+		password = generated
 	}
 
 	adminEmail := "admin@orionauth.local"
@@ -513,17 +519,34 @@ func seedAdminUser(db *gorm.DB, userService *user.Service, rbacService *rbac.Ser
 		return
 	}
 
-	credFile := "admin-credentials.txt"
-	content := fmt.Sprintf("Email:    %s\nPassword: %s\n", adminEmail, password)
-	if err := os.WriteFile(credFile, []byte(content), 0600); err != nil {
-		slog.Error("failed to write admin credentials file", "error", err)
+	// Operator-supplied password: never echo it, the operator already knows it.
+	if passwordFromEnv {
+		slog.Warn("========================================")
+		slog.Warn("DEFAULT ADMIN USER CREATED")
+		slog.Warn("Email:    " + adminEmail)
+		slog.Warn("Password: <provided via ORION_ADMIN_PASSWORD>")
+		slog.Warn("========================================")
 		return
 	}
 
+	// Randomly generated: surface it somewhere or it's lost forever. Try the
+	// file first, fall back to console — never silently swallow it.
+	credFile := "admin-credentials.txt"
+	content := fmt.Sprintf("Email:    %s\nPassword: %s\n", adminEmail, password)
+	fileErr := os.WriteFile(credFile, []byte(content), 0600)
+
 	slog.Warn("========================================")
 	slog.Warn("DEFAULT ADMIN USER CREATED")
-	slog.Warn("Credentials written to " + credFile)
+	slog.Warn("Email:    " + adminEmail)
+	if fileErr != nil {
+		slog.Error("failed to write admin credentials file, printing to console as fallback", "error", fileErr)
+		slog.Warn("Password: " + password)
+		slog.Warn("COPY THIS PASSWORD NOW — IT WILL NOT BE PRINTED AGAIN")
+	} else {
+		slog.Warn("Credentials written to " + credFile)
+	}
 	slog.Warn("CHANGE THIS PASSWORD IMMEDIATELY")
+	slog.Warn("Tip: set ORION_ADMIN_PASSWORD to provision a deterministic admin password.")
 	slog.Warn("========================================")
 }
 
