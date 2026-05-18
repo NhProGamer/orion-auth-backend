@@ -168,6 +168,14 @@ func (m *mockUserRepo) FindByVerifyToken(tokenHash string) (*model.User, error) 
 	return nil, nil
 }
 
+func (m *mockUserRepo) FindByEmailChangeToken(_ string) (*model.User, error) {
+	return nil, nil
+}
+
+func (m *mockUserRepo) FindByDeletionToken(_ string) (*model.User, error) {
+	return nil, nil
+}
+
 // --- Mock RBAC Repository ---
 
 type mockRbacRepo struct {
@@ -279,6 +287,11 @@ func (m *mockEmailSender) SendInvitationEmail(to, token string) error {
 	}
 	return nil
 }
+
+func (m *mockEmailSender) SendEmailChangeConfirmation(_, _ string) error { return nil }
+func (m *mockEmailSender) SendEmailChangedNotice(_, _ string) error      { return nil }
+func (m *mockEmailSender) SendPasswordChangedNotice(_ string) error      { return nil }
+func (m *mockEmailSender) SendAccountDeletionEmail(_, _ string) error    { return nil }
 
 // --- Helpers ---
 

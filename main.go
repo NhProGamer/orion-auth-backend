@@ -11,10 +11,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 	"gorm.io/gorm"
 
+	"orion-auth-backend/account"
 	"orion-auth-backend/audit"
 	"orion-auth-backend/model"
 
@@ -33,8 +35,10 @@ import (
 	"orion-auth-backend/middleware"
 	"orion-auth-backend/oauth"
 	"orion-auth-backend/oidc"
+	"orion-auth-backend/passkey"
 	"orion-auth-backend/policy"
 	"orion-auth-backend/rbac"
+	"orion-auth-backend/reauth"
 	"orion-auth-backend/resource"
 	"orion-auth-backend/session"
 	"orion-auth-backend/user"
@@ -84,6 +88,8 @@ func main() {
 	mfaRepo := mfa.NewRepository(db)
 	rbacRepo := rbac.NewRepository(db)
 	fedRepo := federation.NewRepository(db)
+	reauthRepo := reauth.NewRepository(db)
+	passkeyRepo := passkey.NewRepository(db)
 
 	// Services
 	userService := user.NewService(userRepo, hasher, cfg.Auth)
@@ -98,6 +104,32 @@ func main() {
 	fedService := federation.NewService(fedRepo, cfg.Issuer)
 	invRepo := invitation.NewRepository(db)
 	invService := invitation.NewService(invRepo, userService, rbacService, emailSender, cfg.Issuer)
+
+	// WebAuthn / Passkeys
+	wa, err := webauthn.New(&webauthn.Config{
+		RPDisplayName: cfg.WebAuthn.RPDisplayName,
+		RPID:          cfg.WebAuthn.RPID,
+		RPOrigins:     cfg.WebAuthn.RPOrigins,
+	})
+	if err != nil {
+		slog.Error("failed to initialize webauthn", "error", err)
+		os.Exit(1)
+	}
+	passkeyService := passkey.NewService(passkeyRepo, userService, wa, cfg.Account.PasskeyChallengeTTL)
+
+	// Reauth (step-up)
+	reauthService := reauth.NewService(reauthRepo, userService, cfg.Account.ReauthTokenTTL)
+	reauthService.SetMFAValidator(mfaService)
+	reauthService.SetPasskeyValidator(passkeyService)
+
+	// Account self-service (email change, password change, deletion)
+	accountService := account.NewService(
+		userService,
+		sessionService,
+		emailSender,
+		cfg.Account.EmailChangeTokenTTL,
+		cfg.Account.DeletionGracePeriod,
+	)
 
 	// Policy engine
 	policyRepo := policy.NewRepository(db)
@@ -115,6 +147,11 @@ func main() {
 
 	// Seed defaults on first launch
 	seedDefaults(db, userService, rbacService, cfg.Issuer)
+
+	// Wire the default 'user' role for self-registration AFTER seeding so the
+	// admin user (created via seedAdminUser) doesn't pick up the user role on top
+	// of the admin role. New registrations get the user role automatically.
+	userService.SetDefaultRole(uuid.MustParse(defaultUserRoleID), rbacService)
 
 	// Initialize signing keys
 	if err := oidcService.EnsureSigningKey(); err != nil {
@@ -148,6 +185,19 @@ func main() {
 	invHandler := invitation.NewHandler(invService)
 	policyHandler := policy.NewHandler(policyService)
 	resourceHandler := resource.NewHandler(resourceService)
+	reauthHandler := reauth.NewHandler(reauthService)
+	passkeyHandler := passkey.NewHandler(passkeyService)
+	accountHandler := account.NewHandler(accountService)
+	accountHandler.SetReauthService(reauthService)
+
+	// Policy gate for account_action policies (deny-on-self-service rules).
+	accountPolicyGate := account.NewPolicyGate(
+		userService,
+		newRoleProviderAdapter(rbacService),
+		mfaService,
+		passkeyService,
+		newAccountPolicyEvaluatorAdapter(policyService),
+	)
 
 	// Connect audit logging to handlers
 	userHandler.SetAuditService(auditService)
@@ -161,12 +211,40 @@ func main() {
 	invHandler.SetFederationLister(&federationListerAdapter{fedService: fedService})
 	policyHandler.SetAuditService(auditService)
 	resourceHandler.SetAuditService(auditService)
+	reauthHandler.SetAuditService(auditService)
+	passkeyHandler.SetAuditService(auditService)
+	accountHandler.SetAuditService(auditService)
 
 	// Dynamic Client Registration handler
 	dcrHandler := client.NewDCRHandler(clientService)
 
 	// Router
-	router := setupRouter(cfg, db, hasher, authRateLimiter, rbacService, policyService, userHandler, sessionHandler, clientHandler, oauthHandler, oidcHandler, mfaHandler, rbacHandler, auditHandler, fedHandler, invHandler, policyHandler, resourceHandler, dcrHandler)
+	router := setupRouter(setupRouterArgs{
+		cfg:               cfg,
+		db:                db,
+		hasher:            hasher,
+		authRL:            authRateLimiter,
+		rbacService:       rbacService,
+		policyService:     policyService,
+		reauthService:     reauthService,
+		accountGate:       accountPolicyGate,
+		userHandler:       userHandler,
+		sessionHandler:    sessionHandler,
+		clientHandler:     clientHandler,
+		oauthHandler:      oauthHandler,
+		oidcHandler:       oidcHandler,
+		mfaHandler:        mfaHandler,
+		rbacHandler:       rbacHandler,
+		auditHandler:      auditHandler,
+		fedHandler:        fedHandler,
+		invHandler:        invHandler,
+		policyHandler:     policyHandler,
+		resourceHandler:   resourceHandler,
+		reauthHandler:     reauthHandler,
+		passkeyHandler:    passkeyHandler,
+		accountHandler:    accountHandler,
+		dcrHandler:        dcrHandler,
+	})
 
 	// Server
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
@@ -203,27 +281,41 @@ func main() {
 	slog.Info("server stopped")
 }
 
-func setupRouter(
-	cfg *config.Config,
-	db *gorm.DB,
-	hasher *crypto.Argon2Hasher,
-	authRL *middleware.RateLimiter,
-	rbacService *rbac.Service,
-	policyService *policy.Service,
-	userHandler *user.Handler,
-	sessionHandler *session.Handler,
-	clientHandler *client.Handler,
-	oauthHandler *oauth.Handler,
-	oidcHandler *oidc.Handler,
-	mfaHandler *mfa.Handler,
-	rbacHandler *rbac.Handler,
-	auditHandler *audit.Handler,
-	fedHandler *federation.Handler,
-	invHandler *invitation.Handler,
-	policyHandler *policy.Handler,
-	resourceHandler *resource.Handler,
-	dcrHandler *client.DCRHandler,
-) *gin.Engine {
+type setupRouterArgs struct {
+	cfg             *config.Config
+	db              *gorm.DB
+	hasher          *crypto.Argon2Hasher
+	authRL          *middleware.RateLimiter
+	rbacService     *rbac.Service
+	policyService   *policy.Service
+	reauthService   *reauth.Service
+	accountGate     *account.PolicyGate
+	userHandler     *user.Handler
+	sessionHandler  *session.Handler
+	clientHandler   *client.Handler
+	oauthHandler    *oauth.Handler
+	oidcHandler     *oidc.Handler
+	mfaHandler      *mfa.Handler
+	rbacHandler     *rbac.Handler
+	auditHandler    *audit.Handler
+	fedHandler      *federation.Handler
+	invHandler      *invitation.Handler
+	policyHandler   *policy.Handler
+	resourceHandler *resource.Handler
+	reauthHandler   *reauth.Handler
+	passkeyHandler  *passkey.Handler
+	accountHandler  *account.Handler
+	dcrHandler      *client.DCRHandler
+}
+
+func setupRouter(a setupRouterArgs) *gin.Engine {
+	cfg := a.cfg
+	db := a.db
+	hasher := a.hasher
+	authRL := a.authRL
+	rbacService := a.rbacService
+	policyService := a.policyService
+
 	gin.SetMode(cfg.Server.Mode)
 	router := gin.New()
 	router.Use(gin.Recovery())
@@ -252,32 +344,67 @@ func setupRouter(
 	oauthRL := middleware.NewRateLimiter(10, 3)
 	jwksCache := middleware.NewJWKSCache()
 	clientAuthMiddleware := middleware.ClientAuth(db, hasher, cfg.Issuer+"/token", jwksCache, newPolicyDeciderAdapter(policyService))
-	oauthHandler.RegisterRoutes(router, clientAuthMiddleware, oauthRL.Middleware(), cfg.Issuer)
+	a.oauthHandler.RegisterRoutes(router, clientAuthMiddleware, oauthRL.Middleware(), cfg.Issuer)
 
 	// Dynamic Client Registration (RFC 7591)
-	router.POST("/register", oauthRL.Middleware(), dcrHandler.Register)
-	router.GET("/register/:client_id", dcrHandler.ReadRegistration)
-	router.PUT("/register/:client_id", dcrHandler.UpdateRegistration)
-	router.DELETE("/register/:client_id", dcrHandler.DeleteRegistration)
+	router.POST("/register", oauthRL.Middleware(), a.dcrHandler.Register)
+	router.GET("/register/:client_id", a.dcrHandler.ReadRegistration)
+	router.PUT("/register/:client_id", a.dcrHandler.UpdateRegistration)
+	router.DELETE("/register/:client_id", a.dcrHandler.DeleteRegistration)
 
 	// OIDC endpoints (root level)
 	bearerAuthMiddleware := middleware.BearerAuth(db)
-	oidcHandler.RegisterRoutes(router, bearerAuthMiddleware, oauthRL.Middleware())
+	a.oidcHandler.RegisterRoutes(router, bearerAuthMiddleware, oauthRL.Middleware())
+
+	// Account permission gates (RBAC permissions seeded by migration 028).
+	readProfilePerm := rbac.RequirePermission(rbacService, "account:read_profile")
+	updateProfilePerm := rbac.RequirePermission(rbacService, "account:update_profile")
+	changeEmailPerm := rbac.RequirePermission(rbacService, "account:change_email")
+	changePasswordPerm := rbac.RequirePermission(rbacService, "account:change_password")
+	manageSessionsPerm := rbac.RequirePermission(rbacService, "account:manage_sessions")
+	manageMFAPerm := rbac.RequirePermission(rbacService, "account:manage_mfa")
+	managePasskeysPerm := rbac.RequirePermission(rbacService, "account:manage_passkeys")
+	manageLinkedAccountsPerm := rbac.RequirePermission(rbacService, "account:manage_linked_accounts")
+	deleteAccountPerm := rbac.RequirePermission(rbacService, "account:delete_account")
+	requireReauth := middleware.RequireReauth(a.reauthService)
+
+	// account_action policy gates per action — chain after the permission gate.
+	policyGateUpdateProfile := a.accountGate.Middleware("update_profile")
+	policyGateChangeEmail := a.accountGate.Middleware("change_email")
+	policyGateChangePassword := a.accountGate.Middleware("change_password")
+	policyGateManageMFA := a.accountGate.Middleware("manage_mfa")
+	policyGateManagePasskeys := a.accountGate.Middleware("manage_passkeys")
+	policyGateManageLinkedAccounts := a.accountGate.Middleware("manage_linked_accounts")
+	policyGateDeleteAccount := a.accountGate.Middleware("delete_account")
 
 	// Public API routes (rate limited)
 	public := router.Group("/api/v1")
 	public.Use(authRL.Middleware())
-	userHandler.RegisterRoutes(public, nil)
-	invHandler.RegisterPublicRoutes(public)
-	fedHandler.RegisterPublicRoutes(public)
+	a.userHandler.RegisterRoutes(public, nil, nil, nil)
+	a.invHandler.RegisterPublicRoutes(public)
+	a.fedHandler.RegisterPublicRoutes(public)
+	// Token-based account flows (no bearer): email-change confirm + deletion cancel.
+	a.accountHandler.RegisterRoutes(public, nil, nil, nil, nil, nil)
+	// Public passkey login (usernameless): begin + finish only.
+	a.passkeyHandler.RegisterRoutes(public, nil, nil, nil, nil)
 
 	// Authenticated API routes
 	authenticated := router.Group("/api/v1")
 	authenticated.Use(bearerAuthMiddleware)
-	userHandler.RegisterRoutes(nil, authenticated)
-	sessionHandler.RegisterRoutes(authenticated)
-	mfaHandler.RegisterRoutes(authenticated)
-	fedHandler.RegisterAuthenticatedRoutes(authenticated)
+	a.userHandler.RegisterRoutes(nil, authenticated, readProfilePerm, chainMW(updateProfilePerm, policyGateUpdateProfile))
+	a.sessionHandler.RegisterRoutes(authenticated, readProfilePerm, manageSessionsPerm)
+	a.mfaHandler.RegisterRoutes(authenticated, chainMW(manageMFAPerm, policyGateManageMFA), requireReauth)
+	a.fedHandler.RegisterAuthenticatedRoutes(authenticated, readProfilePerm, chainMW(manageLinkedAccountsPerm, policyGateManageLinkedAccounts), requireReauth)
+	a.reauthHandler.RegisterRoutes(authenticated)
+	a.passkeyHandler.RegisterRoutes(nil, authenticated, readProfilePerm, chainMW(managePasskeysPerm, policyGateManagePasskeys), requireReauth)
+	a.accountHandler.RegisterRoutes(
+		nil,
+		authenticated,
+		chainMW(changePasswordPerm, policyGateChangePassword),
+		chainMW(changeEmailPerm, policyGateChangeEmail),
+		chainMW(deleteAccountPerm, policyGateDeleteAccount),
+		requireReauth,
+	)
 
 	// Admin API routes (authenticated + RBAC)
 	adminBase := router.Group("/api/v1/admin")
@@ -286,50 +413,65 @@ func setupRouter(
 	// User management (requires users:read or users:write)
 	userAdmin := adminBase.Group("")
 	userAdmin.Use(rbac.RequireAnyPermission(rbacService, "users:read", "users:write"))
-	userHandler.RegisterAdminRoutes(userAdmin)
-	invHandler.RegisterAdminRoutes(userAdmin)
+	a.userHandler.RegisterAdminRoutes(userAdmin)
+	a.invHandler.RegisterAdminRoutes(userAdmin)
 
 	// Client management (requires clients:read or clients:write)
 	clientAdmin := adminBase.Group("")
 	clientAdmin.Use(rbac.RequireAnyPermission(rbacService, "clients:read", "clients:write"))
-	clientHandler.RegisterRoutes(clientAdmin)
+	a.clientHandler.RegisterRoutes(clientAdmin)
 
 	// RBAC management (requires roles:read or roles:write)
 	rbacAdmin := adminBase.Group("")
 	rbacAdmin.Use(rbac.RequireAnyPermission(rbacService, "roles:read", "roles:write"))
-	rbacHandler.RegisterRoutes(rbacAdmin)
+	a.rbacHandler.RegisterRoutes(rbacAdmin)
 
 	// Key management (requires keys:read or keys:write)
 	keyAdmin := adminBase.Group("")
 	keyAdmin.Use(rbac.RequireAnyPermission(rbacService, "keys:read", "keys:write"))
-	oidcHandler.RegisterAdminRoutes(keyAdmin)
+	a.oidcHandler.RegisterAdminRoutes(keyAdmin)
 
 	// Federation management (requires federation:read or federation:write)
 	fedAdmin := adminBase.Group("")
 	fedAdmin.Use(rbac.RequireAnyPermission(rbacService, "federation:read", "federation:write"))
-	fedHandler.RegisterAdminRoutes(fedAdmin)
+	a.fedHandler.RegisterAdminRoutes(fedAdmin)
 
 	// Policy management (requires policies:read or policies:write)
 	policyAdmin := adminBase.Group("")
 	policyAdmin.Use(rbac.RequireAnyPermission(rbacService, "policies:read", "policies:write"))
-	policyHandler.RegisterRoutes(policyAdmin)
+	a.policyHandler.RegisterRoutes(policyAdmin)
 
 	// Resource management (requires resources:read or resources:write)
 	resourceAdmin := adminBase.Group("")
 	resourceAdmin.Use(rbac.RequireAnyPermission(rbacService, "resources:read", "resources:write"))
-	resourceHandler.RegisterRoutes(resourceAdmin)
+	a.resourceHandler.RegisterRoutes(resourceAdmin)
 
 	// Audit logs (requires audit:read)
 	auditAdmin := adminBase.Group("")
 	auditAdmin.Use(rbac.RequirePermission(rbacService, "audit:read"))
-	auditHandler.RegisterRoutes(auditAdmin)
+	a.auditHandler.RegisterRoutes(auditAdmin)
 
 	return router
 }
 
+// chainMW returns a single gin.HandlerFunc that runs the supplied middlewares
+// in order, stopping at the first one that aborts. Lets callers attach a
+// permission gate + a policy gate as one slot in RegisterRoutes signatures.
+func chainMW(mws ...gin.HandlerFunc) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		for _, mw := range mws {
+			if c.IsAborted() {
+				return
+			}
+			mw(c)
+		}
+	}
+}
+
 const (
-	adminRoleID   = "00000000-0000-0000-0000-000000000001"
-	adminClientID = "00000000-0000-0000-0000-000000000002"
+	adminRoleID       = "00000000-0000-0000-0000-000000000001"
+	adminClientID     = "00000000-0000-0000-0000-000000000002"
+	defaultUserRoleID = "00000000-0000-0000-0000-000000000004"
 )
 
 func seedDefaults(db *gorm.DB, userService *user.Service, rbacService *rbac.Service, issuer string) {
@@ -468,6 +610,23 @@ func (a *roleProviderAdapter) GetUserRoleNames(userID uuid.UUID) ([]string, erro
 
 func (a *roleProviderAdapter) GetUserPermissions(userID uuid.UUID) ([]string, error) {
 	return a.svc.GetUserPermissions(userID)
+}
+
+// accountPolicyEvaluatorAdapter adapts policy.Service to account.PolicyEvaluator.
+type accountPolicyEvaluatorAdapter struct {
+	svc *policy.Service
+}
+
+func newAccountPolicyEvaluatorAdapter(svc *policy.Service) *accountPolicyEvaluatorAdapter {
+	return &accountPolicyEvaluatorAdapter{svc: svc}
+}
+
+func (a *accountPolicyEvaluatorAdapter) Evaluate(ctx context.Context, policyType string, input map[string]any) (*account.PolicyResult, error) {
+	r, err := a.svc.Evaluate(ctx, policyType, input)
+	if err != nil || r == nil {
+		return nil, err
+	}
+	return &account.PolicyResult{Deny: r.Deny, DenyReason: r.DenyReason}, nil
 }
 
 // federationListerAdapter adapts federation.Service to invitation.FederationLister.

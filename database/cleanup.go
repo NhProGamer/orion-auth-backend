@@ -34,6 +34,10 @@ func runCleanup(db *gorm.DB) {
 		{"authorization_codes", "DELETE FROM authorization_codes WHERE expires_at < ?", []any{now}},
 		{"device_codes", "DELETE FROM device_codes WHERE expires_at < ?", []any{now}},
 		{"sessions", "DELETE FROM sessions WHERE expires_at < ? OR (revoked = TRUE AND revoked_at < ?)", []any{now, grace}},
+		{"reauth_tokens", "DELETE FROM reauth_tokens WHERE expires_at < ? OR (used = TRUE AND used_at < ?)", []any{now, grace}},
+		{"passkey_challenges", "DELETE FROM passkey_challenges WHERE expires_at < ?", []any{now}},
+		// Hard-delete users whose grace period has elapsed.
+		{"users_purged", "DELETE FROM users WHERE deletion_purge_after IS NOT NULL AND deletion_purge_after < ?", []any{now}},
 	}
 
 	for _, q := range queries {
