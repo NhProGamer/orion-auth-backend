@@ -33,7 +33,17 @@ func (h *Handler) SetAuditService(s *audit.Service) {
 	h.auditService = s
 }
 
-func (h *Handler) RegisterRoutes(public, authenticated *gin.RouterGroup) {
+// RegisterRoutes wires the user-facing routes.
+//
+//	readProfilePerm    — account:read_profile gate (GET /me)
+//	updateProfilePerm  — account:update_profile gate (PATCH /me)
+//
+// Password change has moved to the account package (account.Handler) so it
+// can centralise step-up + session revocation + notification email.
+func (h *Handler) RegisterRoutes(
+	public, authenticated *gin.RouterGroup,
+	readProfilePerm, updateProfilePerm gin.HandlerFunc,
+) {
 	if public != nil {
 		public.POST("/auth/register", h.Register)
 		public.POST("/auth/login", h.Login)
@@ -43,9 +53,17 @@ func (h *Handler) RegisterRoutes(public, authenticated *gin.RouterGroup) {
 	}
 
 	if authenticated != nil {
-		authenticated.GET("/me", h.GetProfile)
-		authenticated.PATCH("/me", h.UpdateProfile)
-		authenticated.PUT("/me/password", h.ChangePassword)
+		read := authenticated.Group("")
+		if readProfilePerm != nil {
+			read.Use(readProfilePerm)
+		}
+		read.GET("/me", h.GetProfile)
+
+		write := authenticated.Group("")
+		if updateProfilePerm != nil {
+			write.Use(updateProfilePerm)
+		}
+		write.PATCH("/me", h.UpdateProfile)
 	}
 }
 
@@ -328,42 +346,6 @@ func (h *Handler) UpdateProfile(c *gin.Context) {
 	}
 
 	pkg.OK(c, gin.H{"user": user.PublicProfile()})
-}
-
-// ChangePassword godoc
-// @Summary      Change the current user's password
-// @Tags         Profile
-// @Accept       json
-// @Produce      json
-// @Param        body  body     user.ChangePasswordInput  true  "Old and new password"
-// @Success      200   {object}  map[string]any
-// @Failure      400   {object}  pkg.AppError
-// @Failure      401   {object}  pkg.AppError
-// @Security     BearerAuth
-// @Router       /api/v1/me/password [put]
-func (h *Handler) ChangePassword(c *gin.Context) {
-	userID, ok := middleware.GetUserID(c)
-	if !ok {
-		pkg.HandleError(c, pkg.ErrUnauthorized("not authenticated"))
-		return
-	}
-
-	var input ChangePasswordInput
-	if err := c.ShouldBindJSON(&input); err != nil {
-		pkg.HandleError(c, pkg.ErrBadRequest("invalid request body: "+err.Error()))
-		return
-	}
-
-	if err := h.service.ChangePassword(userID, input); err != nil {
-		pkg.HandleError(c, err)
-		return
-	}
-
-	if h.auditService != nil {
-		h.auditService.LogFromContext(c, audit.ActionPasswordChanged, nil)
-	}
-
-	pkg.OK(c, gin.H{"message": "password changed successfully"})
 }
 
 // ForgotPassword godoc

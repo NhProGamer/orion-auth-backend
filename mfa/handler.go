@@ -23,11 +23,24 @@ func (h *Handler) SetAuditService(s *audit.Service) {
 	h.auditService = s
 }
 
-func (h *Handler) RegisterRoutes(authenticated *gin.RouterGroup) {
-	authenticated.POST("/me/mfa/totp/enroll", h.Enroll)
-	authenticated.POST("/me/mfa/totp/verify", h.Verify)
-	authenticated.DELETE("/me/mfa/totp", h.Disable)
-	authenticated.POST("/me/mfa/backup-codes", h.RegenerateBackupCodes)
+// RegisterRoutes wires MFA self-service.
+//
+//	managePerm    — account:manage_mfa gate
+//	requireReauth — step-up middleware applied to DELETE (disabling TOTP)
+func (h *Handler) RegisterRoutes(authenticated *gin.RouterGroup, managePerm, requireReauth gin.HandlerFunc) {
+	g := authenticated.Group("")
+	if managePerm != nil {
+		g.Use(managePerm)
+	}
+	g.POST("/me/mfa/totp/enroll", h.Enroll)
+	g.POST("/me/mfa/totp/verify", h.Verify)
+	g.POST("/me/mfa/backup-codes", h.RegenerateBackupCodes)
+
+	sensitive := g.Group("")
+	if requireReauth != nil {
+		sensitive.Use(requireReauth)
+	}
+	sensitive.DELETE("/me/mfa/totp", h.Disable)
 }
 
 // Enroll godoc

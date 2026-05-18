@@ -22,10 +22,23 @@ func (h *Handler) SetAuditService(s *audit.Service) {
 	h.auditService = s
 }
 
-func (h *Handler) RegisterRoutes(authenticated *gin.RouterGroup) {
-	authenticated.GET("/me/sessions", h.List)
-	authenticated.DELETE("/me/sessions/:id", h.Revoke)
-	authenticated.DELETE("/me/sessions", h.RevokeAll)
+// RegisterRoutes wires the session self-service routes.
+//
+//	readPerm   — account:read_profile (List)
+//	managePerm — account:manage_sessions (Revoke, RevokeAll)
+func (h *Handler) RegisterRoutes(authenticated *gin.RouterGroup, readPerm, managePerm gin.HandlerFunc) {
+	read := authenticated.Group("")
+	if readPerm != nil {
+		read.Use(readPerm)
+	}
+	read.GET("/me/sessions", h.List)
+
+	manage := authenticated.Group("")
+	if managePerm != nil {
+		manage.Use(managePerm)
+	}
+	manage.DELETE("/me/sessions/:id", h.Revoke)
+	manage.DELETE("/me/sessions", h.RevokeAll)
 }
 
 // List godoc

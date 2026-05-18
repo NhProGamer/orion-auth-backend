@@ -29,9 +29,25 @@ func (h *Handler) RegisterPublicRoutes(public *gin.RouterGroup) {
 }
 
 // RegisterAuthenticatedRoutes registers endpoints that require auth.
-func (h *Handler) RegisterAuthenticatedRoutes(authenticated *gin.RouterGroup) {
-	authenticated.GET("/me/linked-accounts", h.ListLinkedAccounts)
-	authenticated.DELETE("/me/linked-accounts/:id", h.UnlinkAccount)
+//
+//	readPerm      — account:read_profile (List)
+//	managePerm    — account:manage_linked_accounts (Unlink)
+//	requireReauth — step-up on Unlink
+func (h *Handler) RegisterAuthenticatedRoutes(authenticated *gin.RouterGroup, readPerm, managePerm, requireReauth gin.HandlerFunc) {
+	read := authenticated.Group("")
+	if readPerm != nil {
+		read.Use(readPerm)
+	}
+	read.GET("/me/linked-accounts", h.ListLinkedAccounts)
+
+	manage := authenticated.Group("")
+	if managePerm != nil {
+		manage.Use(managePerm)
+	}
+	if requireReauth != nil {
+		manage.Use(requireReauth)
+	}
+	manage.DELETE("/me/linked-accounts/:id", h.UnlinkAccount)
 }
 
 // RegisterAdminRoutes registers admin CRUD for federation providers.
