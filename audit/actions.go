@@ -79,6 +79,23 @@ const (
 	ActionPolicyDenied  = "policy.denied"
 )
 
+// M2M actions (changes performed by services on users via /api/v1/m2m/users/*).
+// The audit log always carries the caller `client_id` in ClientID, and the
+// affected user in metadata.target_user_id.
+const (
+	ActionM2MUserCreated        = "m2m.user.created"
+	ActionM2MUserUpdated        = "m2m.user.updated"
+	ActionM2MUserDeleted        = "m2m.user.deleted"
+	ActionM2MUserPasswordSet    = "m2m.user.password_set"
+	ActionM2MUserUnlocked       = "m2m.user.unlocked"
+	ActionM2MUserMFAReset       = "m2m.user.mfa_reset"
+	ActionM2MUserRoleAssigned   = "m2m.user.role_assigned"
+	ActionM2MUserRoleRemoved    = "m2m.user.role_removed"
+	ActionM2MUserSessionRevoked = "m2m.user.session_revoked"
+	ActionM2MUserPasskeyRemoved = "m2m.user.passkey_removed"
+	ActionM2MUserLinkRemoved    = "m2m.user.linked_account_removed"
+)
+
 // Account self-service actions (user-initiated changes on their own account).
 const (
 	ActionAccountProfileUpdated         = "account.profile_updated"
