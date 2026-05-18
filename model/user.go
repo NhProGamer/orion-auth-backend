@@ -26,6 +26,9 @@ type User struct {
 	DeletedAt              *time.Time      `json:"deleted_at,omitempty"`
 	DeletionToken          *string         `gorm:"type:varchar(255)" json:"-"`
 	DeletionPurgeAfter     *time.Time      `gorm:"index" json:"deletion_purge_after,omitempty"`
+	EmailChangeNew         *string         `gorm:"type:varchar(255)" json:"-"`
+	EmailChangeToken       *string         `gorm:"type:varchar(255)" json:"-"`
+	EmailChangeExpiresAt   *time.Time      `json:"-"`
 }
 
 // IsPendingDeletion reports whether the user has requested account deletion

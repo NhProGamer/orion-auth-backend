@@ -15,8 +15,9 @@ import (
 var tmpl = template.Must(template.ParseFS(templates.FS, "*.gohtml"))
 
 type EmailData struct {
-	Issuer string
-	Token  string
+	Issuer   string
+	Token    string
+	NewEmail string
 }
 
 type SMTPSender struct {
@@ -50,6 +51,38 @@ func (s *SMTPSender) SendInvitationEmail(to, token string) error {
 		return fmt.Errorf("failed to render email template: %w", err)
 	}
 	return s.send(to, "You've been invited", buf.String())
+}
+
+func (s *SMTPSender) SendEmailChangeConfirmation(to, token string) error {
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, "account_email_change.gohtml", EmailData{Issuer: s.issuer, Token: token}); err != nil {
+		return fmt.Errorf("failed to render email template: %w", err)
+	}
+	return s.send(to, "Confirm your new email address", buf.String())
+}
+
+func (s *SMTPSender) SendEmailChangedNotice(oldEmail, newEmail string) error {
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, "account_email_changed.gohtml", EmailData{Issuer: s.issuer, NewEmail: newEmail}); err != nil {
+		return fmt.Errorf("failed to render email template: %w", err)
+	}
+	return s.send(oldEmail, "Your email address was changed", buf.String())
+}
+
+func (s *SMTPSender) SendPasswordChangedNotice(to string) error {
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, "account_password_changed.gohtml", EmailData{Issuer: s.issuer}); err != nil {
+		return fmt.Errorf("failed to render email template: %w", err)
+	}
+	return s.send(to, "Your password was changed", buf.String())
+}
+
+func (s *SMTPSender) SendAccountDeletionEmail(to, cancelToken string) error {
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, "account_deletion.gohtml", EmailData{Issuer: s.issuer, Token: cancelToken}); err != nil {
+		return fmt.Errorf("failed to render email template: %w", err)
+	}
+	return s.send(to, "Account deletion scheduled", buf.String())
 }
 
 func (s *SMTPSender) send(to, subject, htmlBody string) error {
