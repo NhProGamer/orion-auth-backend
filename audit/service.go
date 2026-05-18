@@ -64,13 +64,14 @@ func (s *Service) Log(entry LogEntry) {
 }
 
 type QueryInput struct {
-	ID      *uuid.UUID
-	UserID  *uuid.UUID
-	Action  string
-	From    *time.Time
-	To      *time.Time
-	Page    int
-	PerPage int
+	ID           *uuid.UUID
+	UserID       *uuid.UUID
+	Action       string
+	ActionPrefix string
+	From         *time.Time
+	To           *time.Time
+	Page         int
+	PerPage      int
 }
 
 func (s *Service) Query(input QueryInput) ([]model.AuditLog, int64, error) {
@@ -87,6 +88,9 @@ func (s *Service) Query(input QueryInput) ([]model.AuditLog, int64, error) {
 	}
 	if input.Action != "" {
 		query = query.Where("action = ?", input.Action)
+	}
+	if input.ActionPrefix != "" {
+		query = query.Where("action LIKE ?", input.ActionPrefix+"%")
 	}
 	if input.From != nil {
 		query = query.Where("created_at >= ?", *input.From)

@@ -78,3 +78,22 @@ const (
 	ActionPolicyDeleted = "policy.deleted"
 	ActionPolicyDenied  = "policy.denied"
 )
+
+// Account self-service actions (user-initiated changes on their own account).
+const (
+	ActionAccountProfileUpdated         = "account.profile_updated"
+	ActionAccountEmailChangeRequested   = "account.email_change_requested"
+	ActionAccountEmailChanged           = "account.email_changed"
+	ActionAccountPasswordChanged        = "account.password_changed"
+	ActionAccountMFADisabled            = "account.mfa_disabled"
+	ActionAccountMFABackupCodesReissued = "account.mfa_backup_codes_regenerated"
+	ActionAccountPasskeyAdded           = "account.passkey_added"
+	ActionAccountPasskeyRenamed         = "account.passkey_renamed"
+	ActionAccountPasskeyRemoved         = "account.passkey_removed"
+	ActionAccountLinkedAccountRemoved   = "account.linked_account_removed"
+	ActionAccountDeletionRequested      = "account.deletion_requested"
+	ActionAccountDeletionCancelled      = "account.deletion_cancelled"
+	ActionAccountDeleted                = "account.deleted"
+	ActionAccountReauthIssued           = "account.reauth_issued"
+	ActionAccountReauthFailed           = "account.reauth_failed"
+)

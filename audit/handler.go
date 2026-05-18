@@ -52,6 +52,7 @@ func (h *Handler) Query(c *gin.Context) {
 	}
 
 	input.Action = c.Query("action")
+	input.ActionPrefix = c.Query("action_prefix")
 
 	if fromStr := c.Query("from"); fromStr != "" {
 		t, err := time.Parse(time.RFC3339, fromStr)
