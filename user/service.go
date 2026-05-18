@@ -152,6 +152,143 @@ func (s *Service) List(page, perPage int) ([]model.User, int64, error) {
 	return s.repo.List(page, perPage)
 }
 
+// RegisterAdmin creates a user with explicit control over which roles are
+// assigned, bypassing the default-role hook. Used by the M2M provisioning
+// API where the caller specifies the exact rôle set. If roleIDs is empty,
+// no role is assigned at all — the user will have zero roles until an admin
+// (or another M2M call) sets some.
+func (s *Service) RegisterAdmin(input RegisterInput, roleIDs []uuid.UUID) (*model.User, error) {
+	input.Email = strings.ToLower(strings.TrimSpace(input.Email))
+
+	if len(input.Password) < s.cfg.PasswordMinLen {
+		return nil, pkg.ErrBadRequest(fmt.Sprintf("password must be at least %d characters", s.cfg.PasswordMinLen))
+	}
+
+	existing, err := s.repo.FindByEmail(input.Email)
+	if err != nil {
+		return nil, pkg.ErrInternal("failed to check existing user")
+	}
+	if existing != nil {
+		return nil, pkg.ErrConflict("email already registered")
+	}
+
+	hash, err := s.hasher.Hash(input.Password)
+	if err != nil {
+		return nil, pkg.ErrInternal("failed to hash password")
+	}
+
+	u := &model.User{
+		Email:        input.Email,
+		PasswordHash: hash,
+		DisplayName:  input.DisplayName,
+		Active:       true,
+	}
+	if err := s.repo.Create(u); err != nil {
+		slog.Error("failed to create user via admin path", "error", err)
+		return nil, pkg.ErrInternal("failed to create user")
+	}
+
+	if s.roleAssigner != nil {
+		for _, rid := range roleIDs {
+			if err := s.roleAssigner.AssignRole(u.ID, rid); err != nil {
+				slog.Warn("failed to assign role to admin-created user", "user_id", u.ID, "role_id", rid, "error", err)
+			}
+		}
+	}
+
+	slog.Info("user registered via admin path", "user_id", u.ID, "email", u.Email, "roles", len(roleIDs))
+	return u, nil
+}
+
+// M2MUpdateInput mirrors UpdateProfileInput and AdminUpdateInput but exposes
+// every mutable user field at once so an M2M caller can PATCH any subset.
+// All fields are optional pointers — only non-nil ones are applied.
+type M2MUpdateInput struct {
+	Email         *string                `json:"email"`
+	EmailVerified *bool                  `json:"email_verified"`
+	DisplayName   *string                `json:"display_name"`
+	AvatarURL     *string                `json:"avatar_url"`
+	Phone         *string                `json:"phone"`
+	Active        *bool                  `json:"active"`
+	Metadata      *model.ProfileMetadata `json:"metadata"`
+}
+
+// M2MUpdate applies any non-nil field of M2MUpdateInput on the target user.
+// Email uniqueness is checked. Metadata is merged into existing claims (same
+// semantics as UpdateProfile).
+func (s *Service) M2MUpdate(id uuid.UUID, input M2MUpdateInput) (*model.User, error) {
+	u, err := s.GetByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	if input.Email != nil {
+		email := strings.ToLower(strings.TrimSpace(*input.Email))
+		if email != u.Email {
+			existing, err := s.repo.FindByEmail(email)
+			if err != nil {
+				return nil, pkg.ErrInternal("failed to check email")
+			}
+			if existing != nil && existing.ID != id {
+				return nil, pkg.ErrConflict("email already in use")
+			}
+			u.Email = email
+		}
+	}
+	if input.EmailVerified != nil {
+		u.EmailVerified = *input.EmailVerified
+	}
+	if input.DisplayName != nil {
+		u.DisplayName = input.DisplayName
+	}
+	if input.AvatarURL != nil {
+		u.AvatarURL = input.AvatarURL
+	}
+	if input.Phone != nil {
+		u.Phone = input.Phone
+	}
+	if input.Active != nil {
+		u.Active = *input.Active
+	}
+	if input.Metadata != nil {
+		merged := u.GetProfileMetadata()
+		mergeProfileMetadata(&merged, input.Metadata)
+		raw, err := json.Marshal(merged)
+		if err != nil {
+			return nil, pkg.ErrInternal("failed to marshal metadata")
+		}
+		u.Metadata = raw
+	}
+
+	if err := s.repo.Update(u); err != nil {
+		return nil, pkg.ErrInternal("failed to update user")
+	}
+	return u, nil
+}
+
+// SetPassword overwrites the user's password hash unconditionally (used by
+// the M2M API — no current-password check, the caller is trusted via scope).
+// Returns the user for downstream side effects (sessions revoke, audit).
+func (s *Service) SetPassword(id uuid.UUID, newPassword string) error {
+	if len(newPassword) < s.cfg.PasswordMinLen {
+		return pkg.ErrBadRequest(fmt.Sprintf("password must be at least %d characters", s.cfg.PasswordMinLen))
+	}
+	hash, err := s.hasher.Hash(newPassword)
+	if err != nil {
+		return pkg.ErrInternal("failed to hash password")
+	}
+	return s.repo.UpdateFields(id, map[string]any{"password_hash": hash})
+}
+
+// Unlock clears the lock-out state on a user — failed login attempts reset
+// to 0 and locked_until cleared.
+func (s *Service) Unlock(id uuid.UUID) error {
+	return s.repo.UpdateFields(id, map[string]any{
+		"failed_login_attempts": 0,
+		"locked_until":          nil,
+	})
+}
+
 type AdminUpdateInput struct {
 	Email         *string `json:"email"`
 	DisplayName   *string `json:"display_name"`
