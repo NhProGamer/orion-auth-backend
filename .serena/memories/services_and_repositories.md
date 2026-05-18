@@ -2,89 +2,88 @@
 
 ## User Service (user/service.go)
 **Dependencies**: Repository, Argon2Hasher, AuthConfig, email.Sender (optional), RoleAssigner (optional)
-- Register(RegisterInput) → *User — normalize email, validate password length, hash password, create user, auto-assign default role if configured
+- Register(RegisterInput) → *User — normalize email, validate password length,
+  hash, create user, auto-assign default role if SetDefaultRole was wired
+- **RegisterAdmin(input, roleIDs)** — like Register but bypasses the default
+  role hook and assigns the caller-supplied roles (used by M2M provisioning)
 - Authenticate(LoginInput) → *User
-- GetByID, UpdateProfile, ChangePassword (validates current password), VerifyPassword (used by reauth), UpdateFields (exposed for account/)
-- FindByEmail / FindByEmailChangeToken / FindByDeletionToken — proxies for account/
+- GetByID, UpdateProfile, ChangePassword (validates current password)
+- **VerifyPassword(id, password)** — used by reauth
+- **UpdateFields(id, map)** — pass-through, exposed for account/m2m
+- **M2MUpdate(id, M2MUpdateInput)** — permissive update for the M2M API
+  (covers email, email_verified, display_name, avatar_url, phone, active,
+  metadata in one call; all fields optional pointers)
+- **SetPassword(id, newPassword)** — bypasses current_password check (M2M)
+- **Unlock(id)** — clears failed_login_attempts + locked_until (M2M)
+- FindByEmail / FindByEmailChangeToken / FindByDeletionToken — proxies
 - SendVerificationEmail, VerifyEmail, ForgotPassword, ResetPassword
-- SetDefaultRole(roleID, RoleAssigner) — wires the post-Register role assignment
-- incrementFailedAttempts(user) — lock if attempts >= MaxFailAttempts
+- SetDefaultRole(roleID, RoleAssigner) — wires post-Register role hook
 
 ## User Repository (user/repository.go)
 - Create, FindByID, FindByEmail, Update, UpdateFields(uuid, map), List(page, perPage)
 - FindByResetToken, FindByVerifyToken
-- FindByEmailChangeToken, FindByDeletionToken (added for account self-service flows)
+- FindByEmailChangeToken, FindByDeletionToken
 
 ## Session Service (session/service.go)
-**Dependencies**: Repository, AuthConfig
 - Create, ListActive, Revoke, RevokeAll(userID, exceptSessionID *uuid.UUID)
-- RevokeAll(uid, nil) is called by account.Service after password/email change or account deletion
+- RevokeAll(uid, nil) revokes everything (used by account/m2m after sensitive changes)
 
 ## Client Service (client/service.go) — unchanged
-
 ## OAuth Service (oauth/service.go) — unchanged
-
 ## OIDC Service (oidc/service.go) — unchanged
 
-## MFA Service (mfa/service.go) — unchanged
-Implements reauth.MFAValidator (HasMFA, ValidateCode) — wired in main.go via `reauthService.SetMFAValidator(mfaService)`.
+## MFA Service (mfa/service.go)
+- Enroll, Verify, Disable (requires TOTP code), RegenerateBackupCodes
+- **ForceDisable(userID)** — unconditional MFA reset, used by M2M
+- Implements reauth.MFAValidator (HasMFA, ValidateCode)
 
 ## RBAC Service (rbac/service.go) — unchanged
-Implements user.RoleAssigner (AssignRole) and (through the existing main.go adapter) account.RoleProvider.
+Implements user.RoleAssigner (AssignRole) + account.RoleProvider via main.go adapter.
 
 ## Audit Service (audit/service.go)
-- Log(LogEntry) — async
-- Query(QueryInput) — now supports both `Action` (exact) and `ActionPrefix` (LIKE) filters so the admin UI can show all `account.*` events with one filter.
-- Action constants for `account.*` events live in `audit/actions.go`.
+- Log(LogEntry) async
+- Query(QueryInput) supports `Action` (exact) and `ActionPrefix` (LIKE) filters
+- Action constants for account.* and m2m.user.* in audit/actions.go
 
-## Reauth Service (reauth/service.go) — NEW
-**Dependencies**: Repository, PasswordVerifier (user.Service), tokenTTL — optional MFAValidator, PasskeyValidator
-- Issue(userID, sessionID, IssueRequest) → IssueResponse{Token, ExpiresAt, Method}
-- Verify(rawToken, userID, sessionID) → *ReauthToken (nil if invalid/expired/wrong-session)
-- Consume(hash, consumedBy) — single-use marker; only called by handlers after the sensitive op succeeds
-- RevokeForSession(sessionID) — cascade revoke on session logout
-- CleanupExpired() — called by database.StartCleanupJob
+## Reauth Service (reauth/service.go)
+**Dependencies**: Repository, PasswordVerifier (user.Service), tokenTTL,
+optional MFAValidator, PasskeyValidator
+- Issue/Verify/Consume/RevokeForSession/CleanupExpired
+- Methods: password, totp, backup_code, passkey
 
-Methods accepted: `password`, `totp`, `backup_code`, `passkey`. Token format: SHA-256 hash of an opaque 32-byte random string (same as access tokens). Lifetime: `cfg.Account.ReauthTokenTTL` (default 10 min).
-
-## Reauth Repository (reauth/repository.go)
-- Create, FindByHash, MarkUsed, DeleteExpired, DeleteForSession
-
-## Passkey Service (passkey/service.go) — NEW
+## Passkey Service (passkey/service.go)
 **Dependencies**: Repository, UserFinder (user.Service), *webauthn.WebAuthn, challengeTTL
-- BeginRegistration(userID) → CredentialCreation + challengeID (stores SessionData gob-encoded in `passkey_challenges`)
-- FinishRegistration(userID, FinishRegistrationInput) → *Passkey
-- BeginLogin() → CredentialAssertion + challengeID (usernameless, via webauthn.BeginDiscoverableLogin)
-- FinishLogin(FinishLoginInput) → (*User, *Passkey) — wraps FinishDiscoverableLogin with a UserHandle→User resolver
-- BeginReauth(userID) → CredentialAssertion + challengeID (allowed-credentials scoped to user's passkeys)
-- ValidateReauthAssertion(userID, challengeID, response) → bool — implements reauth.PasskeyValidator
-- HasUserVerifiedPasskey(userID) → bool — used by account.PolicyGate
-- List/Rename/Delete
-- CleanupExpiredChallenges() — called by database cleanup job
+- BeginRegistration / FinishRegistration / BeginLogin / FinishLogin (discoverable)
+- BeginReauth / ValidateReauthAssertion
+- HasUserVerifiedPasskey, List, Rename, Delete, CleanupExpiredChallenges
 
-Uses lib `github.com/go-webauthn/webauthn` v0.17+. RP config read from `cfg.WebAuthn` (RPID, RPDisplayName, RPOrigins).
+## Account Service (account/service.go)
+**Dependencies**: UserStore, SessionRevoker, Mailer, emailChangeTokenTTL, deletionGracePeriod
+- ChangePassword (delegates + revokes sessions + emails notice)
+- RequestEmailChange / ConfirmEmailChange (2-step)
+- RequestDeletion (soft + grace) / CancelDeletion
 
-## Passkey Repository (passkey/repository.go)
-- Passkeys: Create, FindByCredentialID, FindByID, ListByUser, UpdateName, UpdateSignCount, Delete
-- Challenges: CreateChallenge, FindChallenge, DeleteChallenge, DeleteExpiredChallenges
+## Account PolicyGate (account/policy.go)
+Builder ; `.Middleware(action)` evaluates `account_action` Rego policies.
 
-## Account Service (account/service.go) — NEW
-**Dependencies**: UserStore (user.Service), SessionRevoker (session.Service), Mailer (email.Sender), emailChangeTokenTTL, deletionGracePeriod
-- ChangePassword(userID, ChangePasswordInput) — delegates to user.Service.ChangePassword + revokes other sessions + emails notice
-- RequestEmailChange(userID, ChangeEmailRequestInput) — token + email to new address (1h TTL by default)
-- ConfirmEmailChange(ConfirmEmailChangeInput) → (old, new, userID) — swaps email atomically, revokes sessions, notifies old address
-- RequestDeletion(userID) — soft-delete (active=false), token, cancel-link email (7d grace by default)
-- CancelDeletion(CancelDeletionInput) — restores account from token
+## M2M UserService (m2m/service.go) — NEW
+**Dependencies (injected as interfaces)**: UserStore, RoleService, SessionService,
+MFAService, PasskeyService, FederationService — narrow contracts in m2m/interfaces.go.
+Owns no data; delegates everything to upstream services.
 
-## Account PolicyGate (account/policy.go) — NEW
-Builder around userService + rbacService adapter + mfaService + passkeyService + policyService adapter. `.Middleware(action)` returns a gin.HandlerFunc that evaluates `account_action` Rego policies for the given action string (`update_profile`, `change_email`, ...). Fail-open on internal errors; deny → 403 with policy reason.
+Methods:
+- CRUD: Get, List, Create (returns *User + generated_password if omitted),
+  Update (any field except id), Delete
+- Credentials: SetPassword (auto-revokes all sessions), Unlock, ResetMFA
+- Roles: ListRoles, AssignRole, RemoveRole
+- Sessions: ListSessions, RevokeSession, RevokeAllSessions
+- Passkeys: ListPasskeys, DeletePasskey
+- Linked accounts: ListLinkedAccounts, UnlinkAccount
+
+m2m/handler.go exposes everything under /api/v1/m2m/users/*. Each route is
+gated by `middleware.RequireClientScope(db, scope, "urn:orion:m2m")` applied
+in main.go via 5 sub-groups (read, write, delete, manage_auth, manage_roles).
 
 ## DCR Handler (client/dcr_handler.go) — unchanged
 ## Federation Service (federation/service.go) — unchanged
-## Email Sender (email/) — extended with 4 new methods
-- SendEmailChangeConfirmation(to, token)
-- SendEmailChangedNotice(oldEmail, newEmail)
-- SendPasswordChangedNotice(to)
-- SendAccountDeletionEmail(to, cancelToken)
-
-Templates live in `email/templates/account_*.gohtml` and follow the existing dark/light design system.
+## Email Sender (email/) — extended with account.* notifications

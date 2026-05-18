@@ -33,56 +33,65 @@
 | GET | /check_session | None | OIDC Session Management iframe |
 
 ## Public API Routes (/api/v1, rate limited)
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| POST | /api/v1/auth/register | None | User registration (auto-assigns "user" role) |
-| POST | /api/v1/auth/login | None | User login |
-| POST | /api/v1/auth/forgot-password | None | Initiate password reset |
-| POST | /api/v1/auth/reset-password | None | Complete password reset |
-| POST | /api/v1/auth/verify-email | None | Verify email with token |
-| GET | /api/v1/auth/federation/:provider | None | Get social login authorization URL |
-| POST | /api/v1/auth/federation/:provider/callback | None | Process social login callback |
-| POST | /api/v1/me/passkeys/login/begin | None | Begin usernameless passkey login (CredentialAssertion) |
-| POST | /api/v1/me/passkeys/login/finish | None | Finish usernameless passkey login; returns matching user |
-| POST | /api/v1/me/account/email/confirm | None | Confirm email change with token from email |
-| POST | /api/v1/me/account/cancel-deletion | None | Cancel a pending account deletion with token |
+(unchanged — auth/register, auth/login, forgot-password, reset-password, verify-email,
+federation/:provider, federation/:provider/callback, /me/passkeys/login/{begin,finish},
+/me/account/email/confirm, /me/account/cancel-deletion)
 
-## Authenticated User Account API (/api/v1, bearer auth + RBAC + optional step-up)
-The "User Account API" is gated by RBAC permissions seeded under the `orion-account` API resource (migration 028). Default `user` role (migration 032) has them all; admins can revoke per-role. Sensitive endpoints additionally require an `X-Reauth-Token` header from `POST /api/v1/me/reauth`.
+## Authenticated User Account API (/api/v1/me/*, bearer auth + RBAC + optional step-up)
+(unchanged — see previous index; gated by orion-account resource permissions
+account:read_profile, account:update_profile, account:change_email,
+account:change_password, account:manage_sessions, account:manage_mfa,
+account:manage_passkeys, account:manage_linked_accounts, account:delete_account.
+Step-up X-Reauth-Token required on sensitive endpoints.)
 
-| Method | Path | Permission | Step-up | Description |
-|--------|------|------------|---------|-------------|
-| GET | /api/v1/me | account:read_profile | no | Profile |
-| PATCH | /api/v1/me | account:update_profile | no | Update display name / avatar / phone / OIDC metadata |
-| PUT | /api/v1/me/password | account:change_password | **yes** | Change password (also requires current_password in body); revokes other sessions and emails a notice |
-| POST | /api/v1/me/account/email/change-request | account:change_email | **yes** | Send confirm link to the new email |
-| DELETE | /api/v1/me | account:delete_account | **yes** | Soft-delete + 7d grace period; emails cancel link |
-| GET | /api/v1/me/sessions | account:read_profile | no | List own active sessions |
-| DELETE | /api/v1/me/sessions/:id | account:manage_sessions | no | Revoke a specific session |
-| DELETE | /api/v1/me/sessions | account:manage_sessions | no | Revoke all other sessions |
-| POST | /api/v1/me/mfa/totp/enroll | account:manage_mfa | no | Start TOTP enrollment |
-| POST | /api/v1/me/mfa/totp/verify | account:manage_mfa | no | Confirm TOTP, return backup codes |
-| POST | /api/v1/me/mfa/backup-codes | account:manage_mfa | no | Regenerate backup codes (requires TOTP code) |
-| DELETE | /api/v1/me/mfa/totp | account:manage_mfa | **yes** | Disable TOTP (also requires TOTP code in body) |
-| GET | /api/v1/me/passkeys | account:read_profile | no | List own passkeys |
-| POST | /api/v1/me/passkeys/register/begin | account:manage_passkeys | no | Start WebAuthn registration |
-| POST | /api/v1/me/passkeys/register/finish | account:manage_passkeys | no | Persist a new passkey |
-| PATCH | /api/v1/me/passkeys/:id | account:manage_passkeys | no | Rename a passkey |
-| POST | /api/v1/me/passkeys/reauth/begin | account:manage_passkeys | no | Start a passkey-based step-up challenge |
-| DELETE | /api/v1/me/passkeys/:id | account:manage_passkeys | **yes** | Remove a passkey |
-| GET | /api/v1/me/linked-accounts | account:read_profile | no | List linked federation accounts |
-| DELETE | /api/v1/me/linked-accounts/:id | account:manage_linked_accounts | **yes** | Unlink a federation account |
-| POST | /api/v1/me/reauth | (authenticated) | n/a | Issue a single-use step-up token (10 min, session-bound). Body: `{"method": "password|totp|backup_code|passkey", ...}` |
+## M2M API (/api/v1/m2m/users/*, client_credentials bearer)
+Service-to-service admin API. Consumed by services authenticated in OAuth2
+`client_credentials` with audience **`urn:orion:m2m`** and scope-gated access.
+Equivalent of /api/v1/admin/users/* but with the M2M audience instead of
+user RBAC. **No step-up reauth** — the scope on the token is the only barrier.
 
-Every account.* action is logged with a dedicated audit constant (`account.profile_updated`, `account.email_changed`, `account.passkey_added`, etc.). The `/admin/audit-logs` endpoint accepts both `action=` (exact) and `action_prefix=` (LIKE prefix) filters.
+Each call is logged with the caller `client_id` (from the bearer) and the
+affected user in `metadata.target_user_id`. Filter via
+`/admin/audit-logs?action_prefix=m2m.`.
+
+| Method | Path | Scope | Description |
+|--------|------|-------|-------------|
+| GET | /api/v1/m2m/users | m2m:users:read | List paginated |
+| POST | /api/v1/m2m/users | m2m:users:write | Create (body: email, password optional, display_name, email_verified, active, phone, avatar_url, metadata, role_ids). Returns generated_password once if omitted. |
+| GET | /api/v1/m2m/users/:id | m2m:users:read | Get (AdminView) |
+| PATCH | /api/v1/m2m/users/:id | m2m:users:write | Update any field except id |
+| DELETE | /api/v1/m2m/users/:id | m2m:users:delete | Hard delete (cascade) |
+| PUT | /api/v1/m2m/users/:id/password | m2m:users:manage_auth | Set password (no current_password); revokes all sessions |
+| POST | /api/v1/m2m/users/:id/unlock | m2m:users:manage_auth | Clear failed_login_attempts + locked_until |
+| POST | /api/v1/m2m/users/:id/mfa/reset | m2m:users:manage_auth | Force-disable TOTP |
+| GET | /api/v1/m2m/users/:id/roles | m2m:users:read | List user's roles |
+| POST | /api/v1/m2m/users/:id/roles | m2m:users:manage_roles | Body: { role_id } |
+| DELETE | /api/v1/m2m/users/:id/roles/:roleId | m2m:users:manage_roles | Remove role |
+| GET | /api/v1/m2m/users/:id/sessions | m2m:users:read | List active sessions |
+| DELETE | /api/v1/m2m/users/:id/sessions/:sid | m2m:users:manage_auth | Revoke session |
+| DELETE | /api/v1/m2m/users/:id/sessions | m2m:users:manage_auth | Revoke all |
+| GET | /api/v1/m2m/users/:id/passkeys | m2m:users:read | List passkeys (PublicView) |
+| DELETE | /api/v1/m2m/users/:id/passkeys/:pid | m2m:users:manage_auth | Remove passkey |
+| GET | /api/v1/m2m/users/:id/linked-accounts | m2m:users:read | List federation links |
+| DELETE | /api/v1/m2m/users/:id/linked-accounts/:linkId | m2m:users:manage_auth | Unlink |
+
+Error codes on the M2M path (RFC 6750 style):
+- `403 m2m_only` — the token is user-bound (rejected by RequireClientScope)
+- `403 wrong_audience` — token's aud != urn:orion:m2m
+- `403 insufficient_scope` — token missing the required scope. Response carries
+  `WWW-Authenticate: Bearer error="insufficient_scope", scope="m2m:users:..."`.
 
 ## Admin API Routes (/api/v1/admin, bearer + RBAC)
-Unchanged from the previous index; `policies:read/write` and `resources:read/write` already in place. The Resources screen now also lists the `orion-account` resource and its 9 permissions, which an admin can attribute to custom roles to fine-tune what end-users can do on their own account.
+(unchanged)
 
 ## Middleware Stack
 - **RequestID, CORS, RateLimiter, BearerAuth, ClientAuth**: as before
-- **RequireReauth(svc)**: enforces the `X-Reauth-Token` header; on success stashes `*model.ReauthToken` in ctx so handlers can `ConsumeReauth(c, svc, action)` after the sensitive op succeeds (single-use, only consumed on success — failures don't burn the token).
-- **account.PolicyGate.Middleware(action)**: chained after RBAC, evaluates `account_action` Rego policies. Fail-open on lookup errors so a misconfig doesn't lock users out of their own data.
+- **RequireReauth(svc)**: enforces X-Reauth-Token for /me sensitive ops
+- **account.PolicyGate.Middleware(action)**: evaluates account_action Rego policies
+- **RequireClientScope(db, scope, audience)** (NEW): the M2M gate. Rejects
+  user-bound tokens, checks aud + scope, sets ClientID in context. Pure
+  helpers (`containsScope`, `parseScopes`) + token lookup factored via
+  `LookupAccessToken(db, raw)` shared with BearerAuth.
 
 ## OIDC Discovery Values
 (unchanged)
