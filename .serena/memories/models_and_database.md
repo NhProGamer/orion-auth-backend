@@ -10,167 +10,88 @@ BaseModel: ID (uuid PK), CreatedAt, UpdatedAt
 
 ### User (table: users)
 - BaseModel
-- Email (varchar 255, unique, not null)
-- EmailVerified (bool, default false)
-- EmailVerifyToken (*string, varchar 255, json:"-")
-- EmailVerifyExpiresAt (*time.Time, json:"-")
-- PasswordHash (varchar 255, not null, json:"-")
-- PasswordResetToken (*string, varchar 255, json:"-")
-- PasswordResetExpiresAt (*time.Time, json:"-")
-- DisplayName (*string, varchar 255)
-- AvatarURL (*string, varchar 512)
-- Phone (*string, varchar 50)
-- LockedUntil (*time.Time)
-- FailedLoginAttempts (int, default 0, json:"-")
-- Active (bool, default true)
-- Metadata (json.RawMessage, jsonb, default '{}')
-- Methods: IsLocked(), PublicProfile(), OIDCClaims(scopes), AdminView()
-- Type alias: UserID = uuid.UUID
+- Email (varchar 255, unique, not null), EmailVerified, EmailVerifyToken/EmailVerifyExpiresAt
+- PasswordHash (varchar 255, not null), PasswordResetToken/PasswordResetExpiresAt
+- DisplayName, AvatarURL, Phone (*string)
+- LockedUntil (*time.Time), FailedLoginAttempts, Active (bool)
+- Metadata (jsonb, OIDC profile claims)
+- **DeletedAt, DeletionToken, DeletionPurgeAfter** (migration 031) — soft-delete with 7d grace period
+- **EmailChangeNew, EmailChangeToken, EmailChangeExpiresAt** (migration 033) — pending email change flow
+- Methods: IsLocked(), IsPendingDeletion(), PublicProfile(), AdminView(), OIDCClaims(scopes), GetProfileMetadata()
 
-### OAuthClient (table: oauth_clients)
+### OAuthClient — unchanged
+
+### PushedAuthorizationRequest — unchanged
+
+### AccessToken / RefreshToken / AuthorizationCode / AuthorizationRequest / Session / Consent / DeviceCode / AuditLog / SigningKey — unchanged
+
+### MFAMethod — unchanged
+
+### Role / Permission / UserRole / RolePermission — unchanged structure
+- Migration 032 seeds a default `user` role (UUID `00000000-0000-0000-0000-000000000004`) granted all `account:*` permissions and back-fills existing users that have no role assignment yet.
+
+### APIResource / ResourcePermission / ClientResourcePermission / RoleResourcePermission — unchanged structure
+- Migration 028 seeds the `orion-account` resource (UUID `00000000-0000-0000-0000-000000000003`) and 9 `account:*` permissions, mirrored into the RBAC `permissions` table and granted to the admin role.
+
+### Policy — unchanged structure
+- Type whitelist now includes `account_action` (validated in policy.Service.CreatePolicyInput binding tag).
+
+### FederationProvider / FederationLink — unchanged
+
+### Passkey (table: passkeys) — NEW (migration 030)
 - BaseModel
-- SecretHash (*string, varchar 255, json:"-")
-- Name (varchar 255, not null)
-- Description (*string, text)
-- RedirectURIs (pq.StringArray, text[])
-- GrantTypes (pq.StringArray, text[])
-- ResponseTypes (pq.StringArray, text[])
-- Scopes (pq.StringArray, text[])
-- TokenAuthMethod (varchar 50, default "client_secret_basic")
-- IsPublic (bool, default false)
-- IsFirstParty (bool, default false)
-- JWKSUri (*string, varchar 512)
-- AccessTokenTTL (int, default 3600)
-- RefreshTokenTTL (int, default 86400)
-- IDTokenTTL (int, default 3600)
-- PostLogoutRedirectURIs (pq.StringArray, text[])
-- BackchannelLogoutURI (*string, varchar 512)
-- BackchannelLogoutSessionReq (bool, default false)
-- FrontchannelLogoutURI (*string, varchar 512)
-- FrontchannelLogoutSessionReq (bool, default false)
-- SubjectType (string, varchar 20, default "public")
-- SectorIdentifierURI (*string, varchar 512)
-- UserinfoSignedResponseAlg (*string, varchar 10)
-- RegistrationAccessTokenHash (*string, varchar 64, json:"-")
-- Active (bool, default true)
-- Methods: HasGrantType(), HasScope(), HasRedirectURI(), HasPostLogoutRedirectURI(), ValidateScopes()
+- UserID (uuid FK, indexed, on delete cascade)
+- CredentialID ([]byte, BYTEA, unique) — WebAuthn credential ID
+- PublicKey ([]byte, BYTEA) — CBOR-encoded
+- AttestationType (varchar 50), AAGUID ([]byte BYTEA)
+- SignCount (uint32)
+- Transports (pq.StringArray, TEXT[]: usb, nfc, ble, internal, hybrid)
+- Flags (uint8 stored as INT) — raw `CredentialFlags.ProtocolValue()` per the go-webauthn recommendation
+- CloneWarning (bool), Name (varchar 100, default "Passkey")
+- LastUsedAt (*time.Time)
+- Method PublicView() — JSON-safe representation, never leaks credential material
 
-### PushedAuthorizationRequest (table: pushed_authorization_requests)
-- RequestURI (varchar 128, PK, format: urn:ietf:params:oauth:request_uri:<uuid>)
-- ClientID (uuid, not null)
-- Params (jsonb, stores serialized InitAuthorizeParams)
-- ExpiresAt, CreatedAt
-- Methods: IsExpired()
+### PasskeyChallenge (table: passkey_challenges) — NEW (migration 030)
+- ID (uuid PK), UserID (*uuid, nullable for usernameless login)
+- Purpose (varchar 20: `registration` | `login` | `reauth`)
+- SessionData ([]byte BYTEA) — gob-encoded `webauthn.SessionData`
+- ExpiresAt (indexed), CreatedAt
+- Method IsExpired()
 
-### AccessToken (table: access_tokens)
-- ID (varchar 64, PK — SHA-256 hash)
-- ClientID, UserID (*uuid), SessionID (*uuid), RefreshTokenID (*string varchar 64)
-- Scopes (pq.StringArray), ExpiresAt, Revoked (default false), CreatedAt
-- Method: IsValid()
+### ReauthToken (table: reauth_tokens) — NEW (migration 029)
+- ID (varchar 64, SHA-256 hash of raw token)
+- UserID (uuid FK, indexed, cascade), SessionID (uuid FK, indexed, cascade)
+- Method (varchar 20: password | totp | backup_code | passkey)
+- ExpiresAt, Used (bool, default false), UsedAt (*time.Time), ConsumedBy (*string varchar 100)
+- Methods: IsValid()
 
-### RefreshToken (table: refresh_tokens)
-- ID (varchar 64, PK — SHA-256 hash)
-- ClientID, UserID, SessionID (all uuid, not null)
-- Scopes (pq.StringArray)
-- FamilyID (uuid, for rotation chain tracking)
-- ParentID (*string varchar 64)
-- ExpiresAt, Revoked (default false), RotatedAt (*time.Time), CreatedAt
-- Methods: IsValid(), WasRotated()
+## Migrations (chronological, latest)
+- 027_require_pkce.sql — pre-existing
+- **028_create_account_resource.sql** — seed orion-account resource + account:* perms in both resource_permissions and RBAC permissions
+- **029_create_reauth_tokens.sql** — table for step-up tokens
+- **030_create_passkeys.sql** — passkeys + passkey_challenges tables
+- **031_add_users_deleted_at.sql** — users.deleted_at + deletion_token + deletion_purge_after columns
+- **032_seed_user_role.sql** — default `user` role with all account:* perms + backfill user_roles for existing accounts
+- **033_add_users_email_change.sql** — users.email_change_new + email_change_token + email_change_expires_at columns
 
-### AuthorizationCode (table: authorization_codes)
-- CodeHash (varchar 64, PK)
-- ClientID, UserID (uuid), RedirectURI (varchar 512)
-- Scopes (pq.StringArray)
-- CodeChallenge (*string, varchar 128), CodeChallengeMethod (*string, varchar 10)
-- Nonce (*string, varchar 128), SessionID (*uuid)
-- AuthTime (*time.Time), AuthMethods (pq.StringArray)
-- ClaimsParam (*string, jsonb)
-- ExpiresAt, Used (default false), CreatedAt
-- Methods: IsValid(), HasPKCE()
+## Cleanup Job (database/cleanup.go)
+Runs every 1h (see main.go). Deletes:
+- expired access_tokens / refresh_tokens / authorization_codes / device_codes / sessions
+- **expired or used reauth_tokens (older than 24h)**
+- **expired passkey_challenges**
+- **users whose `deletion_purge_after` has elapsed (hard delete)**
 
-### AuthorizationRequest (table: authorization_requests)
-- BaseModel
-- ClientID (uuid), RedirectURI (varchar 512), ResponseType (varchar 50)
-- Scopes (pq.StringArray), State (*string), Nonce (*string)
-- CodeChallenge (*string), CodeChallengeMethod (*string)
-- UserID (*uuid), Authenticated (default false), ConsentGiven (default false)
-- ExpiresAt
-- AuthMethods (pq.StringArray, tracks pwd/otp/fed during auth flow)
-- Methods: IsExpired(), IsReady()
-
-### Session (table: sessions)
-- ID (uuid PK, BeforeCreate hook for v7)
-- UserID (uuid), IPAddress (*string, inet), UserAgent (*string, varchar 512)
-- DeviceInfo (*string, varchar 255)
-- LastActiveAt, AuthenticatedAt, Revoked (default false), RevokedAt (*time.Time)
-- ExpiresAt, CreatedAt
-- Methods: IsActive(), Revoke()
-
-### Consent (table: consents)
-- BaseModel
-- UserID, ClientID (uuid), Scopes (pq.StringArray)
-- GrantedAt, RevokedAt (*time.Time)
-- Methods: IsActive(), CoversScopes(requested)
-
-### MFAMethod (table: mfa_methods)
-- BaseModel
-- UserID (uuid), Type (varchar 20, default "totp")
-- Secret (varchar 255, json:"-"), Verified (default false)
-- BackupCodes (pq.StringArray, json:"-")
-
-### Role (table: roles)
-- BaseModel
-- Name (varchar 100, unique), Description (*string)
-- Permissions ([]Permission, many2many:role_permissions)
-
-### Permission (table: permissions)
-- BaseModel
-- Name (varchar 100, unique), Description (*string)
-
-### UserRole (table: user_roles) — join table
-- UserID (PK), RoleID (PK)
-
-### RolePermission (table: role_permissions) — join table
-- RoleID (PK), PermissionID (PK), CreatedAt
-
-### DeviceCode (table: device_codes)
-- DeviceCodeHash (varchar 64, PK)
-- UserCode (varchar 9, unique), ClientID (uuid)
-- Scopes (pq.StringArray), UserID (*uuid), SessionID (*uuid)
-- Status (varchar 20, default "pending": pending/authorized/denied/consumed)
-- IntervalSecs (default 5), ExpiresAt, LastPolledAt (*time.Time), CreatedAt
-- Methods: IsExpired(), IsPending()
-
-### AuditLog (table: audit_logs)
-- ID (uuid PK), UserID (*uuid), ClientID (*uuid)
-- Action (varchar 100), IPAddress (*string, inet), UserAgent (*string, varchar 512)
-- Metadata (json.RawMessage, jsonb), CreatedAt
-
-### SigningKey (table: signing_keys)
-- ID (uuid PK), PrivateKeyPEM (text, json:"-"), PublicKeyPEM (text, json:"-")
-- Algorithm (varchar 10, default "RS256")
-- Active (default true), ExpiresAt (*time.Time), CreatedAt
-
-### FederationProvider (table: federation_providers)
-- BaseModel
-- Name (varchar 100, unique), DisplayName (*string, varchar 255)
-- Type (varchar 20, default "oidc")
-- ClientID (varchar 255), ClientSecret (varchar 255, json:"-")
-- IssuerURL, AuthorizationURL, TokenURL, UserinfoURL (*string, varchar 512)
-- Scopes (pq.StringArray), Active (default true)
-
-### FederationLink (table: federation_links)
-- BaseModel
-- UserID (uuid), ProviderID (uuid), ExternalID (varchar 255)
-- Email (*string, varchar 255), Metadata (json.RawMessage, jsonb)
-
-## Seeded Data (migration 011)
-- Role "admin" (UUID 00000000-0000-0000-0000-000000000001) with all 11 permissions:
-  clients:read, clients:write, users:read, users:write, roles:read, roles:write,
-  audit:read, keys:read, keys:write, federation:read, federation:write
+## Seeded Data (migration 011 + 028 + 032)
+- Role `admin` (UUID `00000000-0000-0000-0000-000000000001`)
+- Role `user` (UUID `00000000-0000-0000-0000-000000000004`) — auto-assigned to all registrations
+- 11 admin permissions (clients:*, users:*, roles:*, audit:read, keys:*, federation:*)
+- 2 policy permissions (policies:read/write)
+- 2 resource-meta permissions (resources:read/write)
+- 9 account:* permissions (granted to both admin and user roles)
 
 ## Key Patterns
-- Tokens (access, refresh, auth code, device code) stored as SHA-256 hashes, never raw
-- PostgreSQL-specific: pq.StringArray (TEXT[]), json.RawMessage (JSONB), INET for IPs
-- Sensitive fields hidden with json:"-" (passwords, secrets, tokens, backup codes)
+- Tokens (access, refresh, auth code, device code, reauth) stored as SHA-256 hashes, never raw
+- Passkey credential public keys stored as CBOR-encoded bytes (decoded only inside go-webauthn calls)
+- PostgreSQL-specific: pq.StringArray (TEXT[]), json.RawMessage (JSONB), INET for IPs, BYTEA for binary credentials
+- Sensitive fields hidden with json:"-" (passwords, secrets, tokens, backup codes, passkey credential material)
 - Refresh token family tracking via FamilyID/ParentID for rotation reuse detection

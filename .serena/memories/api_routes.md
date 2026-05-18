@@ -35,85 +35,54 @@
 ## Public API Routes (/api/v1, rate limited)
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | /api/v1/auth/register | None | User registration |
+| POST | /api/v1/auth/register | None | User registration (auto-assigns "user" role) |
 | POST | /api/v1/auth/login | None | User login |
 | POST | /api/v1/auth/forgot-password | None | Initiate password reset |
 | POST | /api/v1/auth/reset-password | None | Complete password reset |
 | POST | /api/v1/auth/verify-email | None | Verify email with token |
 | GET | /api/v1/auth/federation/:provider | None | Get social login authorization URL |
 | POST | /api/v1/auth/federation/:provider/callback | None | Process social login callback |
+| POST | /api/v1/me/passkeys/login/begin | None | Begin usernameless passkey login (CredentialAssertion) |
+| POST | /api/v1/me/passkeys/login/finish | None | Finish usernameless passkey login; returns matching user |
+| POST | /api/v1/me/account/email/confirm | None | Confirm email change with token from email |
+| POST | /api/v1/me/account/cancel-deletion | None | Cancel a pending account deletion with token |
 
-## Authenticated API Routes (/api/v1, bearer auth)
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| GET | /api/v1/me | Bearer | Get current user profile |
-| PATCH | /api/v1/me | Bearer | Update profile |
-| PUT | /api/v1/me/password | Bearer | Change password |
-| GET | /api/v1/me/sessions | Bearer | List active sessions |
-| DELETE | /api/v1/me/sessions/:id | Bearer | Revoke specific session |
-| DELETE | /api/v1/me/sessions | Bearer | Revoke all other sessions |
-| POST | /api/v1/me/mfa/totp/enroll | Bearer | Start TOTP enrollment |
-| POST | /api/v1/me/mfa/totp/verify | Bearer | Confirm TOTP with code, returns backup codes |
-| DELETE | /api/v1/me/mfa/totp | Bearer | Disable TOTP (requires valid code) |
-| POST | /api/v1/me/mfa/backup-codes | Bearer | Regenerate backup codes |
-| GET | /api/v1/me/linked-accounts | Bearer | List linked federation accounts |
-| DELETE | /api/v1/me/linked-accounts/:id | Bearer | Unlink federation account |
+## Authenticated User Account API (/api/v1, bearer auth + RBAC + optional step-up)
+The "User Account API" is gated by RBAC permissions seeded under the `orion-account` API resource (migration 028). Default `user` role (migration 032) has them all; admins can revoke per-role. Sensitive endpoints additionally require an `X-Reauth-Token` header from `POST /api/v1/me/reauth`.
+
+| Method | Path | Permission | Step-up | Description |
+|--------|------|------------|---------|-------------|
+| GET | /api/v1/me | account:read_profile | no | Profile |
+| PATCH | /api/v1/me | account:update_profile | no | Update display name / avatar / phone / OIDC metadata |
+| PUT | /api/v1/me/password | account:change_password | **yes** | Change password (also requires current_password in body); revokes other sessions and emails a notice |
+| POST | /api/v1/me/account/email/change-request | account:change_email | **yes** | Send confirm link to the new email |
+| DELETE | /api/v1/me | account:delete_account | **yes** | Soft-delete + 7d grace period; emails cancel link |
+| GET | /api/v1/me/sessions | account:read_profile | no | List own active sessions |
+| DELETE | /api/v1/me/sessions/:id | account:manage_sessions | no | Revoke a specific session |
+| DELETE | /api/v1/me/sessions | account:manage_sessions | no | Revoke all other sessions |
+| POST | /api/v1/me/mfa/totp/enroll | account:manage_mfa | no | Start TOTP enrollment |
+| POST | /api/v1/me/mfa/totp/verify | account:manage_mfa | no | Confirm TOTP, return backup codes |
+| POST | /api/v1/me/mfa/backup-codes | account:manage_mfa | no | Regenerate backup codes (requires TOTP code) |
+| DELETE | /api/v1/me/mfa/totp | account:manage_mfa | **yes** | Disable TOTP (also requires TOTP code in body) |
+| GET | /api/v1/me/passkeys | account:read_profile | no | List own passkeys |
+| POST | /api/v1/me/passkeys/register/begin | account:manage_passkeys | no | Start WebAuthn registration |
+| POST | /api/v1/me/passkeys/register/finish | account:manage_passkeys | no | Persist a new passkey |
+| PATCH | /api/v1/me/passkeys/:id | account:manage_passkeys | no | Rename a passkey |
+| POST | /api/v1/me/passkeys/reauth/begin | account:manage_passkeys | no | Start a passkey-based step-up challenge |
+| DELETE | /api/v1/me/passkeys/:id | account:manage_passkeys | **yes** | Remove a passkey |
+| GET | /api/v1/me/linked-accounts | account:read_profile | no | List linked federation accounts |
+| DELETE | /api/v1/me/linked-accounts/:id | account:manage_linked_accounts | **yes** | Unlink a federation account |
+| POST | /api/v1/me/reauth | (authenticated) | n/a | Issue a single-use step-up token (10 min, session-bound). Body: `{"method": "password|totp|backup_code|passkey", ...}` |
+
+Every account.* action is logged with a dedicated audit constant (`account.profile_updated`, `account.email_changed`, `account.passkey_added`, etc.). The `/admin/audit-logs` endpoint accepts both `action=` (exact) and `action_prefix=` (LIKE prefix) filters.
 
 ## Admin API Routes (/api/v1/admin, bearer + RBAC)
-| Method | Path | Permissions | Description |
-|--------|------|------------|-------------|
-| POST | /api/v1/admin/clients | clients:write | Create OAuth client |
-| GET | /api/v1/admin/clients | clients:read | List clients (paginated) |
-| GET | /api/v1/admin/clients/:id | clients:read | Get client details |
-| PATCH | /api/v1/admin/clients/:id | clients:write | Update client |
-| DELETE | /api/v1/admin/clients/:id | clients:write | Deactivate client |
-| POST | /api/v1/admin/clients/:id/rotate-secret | clients:write | Rotate client secret |
-| POST | /api/v1/admin/roles | roles:write | Create role |
-| GET | /api/v1/admin/roles | roles:read | List roles |
-| GET | /api/v1/admin/roles/:id | roles:read | Get role details |
-| PATCH | /api/v1/admin/roles/:id | roles:write | Update role |
-| DELETE | /api/v1/admin/roles/:id | roles:write | Delete role |
-| GET | /api/v1/admin/permissions | roles:read | List all permissions |
-| POST | /api/v1/admin/roles/:id/permissions | roles:write | Set role permissions |
-| POST | /api/v1/admin/users/:id/roles | roles:write | Assign role to user |
-| DELETE | /api/v1/admin/users/:id/roles/:roleId | roles:write | Remove role from user |
-| GET | /api/v1/admin/users/:id/roles | roles:read | Get user roles |
-| GET | /api/v1/admin/keys | keys:read | List signing keys |
-| POST | /api/v1/admin/keys/rotate | keys:write | Rotate signing key |
-| POST | /api/v1/admin/federation | federation:write | Create federation provider |
-| GET | /api/v1/admin/federation | federation:read | List federation providers |
-| PATCH | /api/v1/admin/federation/:id | federation:write | Update federation provider |
-| DELETE | /api/v1/admin/federation/:id | federation:write | Delete federation provider |
-| GET | /api/v1/admin/audit-logs | audit:read | Query audit logs (filters: user_id, action, from, to) |
+Unchanged from the previous index; `policies:read/write` and `resources:read/write` already in place. The Resources screen now also lists the `orion-account` resource and its 9 permissions, which an admin can attribute to custom roles to fine-tune what end-users can do on their own account.
 
 ## Middleware Stack
-- **RequestID**: Generates/echoes X-Request-ID header (UUID)
-- **CORS**: Configurable origin whitelist, credential support, OPTIONS preflight
-- **RateLimiter**: Token bucket per IP (20 burst, 5 req/s on public auth routes)
-- **BearerAuth**: Validates access token (SHA-256 hash lookup), checks session validity, sets context (userID, sessionID, tokenID, scopes)
-- **ClientAuth**: Validates OAuth client via Basic Auth, POST form, or "none" (public). Sets OAuthClient in context
-- **RBAC RequirePermission/RequireAnyPermission**: Checks user permissions via role assignments
+- **RequestID, CORS, RateLimiter, BearerAuth, ClientAuth**: as before
+- **RequireReauth(svc)**: enforces the `X-Reauth-Token` header; on success stashes `*model.ReauthToken` in ctx so handlers can `ConsumeReauth(c, svc, action)` after the sensitive op succeeds (single-use, only consumed on success — failures don't burn the token).
+- **account.PolicyGate.Middleware(action)**: chained after RBAC, evaluates `account_action` Rego policies. Fail-open on lookup errors so a misconfig doesn't lock users out of their own data.
 
 ## OIDC Discovery Values
-- Response Types: ["code", "code id_token", "code token", "code id_token token"]
-- Grant Types: ["authorization_code", "client_credentials", "refresh_token", "urn:ietf:params:oauth:grant-type:device_code"]
-- Subject Type: ["public", "pairwise"]
-- ID Token Signing: ["RS256"]
-- Scopes: ["openid", "profile", "email", "roles", "offline_access"]
-- Token Auth Methods: ["client_secret_basic", "client_secret_post", "private_key_jwt", "none"]
-- Claims: ["sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "at_hash", "acr", "amr", "c_hash", "s_hash", "name", "given_name", "family_name", "middle_name", "nickname", "preferred_username", "profile", "picture", "website", "gender", "birthdate", "zoneinfo", "locale", "email", "email_verified", "phone_number", "phone_number_verified", "address", "updated_at", "roles", "groups"]
-- Code Challenge Methods: ["S256"]
-- End Session Endpoint: /end_session
-- request_parameter_supported: true
-- request_uri_parameter_supported: false
-- authorization_response_iss_parameter_supported: true
-- pushed_authorization_request_endpoint: /par
-- frontchannel_logout_supported: true
-- frontchannel_logout_session_supported: true
-- check_session_iframe: /check_session
-- userinfo_signing_alg_values_supported: ["RS256"]
-- registration_endpoint: /register
-- claims_parameter_supported: true
-
-## OIDC Core Parameters Supported in /authorize
-prompt (none|login|consent|select_account), max_age, display (page|popup|touch|wap), ui_locales, claims_locales, acr_values, login_hint, claims (JSON), id_token_hint
+(unchanged)

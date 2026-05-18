@@ -1,134 +1,90 @@
 # OrionAuth - Services and Repositories Detail
 
 ## User Service (user/service.go)
-**Dependencies**: Repository, Argon2Hasher, AuthConfig, email.Sender (optional)
-- Register(RegisterInput) → *User — normalize email, validate password length, hash password, create user
-- Authenticate(LoginInput) → *User — find by email, check active/locked, verify password, increment failed attempts on failure, reset on success
-- GetByID(uuid) → *User
-- UpdateProfile(uuid, UpdateProfileInput) — update DisplayName, AvatarURL, Phone if non-nil
-- ChangePassword(uuid, ChangePasswordInput) — verify current, validate length, hash new
-- SendVerificationEmail(uuid) — generate 32-byte token, hash, store, send email (24h expiry)
-- VerifyEmail(VerifyEmailInput) — hash token, find user by hash, set email_verified=true
-- ForgotPassword(ForgotPasswordInput) — always returns nil (no enumeration), token 1h expiry
-- ResetPassword(ResetPasswordInput) — hash token, find user, update password, clear lockout
+**Dependencies**: Repository, Argon2Hasher, AuthConfig, email.Sender (optional), RoleAssigner (optional)
+- Register(RegisterInput) → *User — normalize email, validate password length, hash password, create user, auto-assign default role if configured
+- Authenticate(LoginInput) → *User
+- GetByID, UpdateProfile, ChangePassword (validates current password), VerifyPassword (used by reauth), UpdateFields (exposed for account/)
+- FindByEmail / FindByEmailChangeToken / FindByDeletionToken — proxies for account/
+- SendVerificationEmail, VerifyEmail, ForgotPassword, ResetPassword
+- SetDefaultRole(roleID, RoleAssigner) — wires the post-Register role assignment
 - incrementFailedAttempts(user) — lock if attempts >= MaxFailAttempts
 
 ## User Repository (user/repository.go)
-- Create, FindByID, FindByEmail, Update, UpdateFields(uuid, map), List(page, perPage), FindByResetToken(hash), FindByVerifyToken(hash)
+- Create, FindByID, FindByEmail, Update, UpdateFields(uuid, map), List(page, perPage)
+- FindByResetToken, FindByVerifyToken
+- FindByEmailChangeToken, FindByDeletionToken (added for account self-service flows)
 
 ## Session Service (session/service.go)
 **Dependencies**: Repository, AuthConfig
-- Create(CreateInput) → *Session — TTL from config, stores IP/UserAgent
-- ListActive(userID) → []Session
-- Revoke(sessionID, userID) — ownership validation
-- RevokeAll(userID, exceptSessionID) — keeps current session
+- Create, ListActive, Revoke, RevokeAll(userID, exceptSessionID *uuid.UUID)
+- RevokeAll(uid, nil) is called by account.Service after password/email change or account deletion
 
-## Session Repository
-- Create, FindByID, FindActiveByUser, Revoke, RevokeAllForUser(userID, *exceptID), UpdateLastActive
+## Client Service (client/service.go) — unchanged
 
-## Client Service (client/service.go)
-**Dependencies**: Repository, Argon2Hasher
-- Create(CreateInput) → (*Client, plainSecret) — auto-generate 32-char secret, hash with Argon2, set defaults
-- GetByID, Update, List(page, perPage), Delete (soft: active=false)
-- RotateSecret(uuid) → (*Client, newPlainSecret) — generate new secret
+## OAuth Service (oauth/service.go) — unchanged
 
-## Client Repository
-- Create, FindByID, FindActiveByID, Update, List(page, perPage), Delete(active=false)
-- FindClientsWithBackchannelLogout(userID) — clients with backchannel URI for a given user's consents
-- FindClientsWithFrontchannelLogout() — all active clients with frontchannel URI
+## OIDC Service (oidc/service.go) — unchanged
 
-## OAuth Service (oauth/service.go)
-**Dependencies**: Repository, UserService, SessionService, Argon2Hasher, AuthConfig, issuer
-**Interfaces**: IDTokenGenerator (from OIDC adapter), MFAValidator (from MFA service), PolicyEvaluator, ResourceValidator, IDTokenValidator
-- Authorization flow: InitAuthorize, InitAuthorizeFromPAR, AuthorizeLogin, AuthorizeMFA, AuthorizeConsent, CompleteAuthorizeFirstParty
-- PAR: CreatePAR (RFC 9126)
-- Token exchange: ExchangeAuthorizationCode, ExchangeClientCredentials, ExchangeRefreshToken, ExchangeDeviceCode
-- Token management: Introspect, Revoke
-- Device flow: InitDeviceAuthorization, DeviceVerify, DeviceApprove
-- Hybrid flows: generateHybridIDToken (c_hash, s_hash, at_hash)
-- ACR/AMR: computeACR from AuthMethods tracked through the flow
-- Internal: issueTokens, issueTokensWithOpts, completeAuthorize, isValidResponseType, isHybridResponseType
+## MFA Service (mfa/service.go) — unchanged
+Implements reauth.MFAValidator (HasMFA, ValidateCode) — wired in main.go via `reauthService.SetMFAValidator(mfaService)`.
 
-## OAuth Repository
-- Auth requests: Create/Find/Update/Delete AuthRequest
-- Auth codes: Create/Find/MarkUsed AuthCode
-- Access tokens: Create/Find/Revoke/RevokeByRefreshToken/RevokeBySession
-- Refresh tokens: Create/Find/Rotate/RevokeFamiliy/RevokeBySession
-- Consent: FindActive/Create/Update
-- Device codes: Create/Find/FindByUserCode/Update
-- PAR: CreatePAR/FindPAR/DeletePAR
-- Transaction(fn) for atomic operations
-- findClient(clientIDStr)
-
-## OIDC Service (oidc/service.go)
-**Dependencies**: *gorm.DB, UserService, RBACService, SessionRevoker, ClientFinder, issuer string
-- EnsureSigningKey() — loads or generates RSA 2048-bit key pair
-- RotateKey() — new key, deactivate old with 24h grace period
-- GenerateIDToken(IDTokenClaims) → JWT string (RS256, includes acr/amr/c_hash/s_hash/at_hash + user claims per scope)
-- GetJWKS() → JWKS (all active/non-expired keys)
-- GetDiscovery() → OpenIDConfiguration (full OIDC + OAuth 2.1 capabilities)
-- GetUserInfo(userID, scopes) → map of claims
-- ValidateIDToken(tokenString) → userID (for id_token_hint)
-- EndSession(params) → EndSessionResponse (with frontchannel_logout_uris)
-- GenerateLogoutToken(userID, clientID, sessionRequired, sessionID) → logout JWT
-- dispatchBackchannelLogout(userID) — async POST to RP backchannel URIs
-- ComputePairwiseSub(sectorIdentifier, userID, salt) → pairwise sub string
-- Thread-safe with sync.RWMutex
-
-## MFA Service (mfa/service.go)
-**Dependencies**: Repository, Argon2Hasher
-- Enroll(userID, email) → secret, provisioningURL — TOTP setup with issuer "OrionAuth"
-- Verify(userID, code) → []backupCodes — validates TOTP, generates 10 hashed backup codes
-- ValidateCode(userID, code) → bool — checks TOTP then backup codes
-- HasMFA(userID) → bool
-- Disable(userID, code) — requires valid code
-- RegenerateBackupCodes(userID, code) → []newCodes
-
-## MFA Repository
-- Create, FindByUserAndType, FindVerifiedByUser, Update, Delete
-
-## RBAC Service (rbac/service.go)
-**Dependencies**: Repository
-- Role CRUD: CreateRole, GetRole, ListRoles, UpdateRole, DeleteRole
-- Permission listing: ListPermissions
-- Role-Permission: SetPermissions(roleID, permissionIDs)
-- User-Role: AssignRole(userID, roleID), RemoveRole, GetUserRoles
-- HasPermission(userID, permission) → bool
-
-## RBAC Repository
-- Roles: Create/FindByID/FindByName/List/Update/Delete
-- Permissions: List, FindByIDs
-- SetRolePermissions (transaction: delete old + insert new)
-- User-Role: Assign/Remove/GetUserRoles
-- GetUserPermissions(userID) → all permissions across all roles
-
-## RBAC Middleware (rbac/middleware.go)
-- RequirePermission(svc, permission) → gin.HandlerFunc
-- RequireAnyPermission(svc, ...permissions) → gin.HandlerFunc (OR logic)
+## RBAC Service (rbac/service.go) — unchanged
+Implements user.RoleAssigner (AssignRole) and (through the existing main.go adapter) account.RoleProvider.
 
 ## Audit Service (audit/service.go)
-**Dependencies**: *gorm.DB (direct, no repository)
-- Log(LogEntry) — async, non-blocking, serializes metadata to JSON
-- Query(QueryInput) → paginated results with filters (UserID, Action, From, To, Page, PerPage)
+- Log(LogEntry) — async
+- Query(QueryInput) — now supports both `Action` (exact) and `ActionPrefix` (LIKE) filters so the admin UI can show all `account.*` events with one filter.
+- Action constants for `account.*` events live in `audit/actions.go`.
 
-## DCR Handler (client/dcr_handler.go)
-**Dependencies**: Client Service
-- Register(DCRRequest) → DCRResponse — Dynamic Client Registration (RFC 7591)
-- Accepts client_name, redirect_uris, grant_types, response_types, token_endpoint_auth_method
-- Returns client_id, client_secret, registration_access_token
-- Route: POST /register
+## Reauth Service (reauth/service.go) — NEW
+**Dependencies**: Repository, PasswordVerifier (user.Service), tokenTTL — optional MFAValidator, PasskeyValidator
+- Issue(userID, sessionID, IssueRequest) → IssueResponse{Token, ExpiresAt, Method}
+- Verify(rawToken, userID, sessionID) → *ReauthToken (nil if invalid/expired/wrong-session)
+- Consume(hash, consumedBy) — single-use marker; only called by handlers after the sensitive op succeeds
+- RevokeForSession(sessionID) — cascade revoke on session logout
+- CleanupExpired() — called by database.StartCleanupJob
 
-## Federation Service (federation/service.go)
-**Dependencies**: Repository, issuer string
-- Admin: CreateProvider, GetProvider, ListProviders, UpdateProvider, DeleteProvider
-- Social login: InitSocialLogin(providerName) → authURL + state
-- ProcessCallback(providerName, input, existingUserID) → CallbackResult (UserID, ExternalID, Email, IsNewUser, IsNewLink)
-- Account management: GetLinkedAccounts(userID), UnlinkAccount(linkID, userID)
+Methods accepted: `password`, `totp`, `backup_code`, `passkey`. Token format: SHA-256 hash of an opaque 32-byte random string (same as access tokens). Lifetime: `cfg.Account.ReauthTokenTTL` (default 10 min).
 
-## Federation Repository
-- Providers: Create/FindByID/FindByName/List/Update/Delete
-- Links: Create/FindLink(providerID, externalID)/FindLinksByUser/FindLinkByID/Delete
+## Reauth Repository (reauth/repository.go)
+- Create, FindByHash, MarkUsed, DeleteExpired, DeleteForSession
 
-## Email Sender (email/)
-- Interface: SendVerificationEmail(to, token), SendPasswordResetEmail(to, token)
-- SMTPSender: go-mail implementation, HTML templates with token and API instructions
+## Passkey Service (passkey/service.go) — NEW
+**Dependencies**: Repository, UserFinder (user.Service), *webauthn.WebAuthn, challengeTTL
+- BeginRegistration(userID) → CredentialCreation + challengeID (stores SessionData gob-encoded in `passkey_challenges`)
+- FinishRegistration(userID, FinishRegistrationInput) → *Passkey
+- BeginLogin() → CredentialAssertion + challengeID (usernameless, via webauthn.BeginDiscoverableLogin)
+- FinishLogin(FinishLoginInput) → (*User, *Passkey) — wraps FinishDiscoverableLogin with a UserHandle→User resolver
+- BeginReauth(userID) → CredentialAssertion + challengeID (allowed-credentials scoped to user's passkeys)
+- ValidateReauthAssertion(userID, challengeID, response) → bool — implements reauth.PasskeyValidator
+- HasUserVerifiedPasskey(userID) → bool — used by account.PolicyGate
+- List/Rename/Delete
+- CleanupExpiredChallenges() — called by database cleanup job
+
+Uses lib `github.com/go-webauthn/webauthn` v0.17+. RP config read from `cfg.WebAuthn` (RPID, RPDisplayName, RPOrigins).
+
+## Passkey Repository (passkey/repository.go)
+- Passkeys: Create, FindByCredentialID, FindByID, ListByUser, UpdateName, UpdateSignCount, Delete
+- Challenges: CreateChallenge, FindChallenge, DeleteChallenge, DeleteExpiredChallenges
+
+## Account Service (account/service.go) — NEW
+**Dependencies**: UserStore (user.Service), SessionRevoker (session.Service), Mailer (email.Sender), emailChangeTokenTTL, deletionGracePeriod
+- ChangePassword(userID, ChangePasswordInput) — delegates to user.Service.ChangePassword + revokes other sessions + emails notice
+- RequestEmailChange(userID, ChangeEmailRequestInput) — token + email to new address (1h TTL by default)
+- ConfirmEmailChange(ConfirmEmailChangeInput) → (old, new, userID) — swaps email atomically, revokes sessions, notifies old address
+- RequestDeletion(userID) — soft-delete (active=false), token, cancel-link email (7d grace by default)
+- CancelDeletion(CancelDeletionInput) — restores account from token
+
+## Account PolicyGate (account/policy.go) — NEW
+Builder around userService + rbacService adapter + mfaService + passkeyService + policyService adapter. `.Middleware(action)` returns a gin.HandlerFunc that evaluates `account_action` Rego policies for the given action string (`update_profile`, `change_email`, ...). Fail-open on internal errors; deny → 403 with policy reason.
+
+## DCR Handler (client/dcr_handler.go) — unchanged
+## Federation Service (federation/service.go) — unchanged
+## Email Sender (email/) — extended with 4 new methods
+- SendEmailChangeConfirmation(to, token)
+- SendEmailChangedNotice(oldEmail, newEmail)
+- SendPasswordChangedNotice(to)
+- SendAccountDeletionEmail(to, cancelToken)
+
+Templates live in `email/templates/account_*.gohtml` and follow the existing dark/light design system.
