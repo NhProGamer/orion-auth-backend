@@ -16,11 +16,19 @@ import (
 	"orion-auth-backend/pkg"
 )
 
+// RoleAssigner is the slice of rbac.Service used to auto-assign a default
+// role on registration. Defined here to keep user/ free of an rbac import.
+type RoleAssigner interface {
+	AssignRole(userID, roleID uuid.UUID) error
+}
+
 type Service struct {
-	repo        RepositoryInterface
-	hasher      *crypto.Argon2Hasher
-	cfg         config.AuthConfig
-	emailSender email.Sender
+	repo            RepositoryInterface
+	hasher          *crypto.Argon2Hasher
+	cfg             config.AuthConfig
+	emailSender     email.Sender
+	roleAssigner    RoleAssigner
+	defaultRoleID   uuid.UUID
 }
 
 func NewService(repo RepositoryInterface, hasher *crypto.Argon2Hasher, cfg config.AuthConfig) *Service {
@@ -30,6 +38,13 @@ func NewService(repo RepositoryInterface, hasher *crypto.Argon2Hasher, cfg confi
 // SetEmailSender sets the email sender (called after init to allow optional email).
 func (s *Service) SetEmailSender(sender email.Sender) {
 	s.emailSender = sender
+}
+
+// SetDefaultRole wires the role auto-assigned on registration. If roleID is
+// uuid.Nil, the feature is disabled.
+func (s *Service) SetDefaultRole(roleID uuid.UUID, assigner RoleAssigner) {
+	s.defaultRoleID = roleID
+	s.roleAssigner = assigner
 }
 
 type RegisterInput struct {
@@ -85,6 +100,12 @@ func (s *Service) Register(input RegisterInput) (*model.User, error) {
 	if err := s.repo.Create(user); err != nil {
 		slog.Error("failed to create user", "error", err)
 		return nil, pkg.ErrInternal("failed to create user")
+	}
+
+	if s.roleAssigner != nil && s.defaultRoleID != uuid.Nil {
+		if err := s.roleAssigner.AssignRole(user.ID, s.defaultRoleID); err != nil {
+			slog.Warn("failed to assign default role to new user", "user_id", user.ID, "role_id", s.defaultRoleID, "error", err)
+		}
 	}
 
 	slog.Info("user registered", "user_id", user.ID, "email", user.Email)
