@@ -148,6 +148,24 @@ func (s *Service) HasMFA(userID uuid.UUID) (bool, error) {
 	return method != nil, nil
 }
 
+// ForceDisable removes the TOTP enrollment for the user without requiring a
+// code. Reserved for trusted callers such as the M2M API or an admin reset
+// flow. Returns nil if the user has no MFA enrolled (idempotent).
+func (s *Service) ForceDisable(userID uuid.UUID) error {
+	method, err := s.repo.FindVerifiedByUser(userID)
+	if err != nil {
+		return pkg.ErrInternal("failed to look up MFA")
+	}
+	if method == nil {
+		return nil // nothing to disable
+	}
+	if err := s.repo.Delete(method.ID); err != nil {
+		return pkg.ErrInternal("failed to disable MFA")
+	}
+	slog.Info("TOTP force-disabled", "user_id", userID)
+	return nil
+}
+
 // Disable removes the TOTP enrollment for the user.
 func (s *Service) Disable(userID uuid.UUID, code string) error {
 	method, err := s.repo.FindVerifiedByUser(userID)
