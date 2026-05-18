@@ -23,6 +23,15 @@ type User struct {
 	FailedLoginAttempts    int             `gorm:"default:0" json:"-"`
 	Active                 bool            `gorm:"default:true" json:"active"`
 	Metadata               json.RawMessage `gorm:"type:jsonb;default:'{}'" json:"metadata,omitempty"`
+	DeletedAt              *time.Time      `json:"deleted_at,omitempty"`
+	DeletionToken          *string         `gorm:"type:varchar(255)" json:"-"`
+	DeletionPurgeAfter     *time.Time      `gorm:"index" json:"deletion_purge_after,omitempty"`
+}
+
+// IsPendingDeletion reports whether the user has requested account deletion
+// and the grace period has not yet elapsed.
+func (u *User) IsPendingDeletion() bool {
+	return u.DeletedAt != nil && u.DeletionPurgeAfter != nil && u.DeletionPurgeAfter.After(time.Now())
 }
 
 func (User) TableName() string {
