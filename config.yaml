@@ -56,5 +56,18 @@ smtp:
   from_name: "orion-auth-backend"
   tls: false
 
+webauthn:
+  rp_display_name: "OrionAuth"
+  rp_id: "localhost"
+  rp_origins:
+    - "http://localhost:3000"
+    - "http://localhost:5173"
+
+account:
+  reauth_token_ttl: "10m"
+  email_change_token_ttl: "1h"
+  deletion_grace_period: "168h" # 7d
+  passkey_challenge_ttl: "5m"
+
 issuer: "http://localhost:8080"
 pairwise_salt: "change-me-in-production"

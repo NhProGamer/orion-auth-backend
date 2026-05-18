@@ -15,6 +15,8 @@ type Config struct {
 	Argon2   Argon2Config   `mapstructure:"argon2"`
 	CORS     CORSConfig     `mapstructure:"cors"`
 	SMTP     SMTPConfig     `mapstructure:"smtp"`
+	WebAuthn WebAuthnConfig `mapstructure:"webauthn"`
+	Account  AccountConfig  `mapstructure:"account"`
 	Issuer       string `mapstructure:"issuer"`
 	PairwiseSalt string `mapstructure:"pairwise_salt"`
 }
@@ -82,6 +84,19 @@ type CORSConfig struct {
 	MaxAge         int      `mapstructure:"max_age"`
 }
 
+type WebAuthnConfig struct {
+	RPDisplayName string   `mapstructure:"rp_display_name"`
+	RPID          string   `mapstructure:"rp_id"`
+	RPOrigins     []string `mapstructure:"rp_origins"`
+}
+
+type AccountConfig struct {
+	ReauthTokenTTL          time.Duration `mapstructure:"reauth_token_ttl"`
+	EmailChangeTokenTTL     time.Duration `mapstructure:"email_change_token_ttl"`
+	DeletionGracePeriod     time.Duration `mapstructure:"deletion_grace_period"`
+	PasskeyChallengeTTL     time.Duration `mapstructure:"passkey_challenge_ttl"`
+}
+
 func Load() (*Config, error) {
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
@@ -96,10 +111,19 @@ func Load() (*Config, error) {
 		slog.Warn("config file not found, using env vars only", "error", err)
 	}
 
+	setAccountDefaults()
+
 	var cfg Config
 	if err := viper.Unmarshal(&cfg); err != nil {
 		return nil, err
 	}
 
 	return &cfg, nil
+}
+
+func setAccountDefaults() {
+	viper.SetDefault("account.reauth_token_ttl", "10m")
+	viper.SetDefault("account.email_change_token_ttl", "1h")
+	viper.SetDefault("account.deletion_grace_period", "168h") // 7d
+	viper.SetDefault("account.passkey_challenge_ttl", "5m")
 }
