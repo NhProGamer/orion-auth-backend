@@ -22,6 +22,7 @@ type CreateInput struct {
 	Identifier     string  `json:"identifier" binding:"required"`
 	Description    *string `json:"description"`
 	SigningAlg     *string `json:"signing_alg"`
+	TokenFormat    *string `json:"token_format"`
 	AccessTokenTTL *int    `json:"access_token_ttl"`
 }
 
@@ -29,8 +30,22 @@ type UpdateInput struct {
 	Name           *string `json:"name"`
 	Description    *string `json:"description"`
 	SigningAlg     *string `json:"signing_alg"`
+	TokenFormat    *string `json:"token_format"`
 	AccessTokenTTL *int    `json:"access_token_ttl"`
 	Active         *bool   `json:"active"`
+}
+
+// validateTokenFormat rejects any value other than the two the backend
+// knows how to honour. Empty (nil pointer) is accepted at the input
+// boundary — handled by the caller's nil check, which means "don't touch
+// the existing value on update" / "keep DB default 'opaque' on create".
+func validateTokenFormat(v string) error {
+	switch v {
+	case model.TokenFormatOpaque, model.TokenFormatJWT:
+		return nil
+	default:
+		return pkg.ErrBadRequest("token_format must be 'opaque' or 'jwt'")
+	}
 }
 
 type AddPermissionInput struct {
@@ -67,6 +82,12 @@ func (s *Service) Create(input CreateInput) (*model.APIResource, error) {
 	}
 	if input.SigningAlg != nil {
 		res.SigningAlg = *input.SigningAlg
+	}
+	if input.TokenFormat != nil {
+		if err := validateTokenFormat(*input.TokenFormat); err != nil {
+			return nil, err
+		}
+		res.TokenFormat = *input.TokenFormat
 	}
 	if input.AccessTokenTTL != nil {
 		res.AccessTokenTTL = *input.AccessTokenTTL
@@ -106,6 +127,12 @@ func (s *Service) Update(id uuid.UUID, input UpdateInput) (*model.APIResource, e
 	}
 	if input.SigningAlg != nil {
 		res.SigningAlg = *input.SigningAlg
+	}
+	if input.TokenFormat != nil {
+		if err := validateTokenFormat(*input.TokenFormat); err != nil {
+			return nil, err
+		}
+		res.TokenFormat = *input.TokenFormat
 	}
 	if input.AccessTokenTTL != nil {
 		res.AccessTokenTTL = *input.AccessTokenTTL
