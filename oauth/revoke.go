@@ -2,6 +2,7 @@ package oauth
 
 import (
 	"log/slog"
+	"time"
 
 	"orion-auth-backend/crypto"
 	"orion-auth-backend/model"
@@ -10,9 +11,38 @@ import (
 
 // Revoke handles token revocation per RFC 7009.
 // Revoking a refresh token also revokes all associated access tokens.
+// JWT access tokens additionally push their JTI to the denylist so they
+// stop validating even if the access_tokens row is missing.
 func (s *Service) Revoke(token, tokenTypeHint string, client *model.OAuthClient) error {
 	if token == "" {
 		return pkg.ErrInvalidRequest("missing token")
+	}
+
+	// JWT access token branch first: parse + verify ownership before any
+	// DB lookup. We still try the opaque hash lookup afterwards so the
+	// access_tokens row (if any) is also marked revoked for audit.
+	if (tokenTypeHint == "" || tokenTypeHint == "access_token") && s.jwtSigner != nil && looksLikeJWT(token) {
+		if claims, err := s.jwtSigner.ValidateAccessTokenJWT(token); err == nil {
+			clientIDStr, _ := claims["client_id"].(string)
+			if clientIDStr != client.ID.String() {
+				// RFC 7009: return success even if the caller doesn't own it.
+				return nil
+			}
+			jti, _ := claims["jti"].(string)
+			var expiry time.Time
+			if exp, ok := claims["exp"].(float64); ok {
+				expiry = time.Unix(int64(exp), 0)
+			} else {
+				expiry = time.Now().Add(24 * time.Hour) // safety: short-lived AT
+			}
+			if jti != "" {
+				if err := s.repo.RevokeJTI(jti, expiry); err != nil {
+					return pkg.ErrServerError("failed to denylist jwt access token")
+				}
+				slog.Info("jwt access token revoked", "client_id", client.ID, "jti", jti)
+			}
+			// Fall through to mark the access_tokens row revoked too (best effort)
+		}
 	}
 
 	tokenHash := crypto.HashToken(token)
