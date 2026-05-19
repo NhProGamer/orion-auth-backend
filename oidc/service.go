@@ -556,6 +556,7 @@ type OpenIDConfiguration struct {
 	GrantTypesSupported                        []string `json:"grant_types_supported"`
 	SubjectTypesSupported                      []string `json:"subject_types_supported"`
 	IDTokenSigningAlgValuesSupported           []string `json:"id_token_signing_alg_values_supported"`
+	AccessTokenSigningAlgValuesSupported       []string `json:"access_token_signing_alg_values_supported,omitempty"`
 	ScopesSupported                            []string `json:"scopes_supported"`
 	TokenEndpointAuthMethodsSupported          []string `json:"token_endpoint_auth_methods_supported"`
 	ClaimsSupported                            []string `json:"claims_supported"`
@@ -590,8 +591,9 @@ func (s *Service) GetDiscovery() OpenIDConfiguration {
 		ResponseTypesSupported:            []string{"code", "code id_token", "code token", "code id_token token"},
 		GrantTypesSupported:               []string{"authorization_code", "client_credentials", "refresh_token", "urn:ietf:params:oauth:grant-type:device_code"},
 		SubjectTypesSupported:             []string{"public", "pairwise"},
-		IDTokenSigningAlgValuesSupported:  []string{"RS256"},
-		ScopesSupported:                   []string{"openid", "profile", "email", "phone", "address", "roles", "offline_access"},
+		IDTokenSigningAlgValuesSupported:     []string{"RS256"},
+		AccessTokenSigningAlgValuesSupported: []string{"RS256"},
+		ScopesSupported:                      []string{"openid", "profile", "email", "phone", "address", "roles", "offline_access"},
 		TokenEndpointAuthMethodsSupported: []string{"client_secret_basic", "client_secret_post", "private_key_jwt", "client_secret_jwt", "none"},
 		ClaimsSupported: []string{
 			"sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "at_hash",
@@ -650,6 +652,7 @@ type OAuthAuthorizationServerMetadata struct {
 	RegistrationEndpoint                       string   `json:"registration_endpoint,omitempty"`
 	IntrospectionEndpointAuthMethodsSupported  []string `json:"introspection_endpoint_auth_methods_supported,omitempty"`
 	RevocationEndpointAuthMethodsSupported     []string `json:"revocation_endpoint_auth_methods_supported,omitempty"`
+	AccessTokenSigningAlgValuesSupported       []string `json:"access_token_signing_alg_values_supported,omitempty"`
 }
 
 // GetOAuthAuthorizationServerMetadata returns the RFC 8414 metadata document.
@@ -679,6 +682,7 @@ func (s *Service) GetOAuthAuthorizationServerMetadata() OAuthAuthorizationServer
 		RegistrationEndpoint:                       s.issuer + "/register",
 		IntrospectionEndpointAuthMethodsSupported:  authMethods,
 		RevocationEndpointAuthMethodsSupported:     authMethods,
+		AccessTokenSigningAlgValuesSupported:       []string{"RS256"},
 	}
 }
 
