@@ -15,9 +15,12 @@ type AccessToken struct {
 	RefreshTokenID *string        `gorm:"type:varchar(64);index" json:"-"`
 	Scopes         pq.StringArray `gorm:"type:text[];default:'{}'" json:"scopes"`
 	Audience       *string        `gorm:"type:varchar(512)" json:"audience,omitempty"`
-	ExpiresAt      time.Time      `gorm:"index;not null" json:"expires_at"`
-	Revoked        bool           `gorm:"default:false" json:"revoked"`
-	CreatedAt      time.Time      `gorm:"autoCreateTime" json:"created_at"`
+	// JTI is set only for JWT access tokens (RFC 9068). NULL means the
+	// token is opaque and the primary key ID = sha256(raw).
+	JTI       *string   `gorm:"type:varchar(255);index" json:"-"`
+	ExpiresAt time.Time `gorm:"index;not null" json:"expires_at"`
+	Revoked   bool      `gorm:"default:false" json:"revoked"`
+	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
 }
 
 func (AccessToken) TableName() string {
