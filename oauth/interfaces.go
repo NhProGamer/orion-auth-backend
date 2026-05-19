@@ -1,6 +1,8 @@
 package oauth
 
 import (
+	"time"
+
 	"github.com/google/uuid"
 
 	"orion-auth-backend/model"
@@ -51,6 +53,11 @@ type RepositoryInterface interface {
 	CreatePAR(par *model.PushedAuthorizationRequest) error
 	FindPAR(requestURI string) (*model.PushedAuthorizationRequest, error)
 	DeletePAR(requestURI string) error
+
+	// Revoked JTIs (JWT access token denylist, RFC 9068)
+	IsJTIRevoked(jti string) (bool, error)
+	RevokeJTI(jti string, expiresAt time.Time) error
+	PurgeExpiredRevokedJTIs() (int64, error)
 
 	// Transactions
 	Transaction(fn func(tx RepositoryInterface) error) error

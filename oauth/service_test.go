@@ -52,6 +52,9 @@ type mockOAuthRepo struct {
 	createPARFn                    func(par *model.PushedAuthorizationRequest) error
 	findPARFn                      func(requestURI string) (*model.PushedAuthorizationRequest, error)
 	deletePARFn                    func(requestURI string) error
+	isJTIRevokedFn                 func(jti string) (bool, error)
+	revokeJTIFn                    func(jti string, expiresAt time.Time) error
+	purgeExpiredRevokedJTIsFn      func() (int64, error)
 }
 
 func (m *mockOAuthRepo) findClient(clientIDStr string) (*model.OAuthClient, error) {
@@ -223,6 +226,24 @@ func (m *mockOAuthRepo) DeletePAR(requestURI string) error {
 		return m.deletePARFn(requestURI)
 	}
 	return nil
+}
+func (m *mockOAuthRepo) IsJTIRevoked(jti string) (bool, error) {
+	if m.isJTIRevokedFn != nil {
+		return m.isJTIRevokedFn(jti)
+	}
+	return false, nil
+}
+func (m *mockOAuthRepo) RevokeJTI(jti string, expiresAt time.Time) error {
+	if m.revokeJTIFn != nil {
+		return m.revokeJTIFn(jti, expiresAt)
+	}
+	return nil
+}
+func (m *mockOAuthRepo) PurgeExpiredRevokedJTIs() (int64, error) {
+	if m.purgeExpiredRevokedJTIsFn != nil {
+		return m.purgeExpiredRevokedJTIsFn()
+	}
+	return 0, nil
 }
 func (m *mockOAuthRepo) Transaction(fn func(tx RepositoryInterface) error) error {
 	return fn(m)

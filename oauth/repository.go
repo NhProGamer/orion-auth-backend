@@ -205,6 +205,35 @@ func (r *Repository) DeletePAR(requestURI string) error {
 	return r.db.Delete(&model.PushedAuthorizationRequest{}, "request_uri = ?", requestURI).Error
 }
 
+// --- Revoked JTIs (RFC 9068) ---
+
+func (r *Repository) IsJTIRevoked(jti string) (bool, error) {
+	if jti == "" {
+		return false, nil
+	}
+	var count int64
+	if err := r.db.Model(&model.RevokedJTI{}).Where("jti = ? AND expires_at > ?", jti, time.Now()).Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func (r *Repository) RevokeJTI(jti string, expiresAt time.Time) error {
+	if jti == "" {
+		return nil
+	}
+	// ON CONFLICT DO NOTHING so a re-revocation is idempotent.
+	return r.db.Exec(
+		"INSERT INTO revoked_jtis (jti, expires_at) VALUES (?, ?) ON CONFLICT (jti) DO NOTHING",
+		jti, expiresAt,
+	).Error
+}
+
+func (r *Repository) PurgeExpiredRevokedJTIs() (int64, error) {
+	res := r.db.Where("expires_at < ?", time.Now()).Delete(&model.RevokedJTI{})
+	return res.RowsAffected, res.Error
+}
+
 // --- Transactions ---
 
 func (r *Repository) Transaction(fn func(tx RepositoryInterface) error) error {
