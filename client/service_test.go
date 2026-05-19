@@ -69,7 +69,11 @@ func (m *mockClientRepo) Delete(id uuid.UUID) error {
 // --- Helpers ---
 
 func newTestService(repo *mockClientRepo) *Service {
-	return NewService(repo, testutil.FastHasher())
+	return NewService(repo, testutil.FastHasher(), nil)
+}
+
+func newTestServiceWithHMAC(repo *mockClientRepo, hmacKey []byte) *Service {
+	return NewService(repo, testutil.FastHasher(), hmacKey)
 }
 
 func makeClient(isPublic bool) *model.OAuthClient {

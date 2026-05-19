@@ -36,6 +36,10 @@ func runCleanup(db *gorm.DB) {
 		{"sessions", "DELETE FROM sessions WHERE expires_at < ? OR (revoked = TRUE AND revoked_at < ?)", []any{now, grace}},
 		{"reauth_tokens", "DELETE FROM reauth_tokens WHERE expires_at < ? OR (used = TRUE AND used_at < ?)", []any{now, grace}},
 		{"passkey_challenges", "DELETE FROM passkey_challenges WHERE expires_at < ?", []any{now}},
+		// RFC 9068 denylist: drop JTI entries whose underlying JWT has
+		// already expired (they can no longer pass signature validation
+		// anyway).
+		{"revoked_jtis", "DELETE FROM revoked_jtis WHERE expires_at < ?", []any{now}},
 		// Hard-delete users whose grace period has elapsed.
 		{"users_purged", "DELETE FROM users WHERE deletion_purge_after IS NOT NULL AND deletion_purge_after < ?", []any{now}},
 	}

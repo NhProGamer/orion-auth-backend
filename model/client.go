@@ -18,6 +18,7 @@ type OAuthClient struct {
 	IsFirstParty                 bool           `gorm:"default:false" json:"is_first_party"`
 	RequirePKCE                  bool           `gorm:"default:true" json:"require_pkce"`
 	JWKSUri                      *string        `gorm:"type:varchar(512)" json:"jwks_uri,omitempty"`
+	RequestURIs                  pq.StringArray `gorm:"type:text[];default:'{}'" json:"request_uris"`
 	AccessTokenTTL               int            `gorm:"default:3600" json:"access_token_ttl"`
 	RefreshTokenTTL              int            `gorm:"default:86400" json:"refresh_token_ttl"`
 	IDTokenTTL                   int            `gorm:"default:3600" json:"id_token_ttl"`
@@ -29,6 +30,11 @@ type OAuthClient struct {
 	SubjectType                  string         `gorm:"type:varchar(20);default:'public'" json:"subject_type"`
 	SectorIdentifierURI          *string        `gorm:"type:varchar(512)" json:"sector_identifier_uri,omitempty"`
 	UserinfoSignedResponseAlg    *string        `gorm:"type:varchar(10)" json:"userinfo_signed_response_alg,omitempty"`
+	IDTokenEncryptedResponseAlg  *string        `gorm:"type:varchar(50)" json:"id_token_encrypted_response_alg,omitempty"`
+	IDTokenEncryptedResponseEnc  *string        `gorm:"type:varchar(50)" json:"id_token_encrypted_response_enc,omitempty"`
+	UserinfoEncryptedResponseAlg *string        `gorm:"type:varchar(50)" json:"userinfo_encrypted_response_alg,omitempty"`
+	UserinfoEncryptedResponseEnc *string        `gorm:"type:varchar(50)" json:"userinfo_encrypted_response_enc,omitempty"`
+	SecretHMACKey                []byte         `gorm:"type:bytea" json:"-"`
 	RegistrationAccessTokenHash  *string        `gorm:"type:varchar(64)" json:"-"`
 	Active                       bool           `gorm:"default:true" json:"active"`
 }
@@ -66,6 +72,18 @@ func (c *OAuthClient) HasRedirectURI(uri string) bool {
 
 func (c *OAuthClient) HasPostLogoutRedirectURI(uri string) bool {
 	for _, u := range c.PostLogoutRedirectURIs {
+		if u == uri {
+			return true
+		}
+	}
+	return false
+}
+
+// HasRequestURI reports whether the given request_uri matches one of the
+// client's pre-registered request_uris. Used by /authorize before fetching
+// a remote Request Object per RFC 9101 §5.2.2.
+func (c *OAuthClient) HasRequestURI(uri string) bool {
+	for _, u := range c.RequestURIs {
 		if u == uri {
 			return true
 		}

@@ -2,9 +2,9 @@ package oauth
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 
 	"orion-auth-backend/audit"
 	"orion-auth-backend/middleware"
@@ -17,10 +17,17 @@ type Handler struct {
 	service      *Service
 	issuer       string
 	auditService *audit.Service
+	jwksCache    *middleware.JWKSCache
 }
 
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
+}
+
+// SetJWKSCache wires the shared JWKS cache used to verify signed JAR
+// Request Objects (both inline `request` and remote `request_uri`).
+func (h *Handler) SetJWKSCache(cache *middleware.JWKSCache) {
+	h.jwksCache = cache
 }
 
 // setSessionStateCookie sets the session_state cookie for OIDC Session Management.
@@ -77,25 +84,52 @@ func (h *Handler) RegisterRoutes(router *gin.Engine, clientAuth, rateLimiter gin
 // @Failure 400 {object} map[string]any
 // @Router /authorize [get]
 func (h *Handler) Authorize(c *gin.Context) {
-	// PAR support: if request_uri is present, load params from stored PAR
+	clientID := c.Query("client_id")
+	if clientID == "" {
+		pkg.HandleError(c, pkg.ErrInvalidRequest("missing client_id"))
+		return
+	}
+
+	// request_uri: routes either to the PAR store (urn:ietf:params:oauth:request_uri:…)
+	// or to a remote HTTP(S) Request Object whitelisted on the client (RFC 9101 §5.2.2).
 	if requestURI := c.Query("request_uri"); requestURI != "" {
-		clientID := c.Query("client_id")
-		if clientID == "" {
-			pkg.HandleError(c, pkg.ErrInvalidRequest("missing client_id"))
+		if strings.HasPrefix(requestURI, "urn:ietf:params:oauth:request_uri:") {
+			resp, err := h.service.InitAuthorizeFromPAR(requestURI, clientID)
+			if err != nil {
+				pkg.HandleError(c, err)
+				return
+			}
+			pkg.OK(c, resp)
 			return
 		}
-		resp, err := h.service.InitAuthorizeFromPAR(requestURI, clientID)
+
+		client, err := h.service.repo.findClient(clientID)
+		if err != nil {
+			pkg.HandleError(c, err)
+			return
+		}
+		if !client.HasRequestURI(requestURI) {
+			pkg.HandleError(c, pkg.ErrInvalidRequest("request_uri is not registered for this client"))
+			return
+		}
+		body, err := FetchRequestURI(requestURI)
+		if err != nil {
+			pkg.HandleError(c, pkg.ErrInvalidRequest("failed to fetch request_uri: "+err.Error()))
+			return
+		}
+		jarParams, err := ParseAndVerifyRequestObject(body, client, h.jwksCache)
+		if err != nil {
+			pkg.HandleError(c, pkg.ErrInvalidRequest("invalid remote request object: "+err.Error()))
+			return
+		}
+		params := InitAuthorizeParams{}
+		mergeJARParams(&params, jarParams)
+		resp, err := h.service.InitAuthorize(client, params)
 		if err != nil {
 			pkg.HandleError(c, err)
 			return
 		}
 		pkg.OK(c, resp)
-		return
-	}
-
-	clientID := c.Query("client_id")
-	if clientID == "" {
-		pkg.HandleError(c, pkg.ErrInvalidRequest("missing client_id"))
 		return
 	}
 
@@ -127,9 +161,11 @@ func (h *Handler) Authorize(c *gin.Context) {
 		ResponseMode:        c.Query("response_mode"),
 	}
 
-	// JAR (RFC 9101): if request param is present, parse JWT and override params
+	// JAR inline (RFC 9101): the request JWT MUST be signed and verified
+	// against the client's JWKS. Accepting unverified content would allow
+	// arbitrary parameter override on behalf of the client.
 	if requestJWT := c.Query("request"); requestJWT != "" {
-		jarParams, jarErr := parseRequestObject(requestJWT)
+		jarParams, jarErr := ParseAndVerifyRequestObject(requestJWT, client, h.jwksCache)
 		if jarErr != nil {
 			pkg.HandleError(c, pkg.ErrInvalidRequest("invalid request object: "+jarErr.Error()))
 			return
@@ -580,27 +616,6 @@ func (h *Handler) handleDeviceCodeGrant(c *gin.Context, client *model.OAuthClien
 	}
 
 	pkg.OK(c, resp)
-}
-
-// parseRequestObject parses a JWT Request Object (RFC 9101) without signature verification.
-func parseRequestObject(requestJWT string) (map[string]string, error) {
-	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
-	token, _, err := parser.ParseUnverified(requestJWT, jwt.MapClaims{})
-	if err != nil {
-		return nil, err
-	}
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		return nil, err
-	}
-
-	result := make(map[string]string)
-	for key, val := range claims {
-		if str, ok := val.(string); ok {
-			result[key] = str
-		}
-	}
-	return result, nil
 }
 
 // mergeJARParams overrides InitAuthorizeParams with values from the Request Object.

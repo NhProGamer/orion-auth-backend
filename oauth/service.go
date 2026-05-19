@@ -30,6 +30,24 @@ type IDTokenGenerator interface {
 	GenerateIDToken(claims IDTokenClaims) (string, error)
 }
 
+// AccessTokenJWTSigner is the optional companion interface that lets oauth
+// emit signed RFC 9068 access tokens when a resource opts in via
+// api_resources.token_format='jwt'. Implemented in the oidc package.
+type AccessTokenJWTSigner interface {
+	GenerateAccessTokenJWT(claims AccessTokenJWTClaims, signingAlg string) (jwtStr, jti string, err error)
+	ValidateAccessTokenJWT(tokenString string) (map[string]any, error)
+}
+
+// AccessTokenJWTClaims mirrors oidc.AccessTokenClaims to avoid circular imports.
+type AccessTokenJWTClaims struct {
+	UserID      *uuid.UUID
+	ClientID    uuid.UUID
+	Scopes      []string
+	Audience    string
+	TTL         time.Duration
+	ExtraClaims map[string]any
+}
+
 // MFAValidator is an interface to avoid circular imports with the mfa package.
 type MFAValidator interface {
 	HasMFA(userID uuid.UUID) (bool, error)
@@ -85,6 +103,10 @@ type IDTokenClaims struct {
 	SubjectType      string
 	SectorIdentifier string
 	ExtraClaims      map[string]any // custom claims injected via policy modify
+	// JWE encryption (OIDC Core §10.2). Empty disables encryption.
+	EncryptionJWKSURI string
+	EncryptionAlg     string
+	EncryptionEnc     string
 }
 
 type Service struct {
@@ -95,6 +117,7 @@ type Service struct {
 	cfg               config.AuthConfig
 	issuer            string
 	idTokenGen        IDTokenGenerator
+	jwtSigner         AccessTokenJWTSigner
 	mfaValidator      MFAValidator
 	policyEvaluator   PolicyEvaluator
 	resourceValidator ResourceValidator
@@ -121,6 +144,13 @@ func NewService(
 // SetIDTokenGenerator sets the OIDC ID token generator (called after init to break circular dep).
 func (s *Service) SetIDTokenGenerator(gen IDTokenGenerator) {
 	s.idTokenGen = gen
+}
+
+// SetAccessTokenJWTSigner wires the optional signer used when a resource
+// has token_format='jwt'. When nil, even JWT-opted resources fall back to
+// opaque tokens with a runtime warning at issuance time.
+func (s *Service) SetAccessTokenJWTSigner(signer AccessTokenJWTSigner) {
+	s.jwtSigner = signer
 }
 
 // SetMFAValidator sets the MFA validator (called after init to break circular dep).
@@ -1137,6 +1167,7 @@ func (s *Service) ExchangeClientCredentials(client *model.OAuthClient, scope, au
 
 	var scopes []string
 	var tokenAudience *string
+	var resolvedResource *model.APIResource
 	ttl := client.AccessTokenTTL
 
 	if audience != "" && s.resourceValidator != nil {
@@ -1154,20 +1185,50 @@ func (s *Service) ExchangeClientCredentials(client *model.OAuthClient, scope, au
 		scopes = resourceScopes
 		tokenAudience = &audience
 		ttl = resource.AccessTokenTTL
+		resolvedResource = resource
 	} else {
 		scopes = client.ValidateScopes(parseSpaceDelimited(scope))
 	}
 
-	rawToken, tokenHash, err := crypto.GenerateOpaqueToken()
-	if err != nil {
-		return nil, pkg.ErrServerError("failed to generate access token")
+	useJWT := resolvedResource != nil && resolvedResource.EmitsJWTAccessTokens() && s.jwtSigner != nil
+	if resolvedResource != nil && resolvedResource.EmitsJWTAccessTokens() && s.jwtSigner == nil {
+		slog.Warn("resource asks for JWT access tokens but no signer is configured; falling back to opaque",
+			"audience", audience)
+	}
+
+	var (
+		rawToken string
+		tokenID  string
+		jtiPtr   *string
+	)
+	if useJWT {
+		jwtStr, jti, err := s.jwtSigner.GenerateAccessTokenJWT(AccessTokenJWTClaims{
+			ClientID: client.ID,
+			Scopes:   scopes,
+			Audience: audience,
+			TTL:      time.Duration(ttl) * time.Second,
+		}, resolvedResource.SigningAlg)
+		if err != nil {
+			return nil, pkg.ErrServerError("failed to generate access token: " + err.Error())
+		}
+		rawToken = jwtStr
+		tokenID = crypto.HashToken(jwtStr)
+		jtiPtr = &jti
+	} else {
+		raw, hash, err := crypto.GenerateOpaqueToken()
+		if err != nil {
+			return nil, pkg.ErrServerError("failed to generate access token")
+		}
+		rawToken = raw
+		tokenID = hash
 	}
 
 	accessToken := &model.AccessToken{
-		ID:        tokenHash,
+		ID:        tokenID,
 		ClientID:  client.ID,
 		Scopes:    pq.StringArray(scopes),
 		Audience:  tokenAudience,
+		JTI:       jtiPtr,
 		ExpiresAt: time.Now().Add(time.Duration(ttl) * time.Second),
 	}
 
@@ -1175,13 +1236,20 @@ func (s *Service) ExchangeClientCredentials(client *model.OAuthClient, scope, au
 		return nil, pkg.ErrServerError("failed to store access token")
 	}
 
-	slog.Info("client_credentials token issued", "client_id", client.ID, "audience", audience)
+	slog.Info("client_credentials token issued", "client_id", client.ID, "audience", audience, "format", tokenFormatLabel(useJWT))
 	return &TokenResponse{
 		AccessToken: rawToken,
 		TokenType:   "Bearer",
 		ExpiresIn:   ttl,
 		Scope:       joinScopes(scopes),
 	}, nil
+}
+
+func tokenFormatLabel(jwt bool) string {
+	if jwt {
+		return "jwt"
+	}
+	return "opaque"
 }
 
 // --- Token Exchange: Refresh Token ---
@@ -1332,10 +1400,16 @@ func (s *Service) issueTokensWithOpts(tx RepositoryInterface, client *model.OAut
 		}
 	}
 
-	// Resolve resourceID from audience if needed
-	if opts.audience != nil && opts.resourceID == nil && s.resourceValidator != nil {
+	// Resolve the full resource from audience: we need it both to populate
+	// resourceID (existing behaviour) and to inspect TokenFormat for the
+	// opaque-vs-JWT branch below.
+	var resolvedResource *model.APIResource
+	if opts.audience != nil && s.resourceValidator != nil {
 		if res, err := s.resourceValidator.ValidateAudience(*opts.audience); err == nil && res != nil {
-			opts.resourceID = &res.ID
+			resolvedResource = res
+			if opts.resourceID == nil {
+				opts.resourceID = &res.ID
+			}
 		}
 	}
 
@@ -1349,11 +1423,50 @@ func (s *Service) issueTokensWithOpts(tx RepositoryInterface, client *model.OAut
 		}
 	}
 
-	// Generate access token
-	rawAT, atHash, err := crypto.GenerateOpaqueToken()
-	if err != nil {
-		return nil, pkg.ErrServerError("failed to generate access token")
+	// Decide token format. JWT requires both an opted-in resource and a
+	// configured signer; otherwise fall back to opaque so the server
+	// keeps working when oidc isn't wired yet.
+	useJWT := resolvedResource != nil && resolvedResource.EmitsJWTAccessTokens() && s.jwtSigner != nil
+	if resolvedResource != nil && resolvedResource.EmitsJWTAccessTokens() && s.jwtSigner == nil {
+		slog.Warn("resource asks for JWT access tokens but no signer is configured; falling back to opaque",
+			"audience", *opts.audience)
 	}
+
+	atTTL := time.Duration(client.AccessTokenTTL) * time.Second
+	if resolvedResource != nil && resolvedResource.AccessTokenTTL > 0 {
+		atTTL = time.Duration(resolvedResource.AccessTokenTTL) * time.Second
+	}
+
+	var (
+		rawAT  string
+		atID   string
+		atJTI  *string
+		atErr  error
+	)
+	if useJWT {
+		jwtStr, jti, err := s.jwtSigner.GenerateAccessTokenJWT(AccessTokenJWTClaims{
+			UserID:      userID,
+			ClientID:    client.ID,
+			Scopes:      []string(scopes),
+			Audience:    *opts.audience,
+			TTL:         atTTL,
+			ExtraClaims: policyExtraClaims,
+		}, resolvedResource.SigningAlg)
+		if err != nil {
+			return nil, pkg.ErrServerError("failed to generate access token: " + err.Error())
+		}
+		rawAT = jwtStr
+		atID = crypto.HashToken(jwtStr) // primary key is still sha256(raw) so /revoke can locate the row
+		atJTI = &jti
+	} else {
+		raw, hash, err := crypto.GenerateOpaqueToken()
+		if err != nil {
+			return nil, pkg.ErrServerError("failed to generate access token")
+		}
+		rawAT = raw
+		atID = hash
+	}
+	_ = atErr
 
 	// Generate refresh token
 	rawRT, rtHash, err := crypto.GenerateOpaqueToken()
@@ -1379,14 +1492,15 @@ func (s *Service) issueTokensWithOpts(tx RepositoryInterface, client *model.OAut
 	}
 
 	accessToken := &model.AccessToken{
-		ID:             atHash,
+		ID:             atID,
 		ClientID:       client.ID,
 		UserID:         userID,
 		SessionID:      sessionID,
 		RefreshTokenID: &rtHash,
 		Scopes:         scopes,
 		Audience:       opts.audience,
-		ExpiresAt:      time.Now().Add(time.Duration(client.AccessTokenTTL) * time.Second),
+		JTI:            atJTI,
+		ExpiresAt:      time.Now().Add(atTTL),
 	}
 
 	if err := tx.CreateAccessToken(accessToken); err != nil {
@@ -1396,7 +1510,7 @@ func (s *Service) issueTokensWithOpts(tx RepositoryInterface, client *model.OAut
 	resp := &TokenResponse{
 		AccessToken:  rawAT,
 		TokenType:    "Bearer",
-		ExpiresIn:    client.AccessTokenTTL,
+		ExpiresIn:    int(atTTL.Seconds()),
 		RefreshToken: rawRT,
 		Scope:        joinScopes(scopes),
 	}
@@ -1414,20 +1528,34 @@ func (s *Service) issueTokensWithOpts(tx RepositoryInterface, client *model.OAut
 			sectorID = *client.SectorIdentifierURI
 		}
 
+		var encAlg, encEnc, encJWKSURI string
+		if client.IDTokenEncryptedResponseAlg != nil {
+			encAlg = *client.IDTokenEncryptedResponseAlg
+		}
+		if client.IDTokenEncryptedResponseEnc != nil {
+			encEnc = *client.IDTokenEncryptedResponseEnc
+		}
+		if client.JWKSUri != nil {
+			encJWKSURI = *client.JWKSUri
+		}
+
 		idToken, err := s.idTokenGen.GenerateIDToken(IDTokenClaims{
-			UserID:           *userID,
-			ClientID:         client.ID,
-			Scopes:           scopes,
-			Nonce:            opts.nonce,
-			AuthTime:         authTime,
-			ATHash:           atHashValue,
-			TTL:              time.Duration(client.IDTokenTTL) * time.Second,
-			RequestedClaims:  opts.requestedClaims,
-			ACR:              opts.acr,
-			AMR:              opts.amr,
-			SubjectType:      client.SubjectType,
-			SectorIdentifier: sectorID,
-			ExtraClaims:      policyExtraClaims,
+			UserID:            *userID,
+			ClientID:          client.ID,
+			Scopes:            scopes,
+			Nonce:             opts.nonce,
+			AuthTime:          authTime,
+			ATHash:            atHashValue,
+			TTL:               time.Duration(client.IDTokenTTL) * time.Second,
+			RequestedClaims:   opts.requestedClaims,
+			ACR:               opts.acr,
+			AMR:               opts.amr,
+			SubjectType:       client.SubjectType,
+			SectorIdentifier:  sectorID,
+			ExtraClaims:       policyExtraClaims,
+			EncryptionJWKSURI: encJWKSURI,
+			EncryptionAlg:     encAlg,
+			EncryptionEnc:     encEnc,
 		})
 		if err != nil {
 			slog.Warn("failed to generate ID token", "error", err)

@@ -96,7 +96,8 @@ func main() {
 	userService := user.NewService(userRepo, hasher, cfg.Auth)
 	userService.SetEmailSender(emailSender)
 	sessionService := session.NewService(sessionRepo, cfg.Auth)
-	clientService := client.NewService(clientRepo, hasher)
+	hmacEncKey := loadHMACEncryptionKey(cfg.Auth.HMACSecretEncryptionKey)
+	clientService := client.NewService(clientRepo, hasher, hmacEncKey)
 	oauthService := oauth.NewService(oauthRepo, userService, sessionService, hasher, cfg.Auth)
 	oidcService := oidc.NewService(db, userService, cfg.Issuer, cfg.PairwiseSalt)
 	mfaService := mfa.NewService(mfaRepo, hasher)
@@ -162,6 +163,7 @@ func main() {
 
 	// Connect cross-service dependencies
 	oauthService.SetIDTokenGenerator(oidc.NewIDTokenAdapter(oidcService))
+	oauthService.SetAccessTokenJWTSigner(oidc.NewAccessTokenJWTSignerAdapter(oidcService))
 	oauthService.SetMFAValidator(mfaService)
 	oauthService.SetPolicyEvaluator(policy.NewOAuthAdapter(policyService))
 	oauthService.SetRoleProvider(newRoleProviderAdapter(rbacService))
@@ -259,6 +261,7 @@ func main() {
 		accountHandler:    accountHandler,
 		m2mHandler:        m2mHandler,
 		dcrHandler:        dcrHandler,
+		hmacEncKey:        hmacEncKey,
 	})
 
 	// Server
@@ -322,6 +325,7 @@ type setupRouterArgs struct {
 	accountHandler  *account.Handler
 	m2mHandler      *m2m.Handler
 	dcrHandler      *client.DCRHandler
+	hmacEncKey      []byte
 }
 
 func setupRouter(a setupRouterArgs) *gin.Engine {
@@ -359,7 +363,8 @@ func setupRouter(a setupRouterArgs) *gin.Engine {
 	// OAuth2 endpoints (root level, rate limited)
 	oauthRL := middleware.NewRateLimiter(10, 3)
 	jwksCache := middleware.NewJWKSCache()
-	clientAuthMiddleware := middleware.ClientAuth(db, hasher, cfg.Issuer+"/token", jwksCache, newPolicyDeciderAdapter(policyService))
+	clientAuthMiddleware := middleware.ClientAuth(db, hasher, cfg.Issuer+"/token", jwksCache, a.hmacEncKey, newPolicyDeciderAdapter(policyService))
+	a.oauthHandler.SetJWKSCache(jwksCache)
 	a.oauthHandler.RegisterRoutes(router, clientAuthMiddleware, oauthRL.Middleware(), cfg.Issuer)
 
 	// Dynamic Client Registration (RFC 7591)
@@ -498,6 +503,23 @@ func chainMW(mws ...gin.HandlerFunc) gin.HandlerFunc {
 			mw(c)
 		}
 	}
+}
+
+// loadHMACEncryptionKey decodes the base64 AES-256 key used to seal
+// per-client HMAC secrets (client_secret_jwt). Returns nil and logs a warning
+// when the key is unset or invalid, in which case the server still boots but
+// client_secret_jwt assertions are rejected at runtime.
+func loadHMACEncryptionKey(encoded string) []byte {
+	if encoded == "" {
+		slog.Warn("auth.hmac_secret_encryption_key is not set; client_secret_jwt support is disabled")
+		return nil
+	}
+	key, err := crypto.DecodeHMACEncryptionKey(encoded)
+	if err != nil {
+		slog.Error("invalid auth.hmac_secret_encryption_key; client_secret_jwt support is disabled", "error", err)
+		return nil
+	}
+	return key
 }
 
 const (

@@ -49,14 +49,18 @@ func (d DatabaseConfig) DSN() string {
 }
 
 type AuthConfig struct {
-	AccessTokenTTL  time.Duration `mapstructure:"access_token_ttl"`
-	RefreshTokenTTL time.Duration `mapstructure:"refresh_token_ttl"`
-	SessionTTL      time.Duration `mapstructure:"session_ttl"`
-	AuthCodeTTL     time.Duration `mapstructure:"auth_code_ttl"`
-	DeviceCodeTTL   time.Duration `mapstructure:"device_code_ttl"`
-	PasswordMinLen  int           `mapstructure:"password_min_length"`
-	MaxFailAttempts int           `mapstructure:"max_failed_attempts"`
-	LockoutDuration time.Duration `mapstructure:"lockout_duration"`
+	AccessTokenTTL           time.Duration `mapstructure:"access_token_ttl"`
+	RefreshTokenTTL          time.Duration `mapstructure:"refresh_token_ttl"`
+	SessionTTL               time.Duration `mapstructure:"session_ttl"`
+	AuthCodeTTL              time.Duration `mapstructure:"auth_code_ttl"`
+	DeviceCodeTTL            time.Duration `mapstructure:"device_code_ttl"`
+	PasswordMinLen           int           `mapstructure:"password_min_length"`
+	MaxFailAttempts          int           `mapstructure:"max_failed_attempts"`
+	LockoutDuration          time.Duration `mapstructure:"lockout_duration"`
+	// HMACSecretEncryptionKey is a base64-encoded 32-byte AES-256 key used to
+	// seal per-client HMAC keys (client_secret_jwt). When empty,
+	// client_secret_jwt support is disabled with a startup warning.
+	HMACSecretEncryptionKey string `mapstructure:"hmac_secret_encryption_key"`
 }
 
 type Argon2Config struct {

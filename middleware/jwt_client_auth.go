@@ -108,41 +108,38 @@ func fetchJWKS(jwksURI string) (map[string]*rsa.PublicKey, error) {
 	return keys, nil
 }
 
-// ValidateClientAssertionJWT validates a private_key_jwt client assertion (RFC 7523).
-// It verifies the JWT signature using the client's JWKS, and validates standard claims.
-func ValidateClientAssertionJWT(assertion, tokenEndpoint, jwksURI string, jwksCache *JWKSCache) (uuid.UUID, error) {
-	// Parse without verification to extract header and claims
+// validateAssertionCommonClaims runs the RFC 7523 §3 claim checks that are
+// independent of the signing algorithm (sub, iss, aud, jti, exp). It returns
+// the parsed unverified token so callers can dispatch to a per-alg verifier.
+func validateAssertionCommonClaims(assertion, tokenEndpoint string) (*jwt.Token, uuid.UUID, error) {
 	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
 	unverified, _, err := parser.ParseUnverified(assertion, jwt.MapClaims{})
 	if err != nil {
-		return uuid.Nil, errors.New("malformed client assertion JWT")
+		return nil, uuid.Nil, errors.New("malformed client assertion JWT")
 	}
 
 	claims, ok := unverified.Claims.(jwt.MapClaims)
 	if !ok {
-		return uuid.Nil, errors.New("invalid JWT claims")
+		return nil, uuid.Nil, errors.New("invalid JWT claims")
 	}
 
-	// Extract and validate sub (must be client_id)
 	sub, err := claims.GetSubject()
 	if err != nil || sub == "" {
-		return uuid.Nil, errors.New("missing sub claim in client assertion")
+		return nil, uuid.Nil, errors.New("missing sub claim in client assertion")
 	}
 	clientID, err := uuid.Parse(sub)
 	if err != nil {
-		return uuid.Nil, errors.New("invalid client_id in sub claim")
+		return nil, uuid.Nil, errors.New("invalid client_id in sub claim")
 	}
 
-	// iss must equal sub
 	iss, err := claims.GetIssuer()
 	if err != nil || iss != sub {
-		return uuid.Nil, errors.New("iss must equal sub in client assertion")
+		return nil, uuid.Nil, errors.New("iss must equal sub in client assertion")
 	}
 
-	// aud must contain the token endpoint
 	aud, err := claims.GetAudience()
 	if err != nil {
-		return uuid.Nil, errors.New("missing aud claim")
+		return nil, uuid.Nil, errors.New("missing aud claim")
 	}
 	audValid := false
 	for _, a := range aud {
@@ -152,36 +149,67 @@ func ValidateClientAssertionJWT(assertion, tokenEndpoint, jwksURI string, jwksCa
 		}
 	}
 	if !audValid {
-		return uuid.Nil, errors.New("aud must contain the token endpoint URL")
+		return nil, uuid.Nil, errors.New("aud must contain the token endpoint URL")
 	}
 
-	// jti must be present
 	if jti, _ := claims["jti"].(string); jti == "" {
-		return uuid.Nil, errors.New("missing jti claim")
+		return nil, uuid.Nil, errors.New("missing jti claim")
 	}
 
-	// Get kid from header
+	return unverified, clientID, nil
+}
+
+// ValidateClientSecretJWT validates a client_secret_jwt assertion (RFC 7523 §2.2).
+// hmacKey is the client's per-client HMAC key (already decrypted from
+// oauth_clients.secret_hmac_key). The JWT must be signed with HS256.
+func ValidateClientSecretJWT(assertion, tokenEndpoint string, hmacKey []byte) (uuid.UUID, error) {
+	if len(hmacKey) == 0 {
+		return uuid.Nil, errors.New("client has no hmac key configured for client_secret_jwt")
+	}
+	unverified, clientID, err := validateAssertionCommonClaims(assertion, tokenEndpoint)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if _, ok := unverified.Method.(*jwt.SigningMethodHMAC); !ok {
+		return uuid.Nil, errors.New("client_secret_jwt requires an HMAC signing method")
+	}
+	if _, err := jwt.Parse(assertion, func(token *jwt.Token) (any, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, errors.New("unexpected signing method")
+		}
+		return hmacKey, nil
+	}, jwt.WithExpirationRequired(), jwt.WithValidMethods([]string{"HS256"})); err != nil {
+		return uuid.Nil, fmt.Errorf("client assertion verification failed: %w", err)
+	}
+	return clientID, nil
+}
+
+// ValidateClientAssertionJWT validates a private_key_jwt client assertion (RFC 7523).
+// It verifies the JWT signature using the client's JWKS, and validates standard claims.
+func ValidateClientAssertionJWT(assertion, tokenEndpoint, jwksURI string, jwksCache *JWKSCache) (uuid.UUID, error) {
+	unverified, clientID, err := validateAssertionCommonClaims(assertion, tokenEndpoint)
+	if err != nil {
+		return uuid.Nil, err
+	}
+
 	kid, _ := unverified.Header["kid"].(string)
 	if kid == "" {
 		return uuid.Nil, errors.New("missing kid in JWT header")
 	}
 
-	// Fetch public key from JWKS
 	pubKey, err := jwksCache.GetKey(jwksURI, kid)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("failed to get signing key: %w", err)
 	}
 
-	// Verify signature with full validation
-	_, err = jwt.Parse(assertion, func(token *jwt.Token) (any, error) {
+	if _, err = jwt.Parse(assertion, func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
 			if _, ok := token.Method.(*jwt.SigningMethodRSAPSS); !ok {
 				return nil, errors.New("unexpected signing method")
 			}
 		}
 		return pubKey, nil
-	}, jwt.WithExpirationRequired())
-	if err != nil {
+	}, jwt.WithExpirationRequired()); err != nil {
 		return uuid.Nil, fmt.Errorf("client assertion verification failed: %w", err)
 	}
 

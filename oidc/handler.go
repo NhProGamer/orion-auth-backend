@@ -21,6 +21,7 @@ func NewHandler(service *Service) *Handler {
 
 func (h *Handler) RegisterRoutes(router *gin.Engine, bearerAuth, rateLimiter gin.HandlerFunc) {
 	router.GET("/.well-known/openid-configuration", h.Discovery)
+	router.GET("/.well-known/oauth-authorization-server", h.OAuthDiscovery)
 	router.GET("/.well-known/jwks.json", h.JWKS)
 	router.GET("/userinfo", rateLimiter, bearerAuth, h.UserInfo)
 	router.POST("/userinfo", rateLimiter, bearerAuth, h.UserInfo)
@@ -41,6 +42,16 @@ func (h *Handler) RegisterAdminRoutes(admin *gin.RouterGroup) {
 // @Router /.well-known/openid-configuration [get]
 func (h *Handler) Discovery(c *gin.Context) {
 	pkg.OK(c, h.service.GetDiscovery())
+}
+
+// OAuthDiscovery returns the RFC 8414 OAuth 2.0 authorization server metadata.
+// @Summary Get OAuth 2.0 authorization server metadata (RFC 8414)
+// @Tags OAuth2
+// @Produce json
+// @Success 200 {object} map[string]any
+// @Router /.well-known/oauth-authorization-server [get]
+func (h *Handler) OAuthDiscovery(c *gin.Context) {
+	pkg.OK(c, h.service.GetOAuthAuthorizationServerMetadata())
 }
 
 // JWKS returns the JSON Web Key Set.
@@ -78,16 +89,40 @@ func (h *Handler) UserInfo(c *gin.Context) {
 		return
 	}
 
-	// Check if client requires signed UserInfo response
+	// Determine response shape from client config:
+	// - encrypted (JWE wrapping a JWS): when *_alg and *_enc are set
+	// - signed (JWS): when only userinfo_signed_response_alg is set
+	// - plain JSON: default
 	if clientID != uuid.Nil && h.service.clientFinder != nil {
-		if client, err := h.service.clientFinder.FindActiveByID(clientID); err == nil && client.UserinfoSignedResponseAlg != nil && *client.UserinfoSignedResponseAlg != "" {
-			jwtStr, err := h.service.GenerateUserInfoJWT(claims, clientID)
-			if err != nil {
-				pkg.HandleError(c, err)
+		client, err := h.service.clientFinder.FindActiveByID(clientID)
+		if err == nil && client != nil {
+			needsSign := client.UserinfoSignedResponseAlg != nil && *client.UserinfoSignedResponseAlg != ""
+			needsEnc := client.UserinfoEncryptedResponseAlg != nil && *client.UserinfoEncryptedResponseAlg != "" &&
+				client.UserinfoEncryptedResponseEnc != nil && *client.UserinfoEncryptedResponseEnc != ""
+
+			if needsSign || needsEnc {
+				jwtStr, err := h.service.GenerateUserInfoJWT(claims, clientID)
+				if err != nil {
+					pkg.HandleError(c, err)
+					return
+				}
+				if needsEnc {
+					if client.JWKSUri == nil || *client.JWKSUri == "" {
+						pkg.HandleError(c, pkg.ErrInternal("client requests encrypted userinfo but has no jwks_uri"))
+						return
+					}
+					encrypted, err := h.service.EncryptForClient([]byte(jwtStr), *client.JWKSUri,
+						*client.UserinfoEncryptedResponseAlg, *client.UserinfoEncryptedResponseEnc)
+					if err != nil {
+						pkg.HandleError(c, pkg.ErrInternal("failed to encrypt userinfo: "+err.Error()))
+						return
+					}
+					c.Data(200, "application/jwt", []byte(encrypted))
+					return
+				}
+				c.Data(200, "application/jwt", []byte(jwtStr))
 				return
 			}
-			c.Data(200, "application/jwt", []byte(jwtStr))
-			return
 		}
 	}
 

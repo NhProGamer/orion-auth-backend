@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -173,6 +174,11 @@ type IDTokenClaims struct {
 	SubjectType      string // "public" or "pairwise"
 	SectorIdentifier string // sector identifier for pairwise sub
 	ExtraClaims      map[string]any
+	// JWE encryption (OIDC Core §10.2). When all three are set the signed
+	// JWS produced by GenerateIDToken is wrapped in a JWE before return.
+	EncryptionJWKSURI string
+	EncryptionAlg     string
+	EncryptionEnc     string
 }
 
 func (s *Service) GenerateIDToken(claims IDTokenClaims) (string, error) {
@@ -254,7 +260,16 @@ func (s *Service) GenerateIDToken(claims IDTokenClaims) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, jwtClaims)
 	token.Header["kid"] = key.ID.String()
 
-	return token.SignedString(privKey)
+	signed, err := token.SignedString(privKey)
+	if err != nil {
+		return "", err
+	}
+
+	// Optional JWE wrapping (OIDC Core §10.2: nested JWS-in-JWE).
+	if claims.EncryptionAlg != "" {
+		return s.EncryptForClient([]byte(signed), claims.EncryptionJWKSURI, claims.EncryptionAlg, claims.EncryptionEnc)
+	}
+	return signed, nil
 }
 
 // reservedIDTokenClaims is the set of claim names a policy may not override
@@ -357,6 +372,140 @@ func (s *Service) ValidateIDToken(tokenString string) (uuid.UUID, error) {
 	return userID, nil
 }
 
+// --- Access Token JWT (RFC 9068) ---
+
+// AccessTokenClaims is the input set for GenerateAccessTokenJWT. UserID is
+// nil for the client_credentials grant. ExtraClaims merges over the standard
+// set but cannot override RFC 9068 reserved names.
+type AccessTokenClaims struct {
+	UserID      *uuid.UUID
+	ClientID    uuid.UUID
+	Scopes      []string
+	Audience    string
+	TTL         time.Duration
+	ExtraClaims map[string]any
+}
+
+// reservedAccessTokenClaims is the set of names a policy may not override
+// via modify.claims for a JWT access token. They are either spec-mandated
+// (RFC 9068 §2.2) or computed by the issuer.
+var reservedAccessTokenClaims = map[string]bool{
+	"iss": true, "sub": true, "aud": true, "exp": true, "iat": true,
+	"jti": true, "client_id": true, "scope": true,
+}
+
+// GenerateAccessTokenJWT produces a signed JWT access token per RFC 9068.
+// It uses the active server signing key (same as ID tokens); the resource's
+// `signing_alg` is consulted by the caller and validated here against the
+// alg families we actually support (currently RS256 only — the server has
+// a single RSA key pair). Returns the compact serialization and the JTI
+// (uuid v7) that callers must persist into AccessToken.JTI and into the
+// revoked_jtis denylist on /revoke.
+func (s *Service) GenerateAccessTokenJWT(claims AccessTokenClaims, signingAlg string) (jwtStr, jti string, err error) {
+	s.mu.RLock()
+	key := s.activeKey
+	privKey := s.privateKey
+	s.mu.RUnlock()
+	if key == nil || privKey == nil {
+		return "", "", errors.New("no active signing key")
+	}
+
+	// We only sign with the server's RS256 key today. Accept the RFC 9068
+	// recommended families in the resource config but fall back to RS256;
+	// callers that need ES256 must rotate the server signing key first.
+	switch signingAlg {
+	case "", "RS256", "RS384", "RS512", "PS256":
+		// OK; we always sign with RS256 because that's the active key alg
+	default:
+		return "", "", errors.New("unsupported access token signing alg for current server key: " + signingAlg)
+	}
+
+	now := time.Now()
+	sub := claims.ClientID.String()
+	if claims.UserID != nil {
+		sub = claims.UserID.String()
+	}
+	jtiUUID, err := uuid.NewV7()
+	if err != nil {
+		return "", "", err
+	}
+	jti = jtiUUID.String()
+
+	mc := jwt.MapClaims{
+		"iss":       s.issuer,
+		"sub":       sub,
+		"aud":       claims.Audience,
+		"exp":       now.Add(claims.TTL).Unix(),
+		"iat":       now.Unix(),
+		"jti":       jti,
+		"client_id": claims.ClientID.String(),
+		"scope":     strings.Join(claims.Scopes, " "),
+	}
+
+	// Roles are emitted only for user-bound tokens with the "roles" scope.
+	// client_credentials tokens never carry roles (no user to attribute
+	// them to). enrichClaimsWithRoles writes "roles" and "groups" both.
+	if claims.UserID != nil {
+		s.enrichClaimsWithRoles(*claims.UserID, claims.Scopes, mc)
+	}
+
+	for k, v := range claims.ExtraClaims {
+		if reservedAccessTokenClaims[k] {
+			continue
+		}
+		mc[k] = v
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, mc)
+	token.Header["typ"] = "at+jwt"
+	token.Header["kid"] = key.ID.String()
+	signed, err := token.SignedString(privKey)
+	if err != nil {
+		return "", "", err
+	}
+	return signed, jti, nil
+}
+
+// ValidateAccessTokenJWT verifies the signature, issuer and expiry of a JWT
+// access token previously issued by this server, returning the claims for
+// downstream interpretation (introspection, revocation). It does NOT check
+// the denylist — callers must do that against revoked_jtis.
+func (s *Service) ValidateAccessTokenJWT(tokenString string) (jwt.MapClaims, error) {
+	s.mu.RLock()
+	keys := s.allKeys
+	s.mu.RUnlock()
+
+	keyFunc := func(token *jwt.Token) (any, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+			return nil, errors.New("unexpected signing method")
+		}
+		kid, _ := token.Header["kid"].(string)
+		if kid == "" {
+			return nil, errors.New("missing kid")
+		}
+		for _, k := range keys {
+			if k.ID.String() == kid {
+				return appCrypto.ParseRSAPublicKey(k.PublicKeyPEM)
+			}
+		}
+		return nil, errors.New("unknown signing key")
+	}
+
+	parsed, err := jwt.Parse(tokenString, keyFunc,
+		jwt.WithIssuer(s.issuer),
+		jwt.WithValidMethods([]string{"RS256"}),
+		jwt.WithExpirationRequired(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	claims, ok := parsed.Claims.(jwt.MapClaims)
+	if !ok || !parsed.Valid {
+		return nil, errors.New("invalid token claims")
+	}
+	return claims, nil
+}
+
 // ComputeATHash computes the at_hash claim for an access token.
 func ComputeATHash(accessToken string) string {
 	h := sha256.Sum256([]byte(accessToken))
@@ -421,6 +570,11 @@ type OpenIDConfiguration struct {
 	GrantTypesSupported                        []string `json:"grant_types_supported"`
 	SubjectTypesSupported                      []string `json:"subject_types_supported"`
 	IDTokenSigningAlgValuesSupported           []string `json:"id_token_signing_alg_values_supported"`
+	IDTokenEncryptionAlgValuesSupported        []string `json:"id_token_encryption_alg_values_supported,omitempty"`
+	IDTokenEncryptionEncValuesSupported        []string `json:"id_token_encryption_enc_values_supported,omitempty"`
+	UserinfoEncryptionAlgValuesSupported       []string `json:"userinfo_encryption_alg_values_supported,omitempty"`
+	UserinfoEncryptionEncValuesSupported       []string `json:"userinfo_encryption_enc_values_supported,omitempty"`
+	AccessTokenSigningAlgValuesSupported       []string `json:"access_token_signing_alg_values_supported,omitempty"`
 	ScopesSupported                            []string `json:"scopes_supported"`
 	TokenEndpointAuthMethodsSupported          []string `json:"token_endpoint_auth_methods_supported"`
 	ClaimsSupported                            []string `json:"claims_supported"`
@@ -428,6 +582,7 @@ type OpenIDConfiguration struct {
 	ResponseModesSupported                     []string `json:"response_modes_supported"`
 	RequestParameterSupported                  bool     `json:"request_parameter_supported"`
 	RequestURIParameterSupported               bool     `json:"request_uri_parameter_supported"`
+	RequestObjectSigningAlgValuesSupported     []string `json:"request_object_signing_alg_values_supported,omitempty"`
 	ClaimsParameterSupported                   bool     `json:"claims_parameter_supported"`
 	BackchannelLogoutSupported                 bool     `json:"backchannel_logout_supported"`
 	BackchannelLogoutSessionSupported          bool     `json:"backchannel_logout_session_supported"`
@@ -454,9 +609,14 @@ func (s *Service) GetDiscovery() OpenIDConfiguration {
 		ResponseTypesSupported:            []string{"code", "code id_token", "code token", "code id_token token"},
 		GrantTypesSupported:               []string{"authorization_code", "client_credentials", "refresh_token", "urn:ietf:params:oauth:grant-type:device_code"},
 		SubjectTypesSupported:             []string{"public", "pairwise"},
-		IDTokenSigningAlgValuesSupported:  []string{"RS256"},
-		ScopesSupported:                   []string{"openid", "profile", "email", "phone", "address", "roles", "offline_access"},
-		TokenEndpointAuthMethodsSupported: []string{"client_secret_basic", "client_secret_post", "private_key_jwt", "none"},
+		IDTokenSigningAlgValuesSupported:     []string{"RS256"},
+		IDTokenEncryptionAlgValuesSupported:  SupportedJWEAlgs,
+		IDTokenEncryptionEncValuesSupported:  SupportedJWEEncs,
+		UserinfoEncryptionAlgValuesSupported: SupportedJWEAlgs,
+		UserinfoEncryptionEncValuesSupported: SupportedJWEEncs,
+		AccessTokenSigningAlgValuesSupported: []string{"RS256"},
+		ScopesSupported:                      []string{"openid", "profile", "email", "phone", "address", "roles", "offline_access"},
+		TokenEndpointAuthMethodsSupported: []string{"client_secret_basic", "client_secret_post", "private_key_jwt", "client_secret_jwt", "none"},
 		ClaimsSupported: []string{
 			"sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "at_hash",
 			"acr", "amr",
@@ -470,7 +630,8 @@ func (s *Service) GetDiscovery() OpenIDConfiguration {
 		CodeChallengeMethodsSupported:              []string{"S256"},
 		ResponseModesSupported:                     []string{"query", "fragment", "form_post"},
 		RequestParameterSupported:                  true,
-		RequestURIParameterSupported:               false,
+		RequestURIParameterSupported:               true,
+		RequestObjectSigningAlgValuesSupported:     []string{"RS256", "RS384", "RS512", "PS256", "ES256", "ES384"},
 		ClaimsParameterSupported:                   true,
 		BackchannelLogoutSupported:                 true,
 		BackchannelLogoutSessionSupported:          true,
@@ -481,6 +642,69 @@ func (s *Service) GetDiscovery() OpenIDConfiguration {
 		CheckSessionIframe:                         s.issuer + "/check_session",
 		UserinfoSigningAlgValuesSupported:          []string{"RS256"},
 		RegistrationEndpoint:                       s.issuer + "/register",
+	}
+}
+
+// OAuthAuthorizationServerMetadata is the RFC 8414 metadata document for the
+// OAuth 2.0 authorization server, exposed at
+// /.well-known/oauth-authorization-server. It overlaps heavily with the OIDC
+// discovery document but omits OIDC-specific fields (subject_types_supported,
+// id_token_*, userinfo_endpoint, end_session, *channel_logout, claims_supported)
+// so that pure OAuth resource servers that probe this URL get only the
+// metadata that applies to them.
+type OAuthAuthorizationServerMetadata struct {
+	Issuer                                     string   `json:"issuer"`
+	AuthorizationEndpoint                      string   `json:"authorization_endpoint"`
+	TokenEndpoint                              string   `json:"token_endpoint"`
+	JwksURI                                    string   `json:"jwks_uri"`
+	IntrospectionEndpoint                      string   `json:"introspection_endpoint"`
+	RevocationEndpoint                         string   `json:"revocation_endpoint"`
+	DeviceAuthorizationEndpoint                string   `json:"device_authorization_endpoint"`
+	ResponseTypesSupported                     []string `json:"response_types_supported"`
+	GrantTypesSupported                        []string `json:"grant_types_supported"`
+	ScopesSupported                            []string `json:"scopes_supported"`
+	TokenEndpointAuthMethodsSupported          []string `json:"token_endpoint_auth_methods_supported"`
+	CodeChallengeMethodsSupported              []string `json:"code_challenge_methods_supported"`
+	ResponseModesSupported                     []string `json:"response_modes_supported"`
+	RequestParameterSupported                  bool     `json:"request_parameter_supported"`
+	RequestURIParameterSupported               bool     `json:"request_uri_parameter_supported"`
+	RequestObjectSigningAlgValuesSupported     []string `json:"request_object_signing_alg_values_supported,omitempty"`
+	AuthorizationResponseIssParameterSupported bool     `json:"authorization_response_iss_parameter_supported"`
+	PushedAuthorizationRequestEndpoint         string   `json:"pushed_authorization_request_endpoint,omitempty"`
+	RegistrationEndpoint                       string   `json:"registration_endpoint,omitempty"`
+	IntrospectionEndpointAuthMethodsSupported  []string `json:"introspection_endpoint_auth_methods_supported,omitempty"`
+	RevocationEndpointAuthMethodsSupported     []string `json:"revocation_endpoint_auth_methods_supported,omitempty"`
+	AccessTokenSigningAlgValuesSupported       []string `json:"access_token_signing_alg_values_supported,omitempty"`
+}
+
+// GetOAuthAuthorizationServerMetadata returns the RFC 8414 metadata document.
+// Values mirror GetDiscovery() for fields that overlap, so changes stay in
+// sync as long as both methods are touched together.
+func (s *Service) GetOAuthAuthorizationServerMetadata() OAuthAuthorizationServerMetadata {
+	authMethods := []string{"client_secret_basic", "client_secret_post", "private_key_jwt", "client_secret_jwt", "none"}
+	return OAuthAuthorizationServerMetadata{
+		Issuer:                                     s.issuer,
+		AuthorizationEndpoint:                      s.issuer + "/ui/authorize",
+		TokenEndpoint:                              s.issuer + "/token",
+		JwksURI:                                    s.issuer + "/.well-known/jwks.json",
+		IntrospectionEndpoint:                      s.issuer + "/introspect",
+		RevocationEndpoint:                         s.issuer + "/revoke",
+		DeviceAuthorizationEndpoint:                s.issuer + "/device_authorization",
+		ResponseTypesSupported:                     []string{"code", "code id_token", "code token", "code id_token token"},
+		GrantTypesSupported:                        []string{"authorization_code", "client_credentials", "refresh_token", "urn:ietf:params:oauth:grant-type:device_code"},
+		ScopesSupported:                            []string{"openid", "profile", "email", "phone", "address", "roles", "offline_access"},
+		TokenEndpointAuthMethodsSupported:          authMethods,
+		CodeChallengeMethodsSupported:              []string{"S256"},
+		ResponseModesSupported:                     []string{"query", "fragment", "form_post"},
+		RequestParameterSupported:                  true,
+		RequestURIParameterSupported:               true,
+		RequestObjectSigningAlgValuesSupported:     []string{"RS256", "RS384", "RS512", "PS256", "ES256", "ES384"},
+		AuthorizationResponseIssParameterSupported: true,
+		PushedAuthorizationRequestEndpoint:         s.issuer + "/par",
+		RegistrationEndpoint:                       s.issuer + "/register",
+		IntrospectionEndpointAuthMethodsSupported:  authMethods,
+		RevocationEndpointAuthMethodsSupported:     authMethods,
+		AccessTokenSigningAlgValuesSupported:       []string{"RS256"},
 	}
 }
 
