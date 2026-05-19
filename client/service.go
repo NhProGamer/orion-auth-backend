@@ -39,6 +39,7 @@ type CreateInput struct {
 	AccessTokenTTL  *int     `json:"access_token_ttl"`
 	RefreshTokenTTL *int     `json:"refresh_token_ttl"`
 	IDTokenTTL      *int     `json:"id_token_ttl"`
+	RequestURIs     []string `json:"request_uris"`
 }
 
 type UpdateInput struct {
@@ -55,6 +56,7 @@ type UpdateInput struct {
 	RefreshTokenTTL *int     `json:"refresh_token_ttl"`
 	IDTokenTTL      *int     `json:"id_token_ttl"`
 	Active          *bool    `json:"active"`
+	RequestURIs     []string `json:"request_uris"`
 }
 
 type CreateResponse struct {
@@ -105,6 +107,9 @@ func (s *Service) Create(input CreateInput) (*CreateResponse, error) {
 	}
 	if input.IDTokenTTL != nil {
 		client.IDTokenTTL = *input.IDTokenTTL
+	}
+	if len(input.RequestURIs) > 0 {
+		client.RequestURIs = pq.StringArray(input.RequestURIs)
 	}
 
 	var rawSecret string
@@ -214,6 +219,9 @@ func (s *Service) Update(id uuid.UUID, input UpdateInput) (*model.OAuthClient, e
 	}
 	if input.Active != nil {
 		client.Active = *input.Active
+	}
+	if input.RequestURIs != nil {
+		client.RequestURIs = pq.StringArray(input.RequestURIs)
 	}
 
 	if err := s.repo.Update(client); err != nil {

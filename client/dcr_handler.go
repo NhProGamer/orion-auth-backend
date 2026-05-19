@@ -37,6 +37,7 @@ type DCRRequest struct {
 	JWKSUri                 string   `json:"jwks_uri"`
 	SubjectType             string   `json:"subject_type"`
 	RequirePKCE             *bool    `json:"require_pkce,omitempty"`
+	RequestURIs             []string `json:"request_uris,omitempty"`
 }
 
 // DCRResponse represents the OIDC Dynamic Client Registration response.
@@ -51,6 +52,7 @@ type DCRResponse struct {
 	ResponseTypes           []string `json:"response_types"`
 	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
 	RequirePKCE             bool     `json:"require_pkce"`
+	RequestURIs             []string `json:"request_uris,omitempty"`
 	RegistrationAccessToken string   `json:"registration_access_token,omitempty"`
 	RegistrationClientURI   string   `json:"registration_client_uri,omitempty"`
 }
@@ -94,6 +96,7 @@ func (h *DCRHandler) Register(c *gin.Context) {
 		TokenAuthMethod: &authMethod,
 		IsPublic:        isPublic,
 		RequirePKCE:     req.RequirePKCE,
+		RequestURIs:     req.RequestURIs,
 	}
 
 	if req.Scope != "" {
@@ -124,6 +127,7 @@ func (h *DCRHandler) Register(c *gin.Context) {
 		ResponseTypes:           result.Client.ResponseTypes,
 		TokenEndpointAuthMethod: result.Client.TokenAuthMethod,
 		RequirePKCE:             result.Client.RequirePKCE,
+		RequestURIs:             result.Client.RequestURIs,
 		RegistrationAccessToken: rawRAT,
 	}
 
@@ -147,6 +151,7 @@ func (h *DCRHandler) ReadRegistration(c *gin.Context) {
 		ResponseTypes:           client.ResponseTypes,
 		TokenEndpointAuthMethod: client.TokenAuthMethod,
 		RequirePKCE:             client.RequirePKCE,
+		RequestURIs:             client.RequestURIs,
 	}
 
 	c.JSON(http.StatusOK, resp)
@@ -186,6 +191,9 @@ func (h *DCRHandler) UpdateRegistration(c *gin.Context) {
 	if req.RequirePKCE != nil {
 		client.RequirePKCE = *req.RequirePKCE
 	}
+	if req.RequestURIs != nil {
+		client.RequestURIs = pq.StringArray(req.RequestURIs)
+	}
 
 	if err := h.service.repo.Update(client); err != nil {
 		pkg.HandleError(c, pkg.ErrInternal("failed to update client"))
@@ -202,6 +210,7 @@ func (h *DCRHandler) UpdateRegistration(c *gin.Context) {
 		ResponseTypes:           client.ResponseTypes,
 		TokenEndpointAuthMethod: client.TokenAuthMethod,
 		RequirePKCE:             client.RequirePKCE,
+		RequestURIs:             client.RequestURIs,
 	}
 
 	c.JSON(http.StatusOK, resp)
