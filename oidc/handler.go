@@ -21,6 +21,7 @@ func NewHandler(service *Service) *Handler {
 
 func (h *Handler) RegisterRoutes(router *gin.Engine, bearerAuth, rateLimiter gin.HandlerFunc) {
 	router.GET("/.well-known/openid-configuration", h.Discovery)
+	router.GET("/.well-known/oauth-authorization-server", h.OAuthDiscovery)
 	router.GET("/.well-known/jwks.json", h.JWKS)
 	router.GET("/userinfo", rateLimiter, bearerAuth, h.UserInfo)
 	router.POST("/userinfo", rateLimiter, bearerAuth, h.UserInfo)
@@ -41,6 +42,16 @@ func (h *Handler) RegisterAdminRoutes(admin *gin.RouterGroup) {
 // @Router /.well-known/openid-configuration [get]
 func (h *Handler) Discovery(c *gin.Context) {
 	pkg.OK(c, h.service.GetDiscovery())
+}
+
+// OAuthDiscovery returns the RFC 8414 OAuth 2.0 authorization server metadata.
+// @Summary Get OAuth 2.0 authorization server metadata (RFC 8414)
+// @Tags OAuth2
+// @Produce json
+// @Success 200 {object} map[string]any
+// @Router /.well-known/oauth-authorization-server [get]
+func (h *Handler) OAuthDiscovery(c *gin.Context) {
+	pkg.OK(c, h.service.GetOAuthAuthorizationServerMetadata())
 }
 
 // JWKS returns the JSON Web Key Set.

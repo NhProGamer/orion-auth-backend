@@ -484,6 +484,65 @@ func (s *Service) GetDiscovery() OpenIDConfiguration {
 	}
 }
 
+// OAuthAuthorizationServerMetadata is the RFC 8414 metadata document for the
+// OAuth 2.0 authorization server, exposed at
+// /.well-known/oauth-authorization-server. It overlaps heavily with the OIDC
+// discovery document but omits OIDC-specific fields (subject_types_supported,
+// id_token_*, userinfo_endpoint, end_session, *channel_logout, claims_supported)
+// so that pure OAuth resource servers that probe this URL get only the
+// metadata that applies to them.
+type OAuthAuthorizationServerMetadata struct {
+	Issuer                                     string   `json:"issuer"`
+	AuthorizationEndpoint                      string   `json:"authorization_endpoint"`
+	TokenEndpoint                              string   `json:"token_endpoint"`
+	JwksURI                                    string   `json:"jwks_uri"`
+	IntrospectionEndpoint                      string   `json:"introspection_endpoint"`
+	RevocationEndpoint                         string   `json:"revocation_endpoint"`
+	DeviceAuthorizationEndpoint                string   `json:"device_authorization_endpoint"`
+	ResponseTypesSupported                     []string `json:"response_types_supported"`
+	GrantTypesSupported                        []string `json:"grant_types_supported"`
+	ScopesSupported                            []string `json:"scopes_supported"`
+	TokenEndpointAuthMethodsSupported          []string `json:"token_endpoint_auth_methods_supported"`
+	CodeChallengeMethodsSupported              []string `json:"code_challenge_methods_supported"`
+	ResponseModesSupported                     []string `json:"response_modes_supported"`
+	RequestParameterSupported                  bool     `json:"request_parameter_supported"`
+	RequestURIParameterSupported               bool     `json:"request_uri_parameter_supported"`
+	AuthorizationResponseIssParameterSupported bool     `json:"authorization_response_iss_parameter_supported"`
+	PushedAuthorizationRequestEndpoint         string   `json:"pushed_authorization_request_endpoint,omitempty"`
+	RegistrationEndpoint                       string   `json:"registration_endpoint,omitempty"`
+	IntrospectionEndpointAuthMethodsSupported  []string `json:"introspection_endpoint_auth_methods_supported,omitempty"`
+	RevocationEndpointAuthMethodsSupported     []string `json:"revocation_endpoint_auth_methods_supported,omitempty"`
+}
+
+// GetOAuthAuthorizationServerMetadata returns the RFC 8414 metadata document.
+// Values mirror GetDiscovery() for fields that overlap, so changes stay in
+// sync as long as both methods are touched together.
+func (s *Service) GetOAuthAuthorizationServerMetadata() OAuthAuthorizationServerMetadata {
+	authMethods := []string{"client_secret_basic", "client_secret_post", "private_key_jwt", "none"}
+	return OAuthAuthorizationServerMetadata{
+		Issuer:                                     s.issuer,
+		AuthorizationEndpoint:                      s.issuer + "/ui/authorize",
+		TokenEndpoint:                              s.issuer + "/token",
+		JwksURI:                                    s.issuer + "/.well-known/jwks.json",
+		IntrospectionEndpoint:                      s.issuer + "/introspect",
+		RevocationEndpoint:                         s.issuer + "/revoke",
+		DeviceAuthorizationEndpoint:                s.issuer + "/device_authorization",
+		ResponseTypesSupported:                     []string{"code", "code id_token", "code token", "code id_token token"},
+		GrantTypesSupported:                        []string{"authorization_code", "client_credentials", "refresh_token", "urn:ietf:params:oauth:grant-type:device_code"},
+		ScopesSupported:                            []string{"openid", "profile", "email", "phone", "address", "roles", "offline_access"},
+		TokenEndpointAuthMethodsSupported:          authMethods,
+		CodeChallengeMethodsSupported:              []string{"S256"},
+		ResponseModesSupported:                     []string{"query", "fragment", "form_post"},
+		RequestParameterSupported:                  true,
+		RequestURIParameterSupported:               false,
+		AuthorizationResponseIssParameterSupported: true,
+		PushedAuthorizationRequestEndpoint:         s.issuer + "/par",
+		RegistrationEndpoint:                       s.issuer + "/register",
+		IntrospectionEndpointAuthMethodsSupported:  authMethods,
+		RevocationEndpointAuthMethodsSupported:     authMethods,
+	}
+}
+
 // --- UserInfo ---
 
 func (s *Service) GetUserInfo(userID uuid.UUID, clientID uuid.UUID, scopes []string) (map[string]any, error) {
