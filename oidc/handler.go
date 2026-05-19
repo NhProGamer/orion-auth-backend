@@ -89,16 +89,40 @@ func (h *Handler) UserInfo(c *gin.Context) {
 		return
 	}
 
-	// Check if client requires signed UserInfo response
+	// Determine response shape from client config:
+	// - encrypted (JWE wrapping a JWS): when *_alg and *_enc are set
+	// - signed (JWS): when only userinfo_signed_response_alg is set
+	// - plain JSON: default
 	if clientID != uuid.Nil && h.service.clientFinder != nil {
-		if client, err := h.service.clientFinder.FindActiveByID(clientID); err == nil && client.UserinfoSignedResponseAlg != nil && *client.UserinfoSignedResponseAlg != "" {
-			jwtStr, err := h.service.GenerateUserInfoJWT(claims, clientID)
-			if err != nil {
-				pkg.HandleError(c, err)
+		client, err := h.service.clientFinder.FindActiveByID(clientID)
+		if err == nil && client != nil {
+			needsSign := client.UserinfoSignedResponseAlg != nil && *client.UserinfoSignedResponseAlg != ""
+			needsEnc := client.UserinfoEncryptedResponseAlg != nil && *client.UserinfoEncryptedResponseAlg != "" &&
+				client.UserinfoEncryptedResponseEnc != nil && *client.UserinfoEncryptedResponseEnc != ""
+
+			if needsSign || needsEnc {
+				jwtStr, err := h.service.GenerateUserInfoJWT(claims, clientID)
+				if err != nil {
+					pkg.HandleError(c, err)
+					return
+				}
+				if needsEnc {
+					if client.JWKSUri == nil || *client.JWKSUri == "" {
+						pkg.HandleError(c, pkg.ErrInternal("client requests encrypted userinfo but has no jwks_uri"))
+						return
+					}
+					encrypted, err := h.service.EncryptForClient([]byte(jwtStr), *client.JWKSUri,
+						*client.UserinfoEncryptedResponseAlg, *client.UserinfoEncryptedResponseEnc)
+					if err != nil {
+						pkg.HandleError(c, pkg.ErrInternal("failed to encrypt userinfo: "+err.Error()))
+						return
+					}
+					c.Data(200, "application/jwt", []byte(encrypted))
+					return
+				}
+				c.Data(200, "application/jwt", []byte(jwtStr))
 				return
 			}
-			c.Data(200, "application/jwt", []byte(jwtStr))
-			return
 		}
 	}
 

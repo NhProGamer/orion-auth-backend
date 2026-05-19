@@ -103,6 +103,10 @@ type IDTokenClaims struct {
 	SubjectType      string
 	SectorIdentifier string
 	ExtraClaims      map[string]any // custom claims injected via policy modify
+	// JWE encryption (OIDC Core §10.2). Empty disables encryption.
+	EncryptionJWKSURI string
+	EncryptionAlg     string
+	EncryptionEnc     string
 }
 
 type Service struct {
@@ -1524,20 +1528,34 @@ func (s *Service) issueTokensWithOpts(tx RepositoryInterface, client *model.OAut
 			sectorID = *client.SectorIdentifierURI
 		}
 
+		var encAlg, encEnc, encJWKSURI string
+		if client.IDTokenEncryptedResponseAlg != nil {
+			encAlg = *client.IDTokenEncryptedResponseAlg
+		}
+		if client.IDTokenEncryptedResponseEnc != nil {
+			encEnc = *client.IDTokenEncryptedResponseEnc
+		}
+		if client.JWKSUri != nil {
+			encJWKSURI = *client.JWKSUri
+		}
+
 		idToken, err := s.idTokenGen.GenerateIDToken(IDTokenClaims{
-			UserID:           *userID,
-			ClientID:         client.ID,
-			Scopes:           scopes,
-			Nonce:            opts.nonce,
-			AuthTime:         authTime,
-			ATHash:           atHashValue,
-			TTL:              time.Duration(client.IDTokenTTL) * time.Second,
-			RequestedClaims:  opts.requestedClaims,
-			ACR:              opts.acr,
-			AMR:              opts.amr,
-			SubjectType:      client.SubjectType,
-			SectorIdentifier: sectorID,
-			ExtraClaims:      policyExtraClaims,
+			UserID:            *userID,
+			ClientID:          client.ID,
+			Scopes:            scopes,
+			Nonce:             opts.nonce,
+			AuthTime:          authTime,
+			ATHash:            atHashValue,
+			TTL:               time.Duration(client.IDTokenTTL) * time.Second,
+			RequestedClaims:   opts.requestedClaims,
+			ACR:               opts.acr,
+			AMR:               opts.amr,
+			SubjectType:       client.SubjectType,
+			SectorIdentifier:  sectorID,
+			ExtraClaims:       policyExtraClaims,
+			EncryptionJWKSURI: encJWKSURI,
+			EncryptionAlg:     encAlg,
+			EncryptionEnc:     encEnc,
 		})
 		if err != nil {
 			slog.Warn("failed to generate ID token", "error", err)

@@ -174,6 +174,11 @@ type IDTokenClaims struct {
 	SubjectType      string // "public" or "pairwise"
 	SectorIdentifier string // sector identifier for pairwise sub
 	ExtraClaims      map[string]any
+	// JWE encryption (OIDC Core §10.2). When all three are set the signed
+	// JWS produced by GenerateIDToken is wrapped in a JWE before return.
+	EncryptionJWKSURI string
+	EncryptionAlg     string
+	EncryptionEnc     string
 }
 
 func (s *Service) GenerateIDToken(claims IDTokenClaims) (string, error) {
@@ -255,7 +260,16 @@ func (s *Service) GenerateIDToken(claims IDTokenClaims) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, jwtClaims)
 	token.Header["kid"] = key.ID.String()
 
-	return token.SignedString(privKey)
+	signed, err := token.SignedString(privKey)
+	if err != nil {
+		return "", err
+	}
+
+	// Optional JWE wrapping (OIDC Core §10.2: nested JWS-in-JWE).
+	if claims.EncryptionAlg != "" {
+		return s.EncryptForClient([]byte(signed), claims.EncryptionJWKSURI, claims.EncryptionAlg, claims.EncryptionEnc)
+	}
+	return signed, nil
 }
 
 // reservedIDTokenClaims is the set of claim names a policy may not override
