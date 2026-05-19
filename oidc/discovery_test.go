@@ -129,6 +129,23 @@ func TestBothDiscoveries_AdvertiseRequestURIParameter(t *testing.T) {
 	}
 }
 
+func TestOIDCDiscovery_AdvertisesJWEEncryption(t *testing.T) {
+	r, _ := newDiscoveryRouter("https://auth.example.com")
+	body := getDiscoveryJSON(t, r, "/.well-known/openid-configuration")
+
+	for _, k := range []string{
+		"id_token_encryption_alg_values_supported",
+		"id_token_encryption_enc_values_supported",
+		"userinfo_encryption_alg_values_supported",
+		"userinfo_encryption_enc_values_supported",
+	} {
+		v, ok := body[k].([]any)
+		if !ok || len(v) == 0 {
+			t.Errorf("%s should be a non-empty array, got %v", k, body[k])
+		}
+	}
+}
+
 func TestOAuthDiscovery_EndpointsMatchOIDCDiscovery(t *testing.T) {
 	r, _ := newDiscoveryRouter("https://auth.example.com")
 	oidc := getDiscoveryJSON(t, r, "/.well-known/openid-configuration")

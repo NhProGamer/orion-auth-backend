@@ -570,6 +570,10 @@ type OpenIDConfiguration struct {
 	GrantTypesSupported                        []string `json:"grant_types_supported"`
 	SubjectTypesSupported                      []string `json:"subject_types_supported"`
 	IDTokenSigningAlgValuesSupported           []string `json:"id_token_signing_alg_values_supported"`
+	IDTokenEncryptionAlgValuesSupported        []string `json:"id_token_encryption_alg_values_supported,omitempty"`
+	IDTokenEncryptionEncValuesSupported        []string `json:"id_token_encryption_enc_values_supported,omitempty"`
+	UserinfoEncryptionAlgValuesSupported       []string `json:"userinfo_encryption_alg_values_supported,omitempty"`
+	UserinfoEncryptionEncValuesSupported       []string `json:"userinfo_encryption_enc_values_supported,omitempty"`
 	AccessTokenSigningAlgValuesSupported       []string `json:"access_token_signing_alg_values_supported,omitempty"`
 	ScopesSupported                            []string `json:"scopes_supported"`
 	TokenEndpointAuthMethodsSupported          []string `json:"token_endpoint_auth_methods_supported"`
@@ -606,6 +610,10 @@ func (s *Service) GetDiscovery() OpenIDConfiguration {
 		GrantTypesSupported:               []string{"authorization_code", "client_credentials", "refresh_token", "urn:ietf:params:oauth:grant-type:device_code"},
 		SubjectTypesSupported:             []string{"public", "pairwise"},
 		IDTokenSigningAlgValuesSupported:     []string{"RS256"},
+		IDTokenEncryptionAlgValuesSupported:  SupportedJWEAlgs,
+		IDTokenEncryptionEncValuesSupported:  SupportedJWEEncs,
+		UserinfoEncryptionAlgValuesSupported: SupportedJWEAlgs,
+		UserinfoEncryptionEncValuesSupported: SupportedJWEEncs,
 		AccessTokenSigningAlgValuesSupported: []string{"RS256"},
 		ScopesSupported:                      []string{"openid", "profile", "email", "phone", "address", "roles", "offline_access"},
 		TokenEndpointAuthMethodsSupported: []string{"client_secret_basic", "client_secret_post", "private_key_jwt", "client_secret_jwt", "none"},
