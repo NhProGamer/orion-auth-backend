@@ -1,7 +1,5 @@
 package model
 
-import "time"
-
 type Permission struct {
 	BaseModel
 	Name        string  `gorm:"type:varchar(100);uniqueIndex;not null" json:"name"`
@@ -22,11 +20,11 @@ func (UserRole) TableName() string {
 	return "user_roles"
 }
 
-// RolePermission is the join table model.
+// RolePermission is the join table model. Matches migration 011 — composite
+// primary key only, no metadata columns.
 type RolePermission struct {
-	RoleID       string    `gorm:"primaryKey" json:"role_id"`
-	PermissionID string    `gorm:"primaryKey" json:"permission_id"`
-	CreatedAt    time.Time `json:"-"`
+	RoleID       string `gorm:"primaryKey" json:"role_id"`
+	PermissionID string `gorm:"primaryKey" json:"permission_id"`
 }
 
 func (RolePermission) TableName() string {
