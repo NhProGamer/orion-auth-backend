@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -355,6 +356,140 @@ func (s *Service) ValidateIDToken(tokenString string) (uuid.UUID, error) {
 	}
 
 	return userID, nil
+}
+
+// --- Access Token JWT (RFC 9068) ---
+
+// AccessTokenClaims is the input set for GenerateAccessTokenJWT. UserID is
+// nil for the client_credentials grant. ExtraClaims merges over the standard
+// set but cannot override RFC 9068 reserved names.
+type AccessTokenClaims struct {
+	UserID      *uuid.UUID
+	ClientID    uuid.UUID
+	Scopes      []string
+	Audience    string
+	TTL         time.Duration
+	ExtraClaims map[string]any
+}
+
+// reservedAccessTokenClaims is the set of names a policy may not override
+// via modify.claims for a JWT access token. They are either spec-mandated
+// (RFC 9068 §2.2) or computed by the issuer.
+var reservedAccessTokenClaims = map[string]bool{
+	"iss": true, "sub": true, "aud": true, "exp": true, "iat": true,
+	"jti": true, "client_id": true, "scope": true,
+}
+
+// GenerateAccessTokenJWT produces a signed JWT access token per RFC 9068.
+// It uses the active server signing key (same as ID tokens); the resource's
+// `signing_alg` is consulted by the caller and validated here against the
+// alg families we actually support (currently RS256 only — the server has
+// a single RSA key pair). Returns the compact serialization and the JTI
+// (uuid v7) that callers must persist into AccessToken.JTI and into the
+// revoked_jtis denylist on /revoke.
+func (s *Service) GenerateAccessTokenJWT(claims AccessTokenClaims, signingAlg string) (jwtStr, jti string, err error) {
+	s.mu.RLock()
+	key := s.activeKey
+	privKey := s.privateKey
+	s.mu.RUnlock()
+	if key == nil || privKey == nil {
+		return "", "", errors.New("no active signing key")
+	}
+
+	// We only sign with the server's RS256 key today. Accept the RFC 9068
+	// recommended families in the resource config but fall back to RS256;
+	// callers that need ES256 must rotate the server signing key first.
+	switch signingAlg {
+	case "", "RS256", "RS384", "RS512", "PS256":
+		// OK; we always sign with RS256 because that's the active key alg
+	default:
+		return "", "", errors.New("unsupported access token signing alg for current server key: " + signingAlg)
+	}
+
+	now := time.Now()
+	sub := claims.ClientID.String()
+	if claims.UserID != nil {
+		sub = claims.UserID.String()
+	}
+	jtiUUID, err := uuid.NewV7()
+	if err != nil {
+		return "", "", err
+	}
+	jti = jtiUUID.String()
+
+	mc := jwt.MapClaims{
+		"iss":       s.issuer,
+		"sub":       sub,
+		"aud":       claims.Audience,
+		"exp":       now.Add(claims.TTL).Unix(),
+		"iat":       now.Unix(),
+		"jti":       jti,
+		"client_id": claims.ClientID.String(),
+		"scope":     strings.Join(claims.Scopes, " "),
+	}
+
+	// Roles are emitted only for user-bound tokens with the "roles" scope.
+	// client_credentials tokens never carry roles (no user to attribute
+	// them to). enrichClaimsWithRoles writes "roles" and "groups" both.
+	if claims.UserID != nil {
+		s.enrichClaimsWithRoles(*claims.UserID, claims.Scopes, mc)
+	}
+
+	for k, v := range claims.ExtraClaims {
+		if reservedAccessTokenClaims[k] {
+			continue
+		}
+		mc[k] = v
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, mc)
+	token.Header["typ"] = "at+jwt"
+	token.Header["kid"] = key.ID.String()
+	signed, err := token.SignedString(privKey)
+	if err != nil {
+		return "", "", err
+	}
+	return signed, jti, nil
+}
+
+// ValidateAccessTokenJWT verifies the signature, issuer and expiry of a JWT
+// access token previously issued by this server, returning the claims for
+// downstream interpretation (introspection, revocation). It does NOT check
+// the denylist — callers must do that against revoked_jtis.
+func (s *Service) ValidateAccessTokenJWT(tokenString string) (jwt.MapClaims, error) {
+	s.mu.RLock()
+	keys := s.allKeys
+	s.mu.RUnlock()
+
+	keyFunc := func(token *jwt.Token) (any, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+			return nil, errors.New("unexpected signing method")
+		}
+		kid, _ := token.Header["kid"].(string)
+		if kid == "" {
+			return nil, errors.New("missing kid")
+		}
+		for _, k := range keys {
+			if k.ID.String() == kid {
+				return appCrypto.ParseRSAPublicKey(k.PublicKeyPEM)
+			}
+		}
+		return nil, errors.New("unknown signing key")
+	}
+
+	parsed, err := jwt.Parse(tokenString, keyFunc,
+		jwt.WithIssuer(s.issuer),
+		jwt.WithValidMethods([]string{"RS256"}),
+		jwt.WithExpirationRequired(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	claims, ok := parsed.Claims.(jwt.MapClaims)
+	if !ok || !parsed.Valid {
+		return nil, errors.New("invalid token claims")
+	}
+	return claims, nil
 }
 
 // ComputeATHash computes the at_hash claim for an access token.
