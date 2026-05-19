@@ -428,6 +428,7 @@ type OpenIDConfiguration struct {
 	ResponseModesSupported                     []string `json:"response_modes_supported"`
 	RequestParameterSupported                  bool     `json:"request_parameter_supported"`
 	RequestURIParameterSupported               bool     `json:"request_uri_parameter_supported"`
+	RequestObjectSigningAlgValuesSupported     []string `json:"request_object_signing_alg_values_supported,omitempty"`
 	ClaimsParameterSupported                   bool     `json:"claims_parameter_supported"`
 	BackchannelLogoutSupported                 bool     `json:"backchannel_logout_supported"`
 	BackchannelLogoutSessionSupported          bool     `json:"backchannel_logout_session_supported"`
@@ -470,7 +471,8 @@ func (s *Service) GetDiscovery() OpenIDConfiguration {
 		CodeChallengeMethodsSupported:              []string{"S256"},
 		ResponseModesSupported:                     []string{"query", "fragment", "form_post"},
 		RequestParameterSupported:                  true,
-		RequestURIParameterSupported:               false,
+		RequestURIParameterSupported:               true,
+		RequestObjectSigningAlgValuesSupported:     []string{"RS256", "RS384", "RS512", "PS256", "ES256", "ES384"},
 		ClaimsParameterSupported:                   true,
 		BackchannelLogoutSupported:                 true,
 		BackchannelLogoutSessionSupported:          true,
@@ -507,6 +509,7 @@ type OAuthAuthorizationServerMetadata struct {
 	ResponseModesSupported                     []string `json:"response_modes_supported"`
 	RequestParameterSupported                  bool     `json:"request_parameter_supported"`
 	RequestURIParameterSupported               bool     `json:"request_uri_parameter_supported"`
+	RequestObjectSigningAlgValuesSupported     []string `json:"request_object_signing_alg_values_supported,omitempty"`
 	AuthorizationResponseIssParameterSupported bool     `json:"authorization_response_iss_parameter_supported"`
 	PushedAuthorizationRequestEndpoint         string   `json:"pushed_authorization_request_endpoint,omitempty"`
 	RegistrationEndpoint                       string   `json:"registration_endpoint,omitempty"`
@@ -534,7 +537,8 @@ func (s *Service) GetOAuthAuthorizationServerMetadata() OAuthAuthorizationServer
 		CodeChallengeMethodsSupported:              []string{"S256"},
 		ResponseModesSupported:                     []string{"query", "fragment", "form_post"},
 		RequestParameterSupported:                  true,
-		RequestURIParameterSupported:               false,
+		RequestURIParameterSupported:               true,
+		RequestObjectSigningAlgValuesSupported:     []string{"RS256", "RS384", "RS512", "PS256", "ES256", "ES384"},
 		AuthorizationResponseIssParameterSupported: true,
 		PushedAuthorizationRequestEndpoint:         s.issuer + "/par",
 		RegistrationEndpoint:                       s.issuer + "/register",

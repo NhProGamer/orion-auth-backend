@@ -115,6 +115,20 @@ func TestBothDiscoveries_AdvertiseClientSecretJWT(t *testing.T) {
 	}
 }
 
+func TestBothDiscoveries_AdvertiseRequestURIParameter(t *testing.T) {
+	r, _ := newDiscoveryRouter("https://auth.example.com")
+	for _, path := range []string{"/.well-known/openid-configuration", "/.well-known/oauth-authorization-server"} {
+		body := getDiscoveryJSON(t, r, path)
+		if v, _ := body["request_uri_parameter_supported"].(bool); !v {
+			t.Errorf("%s: request_uri_parameter_supported should be true", path)
+		}
+		algs, ok := body["request_object_signing_alg_values_supported"].([]any)
+		if !ok || len(algs) == 0 {
+			t.Errorf("%s: missing request_object_signing_alg_values_supported", path)
+		}
+	}
+}
+
 func TestOAuthDiscovery_EndpointsMatchOIDCDiscovery(t *testing.T) {
 	r, _ := newDiscoveryRouter("https://auth.example.com")
 	oidc := getDiscoveryJSON(t, r, "/.well-known/openid-configuration")
