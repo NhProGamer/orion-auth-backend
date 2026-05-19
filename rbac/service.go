@@ -74,6 +74,7 @@ func (s *Service) UpdateRole(id uuid.UUID, input UpdateRoleInput) (*model.Role, 
 		role.Description = input.Description
 	}
 	if err := s.repo.UpdateRole(role); err != nil {
+		slog.Error("failed to update role", "role_id", id, "error", err)
 		return nil, pkg.ErrInternal("failed to update role")
 	}
 	return role, nil
@@ -105,6 +106,7 @@ func (s *Service) SetRolePermissions(roleID uuid.UUID, permIDs []uuid.UUID) erro
 		return err
 	}
 	if err := s.repo.SetRolePermissions(roleID, permIDs); err != nil {
+		slog.Error("failed to set role permissions", "role_id", roleID, "error", err)
 		return pkg.ErrInternal("failed to set permissions")
 	}
 	slog.Info("role permissions updated", "role_id", roleID)

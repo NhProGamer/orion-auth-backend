@@ -48,7 +48,11 @@ func (r *Repository) ListRoles() ([]model.Role, error) {
 }
 
 func (r *Repository) UpdateRole(role *model.Role) error {
-	return r.db.Save(role).Error
+	// Omit Permissions so GORM doesn't try to round-trip the many2many
+	// association (which would re-insert/replace rows in role_permissions
+	// and can fail on seeded data with explicit IDs). Use SetRolePermissions
+	// to mutate the join table.
+	return r.db.Omit("Permissions").Save(role).Error
 }
 
 func (r *Repository) DeleteRole(id uuid.UUID) error {
