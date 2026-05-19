@@ -41,6 +41,17 @@ type CreateInput struct {
 	IDTokenTTL      *int     `json:"id_token_ttl"`
 	RequestURIs     []string `json:"request_uris"`
 	JWKSUri         *string  `json:"jwks_uri,omitempty"`
+	// Logout (OIDC RP-Initiated / Front-Channel / Back-Channel Logout 1.0)
+	PostLogoutRedirectURIs              []string `json:"post_logout_redirect_uris"`
+	BackchannelLogoutURI                *string  `json:"backchannel_logout_uri,omitempty"`
+	BackchannelLogoutSessionRequired    *bool    `json:"backchannel_logout_session_required,omitempty"`
+	FrontchannelLogoutURI               *string  `json:"frontchannel_logout_uri,omitempty"`
+	FrontchannelLogoutSessionRequired   *bool    `json:"frontchannel_logout_session_required,omitempty"`
+	// OIDC subject + signed UserInfo
+	SubjectType                  *string `json:"subject_type,omitempty"`
+	SectorIdentifierURI          *string `json:"sector_identifier_uri,omitempty"`
+	UserinfoSignedResponseAlg    *string `json:"userinfo_signed_response_alg,omitempty"`
+	// JWE encryption (OIDC Core §10.2 / §5.3.2)
 	IDTokenEncryptedResponseAlg  *string `json:"id_token_encrypted_response_alg,omitempty"`
 	IDTokenEncryptedResponseEnc  *string `json:"id_token_encrypted_response_enc,omitempty"`
 	UserinfoEncryptedResponseAlg *string `json:"userinfo_encrypted_response_alg,omitempty"`
@@ -63,6 +74,14 @@ type UpdateInput struct {
 	Active          *bool    `json:"active"`
 	RequestURIs     []string `json:"request_uris"`
 	JWKSUri         *string  `json:"jwks_uri,omitempty"`
+	PostLogoutRedirectURIs              []string `json:"post_logout_redirect_uris"`
+	BackchannelLogoutURI                *string  `json:"backchannel_logout_uri,omitempty"`
+	BackchannelLogoutSessionRequired    *bool    `json:"backchannel_logout_session_required,omitempty"`
+	FrontchannelLogoutURI               *string  `json:"frontchannel_logout_uri,omitempty"`
+	FrontchannelLogoutSessionRequired   *bool    `json:"frontchannel_logout_session_required,omitempty"`
+	SubjectType                  *string `json:"subject_type,omitempty"`
+	SectorIdentifierURI          *string `json:"sector_identifier_uri,omitempty"`
+	UserinfoSignedResponseAlg    *string `json:"userinfo_signed_response_alg,omitempty"`
 	IDTokenEncryptedResponseAlg  *string `json:"id_token_encrypted_response_alg,omitempty"`
 	IDTokenEncryptedResponseEnc  *string `json:"id_token_encrypted_response_enc,omitempty"`
 	UserinfoEncryptedResponseAlg *string `json:"userinfo_encrypted_response_alg,omitempty"`
@@ -135,6 +154,32 @@ func (s *Service) Create(input CreateInput) (*CreateResponse, error) {
 	}
 	if input.UserinfoEncryptedResponseEnc != nil {
 		client.UserinfoEncryptedResponseEnc = input.UserinfoEncryptedResponseEnc
+	}
+	// Logout
+	if input.PostLogoutRedirectURIs != nil {
+		client.PostLogoutRedirectURIs = pq.StringArray(input.PostLogoutRedirectURIs)
+	}
+	if input.BackchannelLogoutURI != nil {
+		client.BackchannelLogoutURI = input.BackchannelLogoutURI
+	}
+	if input.BackchannelLogoutSessionRequired != nil {
+		client.BackchannelLogoutSessionReq = *input.BackchannelLogoutSessionRequired
+	}
+	if input.FrontchannelLogoutURI != nil {
+		client.FrontchannelLogoutURI = input.FrontchannelLogoutURI
+	}
+	if input.FrontchannelLogoutSessionRequired != nil {
+		client.FrontchannelLogoutSessionReq = *input.FrontchannelLogoutSessionRequired
+	}
+	// OIDC subject + signed UserInfo
+	if input.SubjectType != nil {
+		client.SubjectType = *input.SubjectType
+	}
+	if input.SectorIdentifierURI != nil {
+		client.SectorIdentifierURI = input.SectorIdentifierURI
+	}
+	if input.UserinfoSignedResponseAlg != nil {
+		client.UserinfoSignedResponseAlg = input.UserinfoSignedResponseAlg
 	}
 
 	var rawSecret string
@@ -262,6 +307,30 @@ func (s *Service) Update(id uuid.UUID, input UpdateInput) (*model.OAuthClient, e
 	}
 	if input.UserinfoEncryptedResponseEnc != nil {
 		client.UserinfoEncryptedResponseEnc = input.UserinfoEncryptedResponseEnc
+	}
+	if input.PostLogoutRedirectURIs != nil {
+		client.PostLogoutRedirectURIs = pq.StringArray(input.PostLogoutRedirectURIs)
+	}
+	if input.BackchannelLogoutURI != nil {
+		client.BackchannelLogoutURI = input.BackchannelLogoutURI
+	}
+	if input.BackchannelLogoutSessionRequired != nil {
+		client.BackchannelLogoutSessionReq = *input.BackchannelLogoutSessionRequired
+	}
+	if input.FrontchannelLogoutURI != nil {
+		client.FrontchannelLogoutURI = input.FrontchannelLogoutURI
+	}
+	if input.FrontchannelLogoutSessionRequired != nil {
+		client.FrontchannelLogoutSessionReq = *input.FrontchannelLogoutSessionRequired
+	}
+	if input.SubjectType != nil {
+		client.SubjectType = *input.SubjectType
+	}
+	if input.SectorIdentifierURI != nil {
+		client.SectorIdentifierURI = input.SectorIdentifierURI
+	}
+	if input.UserinfoSignedResponseAlg != nil {
+		client.UserinfoSignedResponseAlg = input.UserinfoSignedResponseAlg
 	}
 
 	if err := s.repo.Update(client); err != nil {
