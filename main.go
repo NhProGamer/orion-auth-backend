@@ -363,6 +363,7 @@ func setupRouter(a setupRouterArgs) *gin.Engine {
 	oauthRL := middleware.NewRateLimiter(10, 3)
 	jwksCache := middleware.NewJWKSCache()
 	clientAuthMiddleware := middleware.ClientAuth(db, hasher, cfg.Issuer+"/token", jwksCache, a.hmacEncKey, newPolicyDeciderAdapter(policyService))
+	a.oauthHandler.SetJWKSCache(jwksCache)
 	a.oauthHandler.RegisterRoutes(router, clientAuthMiddleware, oauthRL.Middleware(), cfg.Issuer)
 
 	// Dynamic Client Registration (RFC 7591)
