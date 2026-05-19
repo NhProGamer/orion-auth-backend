@@ -12,12 +12,17 @@ import (
 )
 
 type Service struct {
-	repo   RepositoryInterface
-	hasher *crypto.Argon2Hasher
+	repo              RepositoryInterface
+	hasher            *crypto.Argon2Hasher
+	hmacEncryptionKey []byte
 }
 
-func NewService(repo RepositoryInterface, hasher *crypto.Argon2Hasher) *Service {
-	return &Service{repo: repo, hasher: hasher}
+// NewService constructs the client service. hmacEncryptionKey is the
+// server-side AES-256 key used to seal per-client HMAC secrets for
+// client_secret_jwt. When nil, client_secret_jwt provisioning fails with a
+// clear error and rotation skips HMAC regeneration.
+func NewService(repo RepositoryInterface, hasher *crypto.Argon2Hasher, hmacEncryptionKey []byte) *Service {
+	return &Service{repo: repo, hasher: hasher, hmacEncryptionKey: hmacEncryptionKey}
 }
 
 type CreateInput struct {
@@ -55,6 +60,10 @@ type UpdateInput struct {
 type CreateResponse struct {
 	Client       *model.OAuthClient `json:"client"`
 	ClientSecret string             `json:"client_secret,omitempty"`
+	// HMACSecret is the base64 raw URL-encoded shared secret returned ONCE
+	// when the client is provisioned with client_secret_jwt auth. The server
+	// only stores it sealed (AES-GCM); it can never be retrieved again.
+	HMACSecret string `json:"client_hmac_secret,omitempty"`
 }
 
 func (s *Service) Create(input CreateInput) (*CreateResponse, error) {
@@ -113,13 +122,41 @@ func (s *Service) Create(input CreateInput) (*CreateResponse, error) {
 		client.SecretHash = &hash
 	}
 
+	var rawHMACSecret string
+	if authMethod == "client_secret_jwt" {
+		hmacB64, sealed, err := s.generateAndSealHMACSecret()
+		if err != nil {
+			return nil, err
+		}
+		client.SecretHMACKey = sealed
+		rawHMACSecret = hmacB64
+	}
+
 	if err := s.repo.Create(client); err != nil {
 		slog.Error("failed to create client", "error", err)
 		return nil, pkg.ErrInternal("failed to create client")
 	}
 
 	slog.Info("oauth client created", "client_id", client.ID, "name", client.Name)
-	return &CreateResponse{Client: client, ClientSecret: rawSecret}, nil
+	return &CreateResponse{Client: client, ClientSecret: rawSecret, HMACSecret: rawHMACSecret}, nil
+}
+
+// generateAndSealHMACSecret returns the URL-safe base64 secret to hand back
+// to the operator and the AES-GCM-sealed bytes to persist on the row. Errors
+// when the server has no encryption key configured.
+func (s *Service) generateAndSealHMACSecret() (b64 string, sealed []byte, err error) {
+	if len(s.hmacEncryptionKey) == 0 {
+		return "", nil, pkg.ErrBadRequest("client_secret_jwt is not enabled on this server (auth.hmac_secret_encryption_key is unset)")
+	}
+	raw, encoded, err := crypto.GenerateHMACSecret()
+	if err != nil {
+		return "", nil, pkg.ErrInternal("failed to generate hmac secret")
+	}
+	cipher, err := crypto.EncryptHMACSecret(raw, s.hmacEncryptionKey)
+	if err != nil {
+		return "", nil, pkg.ErrInternal("failed to seal hmac secret")
+	}
+	return encoded, cipher, nil
 }
 
 func (s *Service) GetByID(id uuid.UUID) (*model.OAuthClient, error) {
@@ -227,4 +264,28 @@ func (s *Service) RotateSecret(id uuid.UUID) (string, error) {
 
 	slog.Info("client secret rotated", "client_id", id)
 	return secret, nil
+}
+
+// RotateHMACSecret regenerates the per-client HMAC key used for
+// client_secret_jwt assertions. The previous key is dropped (any in-flight
+// JWT assertion signed with it will fail). Returns the new secret in
+// base64 URL-safe form; the caller must hand it to the operator exactly once.
+func (s *Service) RotateHMACSecret(id uuid.UUID) (string, error) {
+	client, err := s.GetByID(id)
+	if err != nil {
+		return "", err
+	}
+	if client.TokenAuthMethod != "client_secret_jwt" {
+		return "", pkg.ErrBadRequest("client is not configured for client_secret_jwt")
+	}
+	b64, sealed, err := s.generateAndSealHMACSecret()
+	if err != nil {
+		return "", err
+	}
+	client.SecretHMACKey = sealed
+	if err := s.repo.Update(client); err != nil {
+		return "", pkg.ErrInternal("failed to update client hmac secret")
+	}
+	slog.Info("client hmac secret rotated", "client_id", id)
+	return b64, nil
 }
