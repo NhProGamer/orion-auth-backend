@@ -385,24 +385,36 @@ func (s *Service) InitAuthorize(client *model.OAuthClient, params InitAuthorizeP
 		return nil, pkg.ErrAccountSelectionRequired("account selection is not supported")
 	}
 
-	// Validate audience and scopes
+	// Validate audience and scopes.
+	//
+	// OIDC Core 1.0 §5.4 requires standard scopes (openid, profile, email, …)
+	// to govern UserInfo claims independently of any audience restriction.
+	// When `audience` is set we therefore union:
+	//   1. client-level scopes (client.Scopes whitelist) — covers OIDC
+	//      identity scopes and any other scope the client may request
+	//   2. API resource permissions for this client (client_resource_permissions)
+	// RFC 8707 §2.1 allows the server to narrow scopes per resource, but the
+	// OIDC contract on `openid` must still be honored.
 	var validatedAudience *string
 	var resourceInfo *ResourceInfo
 	var scopes []string
+
+	requestedScopes := parseSpaceDelimited(params.Scope)
+	clientScopes := client.ValidateScopes(requestedScopes)
 
 	if params.Audience != "" && s.resourceValidator != nil {
 		resource, err := s.resourceValidator.ValidateAudience(params.Audience)
 		if err != nil {
 			return nil, err
 		}
-		resourceScopes, err := s.resourceValidator.ValidateClientScopes(client.ID, resource.ID, parseSpaceDelimited(params.Scope))
+		resourceScopes, err := s.resourceValidator.ValidateClientScopes(client.ID, resource.ID, requestedScopes)
 		if err != nil {
 			return nil, err
 		}
 		if len(resourceScopes) == 0 {
 			return nil, pkg.ErrInvalidScope("client has no permissions for this resource")
 		}
-		scopes = resourceScopes
+		scopes = unionScopes(clientScopes, resourceScopes)
 		validatedAudience = &params.Audience
 
 		// Build resource info for consent screen
@@ -416,8 +428,7 @@ func (s *Service) InitAuthorize(client *model.OAuthClient, params InitAuthorizeP
 			Permissions: perms,
 		}
 	} else {
-		// Standard scope validation against client
-		scopes = client.ValidateScopes(parseSpaceDelimited(params.Scope))
+		scopes = clientScopes
 		if len(scopes) == 0 {
 			return nil, pkg.ErrInvalidScope("no valid scopes requested")
 		}
@@ -1559,6 +1570,28 @@ func filterScopes(requested, allowed []string) []string {
 	for _, r := range requested {
 		if set[r] {
 			result = append(result, r)
+		}
+	}
+	return result
+}
+
+// unionScopes merges two scope slices, preserving the order of the first and
+// appending unique entries from the second. Used to keep OIDC identity scopes
+// (granted to the client) alongside API resource permissions when an audience
+// is requested.
+func unionScopes(a, b []string) []string {
+	seen := make(map[string]bool, len(a)+len(b))
+	result := make([]string, 0, len(a)+len(b))
+	for _, s := range a {
+		if !seen[s] {
+			seen[s] = true
+			result = append(result, s)
+		}
+	}
+	for _, s := range b {
+		if !seen[s] {
+			seen[s] = true
+			result = append(result, s)
 		}
 	}
 	return result
