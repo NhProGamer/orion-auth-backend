@@ -1413,13 +1413,23 @@ func (s *Service) issueTokensWithOpts(tx RepositoryInterface, client *model.OAut
 		}
 	}
 
-	// Validate user scopes against role-resource permissions (if audience is set)
-	if opts.resourceID != nil && userID != nil && s.resourceValidator != nil {
-		userScopes, err := s.resourceValidator.ValidateUserScopes(*userID, *opts.resourceID, scopes)
-		if err != nil {
-			slog.Warn("user scope validation failed", "error", err)
-		} else if len(userScopes) > 0 {
-			scopes = pq.StringArray(userScopes)
+	// Narrow only the resource-permission scopes by what the user is allowed
+	// via RBAC. OIDC standard scopes (openid, profile, email, roles, …) and
+	// any non-resource client scopes are preserved verbatim — they govern
+	// /userinfo and the ID token, not the resource server.
+	//
+	// Compliance: OIDC Core §5.3/§5.4 require granted standard scopes to
+	// govern /userinfo claims regardless of audience. RFC 8707 §2 only
+	// authorises narrowing scopes specific to the targeted resource.
+	if opts.resourceID != nil && userID != nil && s.resourceValidator != nil && resolvedResource != nil {
+		resourceScopes, otherScopes := splitResourceScopes(scopes, resolvedResource.Permissions)
+		if len(resourceScopes) > 0 {
+			allowed, err := s.resourceValidator.ValidateUserScopes(*userID, *opts.resourceID, resourceScopes)
+			if err != nil {
+				slog.Warn("user scope validation failed", "error", err)
+			} else {
+				scopes = pq.StringArray(unionScopes(otherScopes, allowed))
+			}
 		}
 	}
 
@@ -1707,6 +1717,30 @@ func filterScopes(requested, allowed []string) []string {
 // appending unique entries from the second. Used to keep OIDC identity scopes
 // (granted to the client) alongside API resource permissions when an audience
 // is requested.
+// splitResourceScopes partitions the requested scopes against the set of
+// permissions declared by the targeted API resource. The first return value
+// is the subset that maps to resource permissions (eligible for RBAC
+// narrowing per RFC 8707 §2). The second is everything else: OIDC standard
+// scopes (openid, profile, email, roles, …) and any client scope not tied
+// to this resource. The order is preserved within each group.
+func splitResourceScopes(scopes []string, perms []model.ResourcePermission) (resourceScopes, otherScopes []string) {
+	if len(perms) == 0 {
+		return nil, append([]string(nil), scopes...)
+	}
+	resourcePermNames := make(map[string]bool, len(perms))
+	for _, p := range perms {
+		resourcePermNames[p.Name] = true
+	}
+	for _, s := range scopes {
+		if resourcePermNames[s] {
+			resourceScopes = append(resourceScopes, s)
+		} else {
+			otherScopes = append(otherScopes, s)
+		}
+	}
+	return resourceScopes, otherScopes
+}
+
 func unionScopes(a, b []string) []string {
 	seen := make(map[string]bool, len(a)+len(b))
 	result := make([]string, 0, len(a)+len(b))
