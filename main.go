@@ -163,6 +163,7 @@ func main() {
 
 	// Connect cross-service dependencies
 	oauthService.SetIDTokenGenerator(oidc.NewIDTokenAdapter(oidcService))
+	oauthService.SetAccessTokenJWTSigner(oidc.NewAccessTokenJWTSignerAdapter(oidcService))
 	oauthService.SetMFAValidator(mfaService)
 	oauthService.SetPolicyEvaluator(policy.NewOAuthAdapter(policyService))
 	oauthService.SetRoleProvider(newRoleProviderAdapter(rbacService))

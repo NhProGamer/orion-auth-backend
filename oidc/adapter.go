@@ -32,3 +32,35 @@ func (a *IDTokenAdapter) GenerateIDToken(claims oauth.IDTokenClaims) (string, er
 		ExtraClaims:      claims.ExtraClaims,
 	})
 }
+
+// AccessTokenJWTSignerAdapter satisfies oauth.AccessTokenJWTSigner.
+type AccessTokenJWTSignerAdapter struct {
+	service *Service
+}
+
+func NewAccessTokenJWTSignerAdapter(service *Service) *AccessTokenJWTSignerAdapter {
+	return &AccessTokenJWTSignerAdapter{service: service}
+}
+
+func (a *AccessTokenJWTSignerAdapter) GenerateAccessTokenJWT(claims oauth.AccessTokenJWTClaims, signingAlg string) (string, string, error) {
+	return a.service.GenerateAccessTokenJWT(AccessTokenClaims{
+		UserID:      claims.UserID,
+		ClientID:    claims.ClientID,
+		Scopes:      claims.Scopes,
+		Audience:    claims.Audience,
+		TTL:         claims.TTL,
+		ExtraClaims: claims.ExtraClaims,
+	}, signingAlg)
+}
+
+func (a *AccessTokenJWTSignerAdapter) ValidateAccessTokenJWT(tokenString string) (map[string]any, error) {
+	claims, err := a.service.ValidateAccessTokenJWT(tokenString)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]any, len(claims))
+	for k, v := range claims {
+		out[k] = v
+	}
+	return out, nil
+}
