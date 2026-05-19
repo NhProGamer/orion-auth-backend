@@ -18,6 +18,7 @@ type OAuthClient struct {
 	IsFirstParty                 bool           `gorm:"default:false" json:"is_first_party"`
 	RequirePKCE                  bool           `gorm:"default:true" json:"require_pkce"`
 	JWKSUri                      *string        `gorm:"type:varchar(512)" json:"jwks_uri,omitempty"`
+	RequestURIs                  pq.StringArray `gorm:"type:text[];default:'{}'" json:"request_uris"`
 	AccessTokenTTL               int            `gorm:"default:3600" json:"access_token_ttl"`
 	RefreshTokenTTL              int            `gorm:"default:86400" json:"refresh_token_ttl"`
 	IDTokenTTL                   int            `gorm:"default:3600" json:"id_token_ttl"`
@@ -67,6 +68,18 @@ func (c *OAuthClient) HasRedirectURI(uri string) bool {
 
 func (c *OAuthClient) HasPostLogoutRedirectURI(uri string) bool {
 	for _, u := range c.PostLogoutRedirectURIs {
+		if u == uri {
+			return true
+		}
+	}
+	return false
+}
+
+// HasRequestURI reports whether the given request_uri matches one of the
+// client's pre-registered request_uris. Used by /authorize before fetching
+// a remote Request Object per RFC 9101 §5.2.2.
+func (c *OAuthClient) HasRequestURI(uri string) bool {
+	for _, u := range c.RequestURIs {
 		if u == uri {
 			return true
 		}
