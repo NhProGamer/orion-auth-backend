@@ -30,9 +30,14 @@ type PolicyEvaluator interface {
 // client_secret_post, client_assertion (private_key_jwt / client_secret_jwt),
 // or no auth (public clients).
 //
+// hmacEncryptionKey is the AES-256 key used to seal per-client HMAC secrets;
+// when nil or empty, client_secret_jwt authentication is rejected with a
+// clear error (the server has not been configured to decrypt the stored
+// HMAC keys).
+//
 // If evaluator is non-nil, client_auth policies are evaluated after a
 // successful credential check. A deny aborts the request with invalid_client.
-func ClientAuth(db *gorm.DB, hasher *crypto.Argon2Hasher, tokenEndpoint string, jwksCache *JWKSCache, evaluator PolicyEvaluator) gin.HandlerFunc {
+func ClientAuth(db *gorm.DB, hasher *crypto.Argon2Hasher, tokenEndpoint string, jwksCache *JWKSCache, hmacEncryptionKey []byte, evaluator PolicyEvaluator) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var clientID uuid.UUID
 		var clientSecret string
@@ -83,21 +88,53 @@ func ClientAuth(db *gorm.DB, hasher *crypto.Argon2Hasher, tokenEndpoint string, 
 			}
 		}
 
-		// 3. Try client_assertion (private_key_jwt)
+		// 3. Try client_assertion (private_key_jwt OR client_secret_jwt)
 		if clientID == uuid.Nil {
 			assertionType := c.PostForm("client_assertion_type")
 			assertion := c.PostForm("client_assertion")
 			if assertionType == "urn:ietf:params:oauth:client-assertion-type:jwt-bearer" && assertion != "" {
-				// Pre-parse to get sub (client_id) for JWKS URI lookup
-				subID, jwksURI, err := resolveAssertionClient(db, assertion)
+				alg, subID, hmacSealed, jwksURI, err := resolveAssertionClient(db, assertion)
 				if err != nil {
 					pkg.HandleError(c, pkg.ErrInvalidClient(err.Error()))
 					c.Abort()
 					return
 				}
-				cid, err := ValidateClientAssertionJWT(assertion, tokenEndpoint, jwksURI, jwksCache)
-				if err != nil {
-					pkg.HandleError(c, pkg.ErrInvalidClient(err.Error()))
+				var (
+					cid    uuid.UUID
+					vErr   error
+					method string
+				)
+				switch alg {
+				case "HS256":
+					if len(hmacEncryptionKey) == 0 {
+						pkg.HandleError(c, pkg.ErrInvalidClient("client_secret_jwt is not enabled on this server"))
+						c.Abort()
+						return
+					}
+					if len(hmacSealed) == 0 {
+						pkg.HandleError(c, pkg.ErrInvalidClient("client has no hmac key configured for client_secret_jwt"))
+						c.Abort()
+						return
+					}
+					hmacKey, err := crypto.DecryptHMACSecret(hmacSealed, hmacEncryptionKey)
+					if err != nil {
+						pkg.HandleError(c, pkg.ErrInvalidClient("failed to recover client hmac key"))
+						c.Abort()
+						return
+					}
+					cid, vErr = ValidateClientSecretJWT(assertion, tokenEndpoint, hmacKey)
+					method = "client_secret_jwt"
+				default:
+					if jwksURI == "" {
+						pkg.HandleError(c, pkg.ErrInvalidClient("client has no jwks_uri configured for private_key_jwt"))
+						c.Abort()
+						return
+					}
+					cid, vErr = ValidateClientAssertionJWT(assertion, tokenEndpoint, jwksURI, jwksCache)
+					method = "private_key_jwt"
+				}
+				if vErr != nil {
+					pkg.HandleError(c, pkg.ErrInvalidClient(vErr.Error()))
 					c.Abort()
 					return
 				}
@@ -108,6 +145,7 @@ func ClientAuth(db *gorm.DB, hasher *crypto.Argon2Hasher, tokenEndpoint string, 
 				}
 				clientID = cid
 				jwtAuthenticated = true
+				authMethod = method
 			}
 		}
 
@@ -184,36 +222,52 @@ func ClientAuth(db *gorm.DB, hasher *crypto.Argon2Hasher, tokenEndpoint string, 
 	}
 }
 
-// resolveAssertionClient extracts the client_id from a JWT assertion's sub claim
-// and looks up the client's JWKS URI for signature verification.
-func resolveAssertionClient(db *gorm.DB, assertion string) (uuid.UUID, string, error) {
+// resolveAssertionClient extracts the JWT header alg, the sub claim
+// (client_id), and pulls the client's stored credentials needed to verify
+// either flavour of client_assertion:
+//   - alg HS256 → returns sealed HMAC key (caller decrypts and verifies)
+//   - alg RS*/ES*/PS* → returns the client's JWKS URI for remote key fetch
+func resolveAssertionClient(db *gorm.DB, assertion string) (alg string, clientID uuid.UUID, hmacSealed []byte, jwksURI string, err error) {
 	parts := strings.SplitN(assertion, ".", 3)
 	if len(parts) != 3 {
-		return uuid.Nil, "", errors.New("malformed JWT")
+		return "", uuid.Nil, nil, "", errors.New("malformed JWT")
 	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return uuid.Nil, "", errors.New("malformed JWT payload")
+	headerBytes, herr := base64.RawURLEncoding.DecodeString(parts[0])
+	if herr != nil {
+		return "", uuid.Nil, nil, "", errors.New("malformed JWT header")
+	}
+	var header struct {
+		Alg string `json:"alg"`
+	}
+	if jerr := json.Unmarshal(headerBytes, &header); jerr != nil {
+		return "", uuid.Nil, nil, "", errors.New("invalid JWT header")
+	}
+
+	payload, perr := base64.RawURLEncoding.DecodeString(parts[1])
+	if perr != nil {
+		return "", uuid.Nil, nil, "", errors.New("malformed JWT payload")
 	}
 	var claims struct {
 		Sub string `json:"sub"`
 	}
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return uuid.Nil, "", errors.New("invalid JWT claims")
+	if jerr := json.Unmarshal(payload, &claims); jerr != nil {
+		return "", uuid.Nil, nil, "", errors.New("invalid JWT claims")
 	}
-	clientID, err := uuid.Parse(claims.Sub)
-	if err != nil {
-		return uuid.Nil, "", errors.New("invalid client_id in sub claim")
+	cid, perr := uuid.Parse(claims.Sub)
+	if perr != nil {
+		return "", uuid.Nil, nil, "", errors.New("invalid client_id in sub claim")
 	}
 
 	var client model.OAuthClient
-	if err := db.Where("id = ? AND active = TRUE", clientID).First(&client).Error; err != nil {
-		return uuid.Nil, "", errors.New("unknown client")
+	if dberr := db.Where("id = ? AND active = TRUE", cid).First(&client).Error; dberr != nil {
+		return "", uuid.Nil, nil, "", errors.New("unknown client")
 	}
-	if client.JWKSUri == nil || *client.JWKSUri == "" {
-		return uuid.Nil, "", errors.New("client has no jwks_uri configured for private_key_jwt")
+
+	jwksURIStr := ""
+	if client.JWKSUri != nil {
+		jwksURIStr = *client.JWKSUri
 	}
-	return clientID, *client.JWKSUri, nil
+	return header.Alg, cid, client.SecretHMACKey, jwksURIStr, nil
 }
 
 // GetOAuthClient extracts the authenticated OAuth2 client from context.

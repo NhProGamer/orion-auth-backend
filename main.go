@@ -359,7 +359,8 @@ func setupRouter(a setupRouterArgs) *gin.Engine {
 	// OAuth2 endpoints (root level, rate limited)
 	oauthRL := middleware.NewRateLimiter(10, 3)
 	jwksCache := middleware.NewJWKSCache()
-	clientAuthMiddleware := middleware.ClientAuth(db, hasher, cfg.Issuer+"/token", jwksCache, newPolicyDeciderAdapter(policyService))
+	hmacEncKey := loadHMACEncryptionKey(cfg.Auth.HMACSecretEncryptionKey)
+	clientAuthMiddleware := middleware.ClientAuth(db, hasher, cfg.Issuer+"/token", jwksCache, hmacEncKey, newPolicyDeciderAdapter(policyService))
 	a.oauthHandler.RegisterRoutes(router, clientAuthMiddleware, oauthRL.Middleware(), cfg.Issuer)
 
 	// Dynamic Client Registration (RFC 7591)
@@ -498,6 +499,23 @@ func chainMW(mws ...gin.HandlerFunc) gin.HandlerFunc {
 			mw(c)
 		}
 	}
+}
+
+// loadHMACEncryptionKey decodes the base64 AES-256 key used to seal
+// per-client HMAC secrets (client_secret_jwt). Returns nil and logs a warning
+// when the key is unset or invalid, in which case the server still boots but
+// client_secret_jwt assertions are rejected at runtime.
+func loadHMACEncryptionKey(encoded string) []byte {
+	if encoded == "" {
+		slog.Warn("auth.hmac_secret_encryption_key is not set; client_secret_jwt support is disabled")
+		return nil
+	}
+	key, err := crypto.DecodeHMACEncryptionKey(encoded)
+	if err != nil {
+		slog.Error("invalid auth.hmac_secret_encryption_key; client_secret_jwt support is disabled", "error", err)
+		return nil
+	}
+	return key
 }
 
 const (
