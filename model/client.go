@@ -30,6 +30,10 @@ type OAuthClient struct {
 	SubjectType                  string         `gorm:"type:varchar(20);default:'public'" json:"subject_type"`
 	SectorIdentifierURI          *string        `gorm:"type:varchar(512)" json:"sector_identifier_uri,omitempty"`
 	UserinfoSignedResponseAlg    *string        `gorm:"type:varchar(10)" json:"userinfo_signed_response_alg,omitempty"`
+	IDTokenEncryptedResponseAlg  *string        `gorm:"type:varchar(50)" json:"id_token_encrypted_response_alg,omitempty"`
+	IDTokenEncryptedResponseEnc  *string        `gorm:"type:varchar(50)" json:"id_token_encrypted_response_enc,omitempty"`
+	UserinfoEncryptedResponseAlg *string        `gorm:"type:varchar(50)" json:"userinfo_encrypted_response_alg,omitempty"`
+	UserinfoEncryptedResponseEnc *string        `gorm:"type:varchar(50)" json:"userinfo_encrypted_response_enc,omitempty"`
 	SecretHMACKey                []byte         `gorm:"type:bytea" json:"-"`
 	RegistrationAccessTokenHash  *string        `gorm:"type:varchar(64)" json:"-"`
 	Active                       bool           `gorm:"default:true" json:"active"`
