@@ -96,7 +96,8 @@ func main() {
 	userService := user.NewService(userRepo, hasher, cfg.Auth)
 	userService.SetEmailSender(emailSender)
 	sessionService := session.NewService(sessionRepo, cfg.Auth)
-	clientService := client.NewService(clientRepo, hasher)
+	hmacEncKey := loadHMACEncryptionKey(cfg.Auth.HMACSecretEncryptionKey)
+	clientService := client.NewService(clientRepo, hasher, hmacEncKey)
 	oauthService := oauth.NewService(oauthRepo, userService, sessionService, hasher, cfg.Auth)
 	oidcService := oidc.NewService(db, userService, cfg.Issuer, cfg.PairwiseSalt)
 	mfaService := mfa.NewService(mfaRepo, hasher)
@@ -259,6 +260,7 @@ func main() {
 		accountHandler:    accountHandler,
 		m2mHandler:        m2mHandler,
 		dcrHandler:        dcrHandler,
+		hmacEncKey:        hmacEncKey,
 	})
 
 	// Server
@@ -322,6 +324,7 @@ type setupRouterArgs struct {
 	accountHandler  *account.Handler
 	m2mHandler      *m2m.Handler
 	dcrHandler      *client.DCRHandler
+	hmacEncKey      []byte
 }
 
 func setupRouter(a setupRouterArgs) *gin.Engine {
@@ -359,8 +362,7 @@ func setupRouter(a setupRouterArgs) *gin.Engine {
 	// OAuth2 endpoints (root level, rate limited)
 	oauthRL := middleware.NewRateLimiter(10, 3)
 	jwksCache := middleware.NewJWKSCache()
-	hmacEncKey := loadHMACEncryptionKey(cfg.Auth.HMACSecretEncryptionKey)
-	clientAuthMiddleware := middleware.ClientAuth(db, hasher, cfg.Issuer+"/token", jwksCache, hmacEncKey, newPolicyDeciderAdapter(policyService))
+	clientAuthMiddleware := middleware.ClientAuth(db, hasher, cfg.Issuer+"/token", jwksCache, a.hmacEncKey, newPolicyDeciderAdapter(policyService))
 	a.oauthHandler.RegisterRoutes(router, clientAuthMiddleware, oauthRL.Middleware(), cfg.Issuer)
 
 	// Dynamic Client Registration (RFC 7591)

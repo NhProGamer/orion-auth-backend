@@ -28,6 +28,7 @@ func (h *Handler) RegisterRoutes(admin *gin.RouterGroup) {
 	admin.PATCH("/clients/:id", h.Update)
 	admin.DELETE("/clients/:id", h.Delete)
 	admin.POST("/clients/:id/rotate-secret", h.RotateSecret)
+	admin.POST("/clients/:id/rotate-hmac-secret", h.RotateHMACSecret)
 }
 
 // Create godoc
@@ -212,4 +213,37 @@ func (h *Handler) RotateSecret(c *gin.Context) {
 	}
 
 	pkg.OK(c, gin.H{"client_id": id, "client_secret": secret})
+}
+
+// RotateHMACSecret godoc
+// @Summary      Rotate a client's HMAC secret (client_secret_jwt)
+// @Tags         Admin - Clients
+// @Produce      json
+// @Param        id path string true "Client ID"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} map[string]any
+// @Failure      404 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/admin/clients/{id}/rotate-hmac-secret [post]
+func (h *Handler) RotateHMACSecret(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		pkg.HandleError(c, pkg.ErrBadRequest("invalid client ID"))
+		return
+	}
+
+	secret, err := h.service.RotateHMACSecret(id)
+	if err != nil {
+		pkg.HandleError(c, err)
+		return
+	}
+
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionClientSecretRotated, map[string]any{
+			"client_id": id,
+			"kind":      "hmac",
+		})
+	}
+
+	pkg.OK(c, gin.H{"client_id": id, "client_hmac_secret": secret})
 }
