@@ -456,7 +456,7 @@ func (s *Service) GetDiscovery() OpenIDConfiguration {
 		SubjectTypesSupported:             []string{"public", "pairwise"},
 		IDTokenSigningAlgValuesSupported:  []string{"RS256"},
 		ScopesSupported:                   []string{"openid", "profile", "email", "phone", "address", "roles", "offline_access"},
-		TokenEndpointAuthMethodsSupported: []string{"client_secret_basic", "client_secret_post", "private_key_jwt", "none"},
+		TokenEndpointAuthMethodsSupported: []string{"client_secret_basic", "client_secret_post", "private_key_jwt", "client_secret_jwt", "none"},
 		ClaimsSupported: []string{
 			"sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "at_hash",
 			"acr", "amr",
@@ -518,7 +518,7 @@ type OAuthAuthorizationServerMetadata struct {
 // Values mirror GetDiscovery() for fields that overlap, so changes stay in
 // sync as long as both methods are touched together.
 func (s *Service) GetOAuthAuthorizationServerMetadata() OAuthAuthorizationServerMetadata {
-	authMethods := []string{"client_secret_basic", "client_secret_post", "private_key_jwt", "none"}
+	authMethods := []string{"client_secret_basic", "client_secret_post", "private_key_jwt", "client_secret_jwt", "none"}
 	return OAuthAuthorizationServerMetadata{
 		Issuer:                                     s.issuer,
 		AuthorizationEndpoint:                      s.issuer + "/ui/authorize",

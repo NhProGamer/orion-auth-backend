@@ -94,6 +94,27 @@ func TestOAuthDiscovery_OmitsOIDCOnlyFields(t *testing.T) {
 	}
 }
 
+func TestBothDiscoveries_AdvertiseClientSecretJWT(t *testing.T) {
+	r, _ := newDiscoveryRouter("https://auth.example.com")
+	for _, path := range []string{"/.well-known/openid-configuration", "/.well-known/oauth-authorization-server"} {
+		body := getDiscoveryJSON(t, r, path)
+		methods, ok := body["token_endpoint_auth_methods_supported"].([]any)
+		if !ok {
+			t.Fatalf("%s: missing or invalid token_endpoint_auth_methods_supported", path)
+		}
+		found := false
+		for _, m := range methods {
+			if s, _ := m.(string); s == "client_secret_jwt" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("%s: client_secret_jwt not advertised in %v", path, methods)
+		}
+	}
+}
+
 func TestOAuthDiscovery_EndpointsMatchOIDCDiscovery(t *testing.T) {
 	r, _ := newDiscoveryRouter("https://auth.example.com")
 	oidc := getDiscoveryJSON(t, r, "/.well-known/openid-configuration")
