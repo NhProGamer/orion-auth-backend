@@ -25,36 +25,80 @@ func NewDCRHandler(service *Service) *DCRHandler {
 
 // DCRRequest represents the OIDC Dynamic Client Registration request body.
 type DCRRequest struct {
-	ClientName              string   `json:"client_name"`
-	RedirectURIs            []string `json:"redirect_uris"`
-	GrantTypes              []string `json:"grant_types"`
-	ResponseTypes           []string `json:"response_types"`
-	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
-	Scope                   string   `json:"scope"`
-	PostLogoutRedirectURIs  []string `json:"post_logout_redirect_uris"`
-	BackchannelLogoutURI    string   `json:"backchannel_logout_uri"`
-	FrontchannelLogoutURI   string   `json:"frontchannel_logout_uri"`
-	JWKSUri                 string   `json:"jwks_uri"`
-	SubjectType             string   `json:"subject_type"`
-	RequirePKCE             *bool    `json:"require_pkce,omitempty"`
-	RequestURIs             []string `json:"request_uris,omitempty"`
+	ClientName                   string   `json:"client_name"`
+	RedirectURIs                 []string `json:"redirect_uris"`
+	GrantTypes                   []string `json:"grant_types"`
+	ResponseTypes                []string `json:"response_types"`
+	TokenEndpointAuthMethod      string   `json:"token_endpoint_auth_method"`
+	Scope                        string   `json:"scope"`
+	PostLogoutRedirectURIs       []string `json:"post_logout_redirect_uris"`
+	BackchannelLogoutURI         string   `json:"backchannel_logout_uri"`
+	FrontchannelLogoutURI        string   `json:"frontchannel_logout_uri"`
+	JWKSUri                      string   `json:"jwks_uri"`
+	SubjectType                  string   `json:"subject_type"`
+	RequirePKCE                  *bool    `json:"require_pkce,omitempty"`
+	RequestURIs                  []string `json:"request_uris,omitempty"`
+	IDTokenEncryptedResponseAlg  string   `json:"id_token_encrypted_response_alg,omitempty"`
+	IDTokenEncryptedResponseEnc  string   `json:"id_token_encrypted_response_enc,omitempty"`
+	UserinfoEncryptedResponseAlg string   `json:"userinfo_encrypted_response_alg,omitempty"`
+	UserinfoEncryptedResponseEnc string   `json:"userinfo_encrypted_response_enc,omitempty"`
 }
 
 // DCRResponse represents the OIDC Dynamic Client Registration response.
 type DCRResponse struct {
-	ClientID                string   `json:"client_id"`
-	ClientSecret            string   `json:"client_secret,omitempty"`
-	ClientIDIssuedAt        int64    `json:"client_id_issued_at"`
-	ClientSecretExpiresAt   int64    `json:"client_secret_expires_at"`
-	ClientName              string   `json:"client_name"`
-	RedirectURIs            []string `json:"redirect_uris"`
-	GrantTypes              []string `json:"grant_types"`
-	ResponseTypes           []string `json:"response_types"`
-	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
-	RequirePKCE             bool     `json:"require_pkce"`
-	RequestURIs             []string `json:"request_uris,omitempty"`
-	RegistrationAccessToken string   `json:"registration_access_token,omitempty"`
-	RegistrationClientURI   string   `json:"registration_client_uri,omitempty"`
+	ClientID                     string   `json:"client_id"`
+	ClientSecret                 string   `json:"client_secret,omitempty"`
+	ClientIDIssuedAt             int64    `json:"client_id_issued_at"`
+	ClientSecretExpiresAt        int64    `json:"client_secret_expires_at"`
+	ClientName                   string   `json:"client_name"`
+	RedirectURIs                 []string `json:"redirect_uris"`
+	GrantTypes                   []string `json:"grant_types"`
+	ResponseTypes                []string `json:"response_types"`
+	TokenEndpointAuthMethod      string   `json:"token_endpoint_auth_method"`
+	RequirePKCE                  bool     `json:"require_pkce"`
+	RequestURIs                  []string `json:"request_uris,omitempty"`
+	IDTokenEncryptedResponseAlg  string   `json:"id_token_encrypted_response_alg,omitempty"`
+	IDTokenEncryptedResponseEnc  string   `json:"id_token_encrypted_response_enc,omitempty"`
+	UserinfoEncryptedResponseAlg string   `json:"userinfo_encrypted_response_alg,omitempty"`
+	UserinfoEncryptedResponseEnc string   `json:"userinfo_encrypted_response_enc,omitempty"`
+	RegistrationAccessToken      string   `json:"registration_access_token,omitempty"`
+	RegistrationClientURI        string   `json:"registration_client_uri,omitempty"`
+}
+
+// supportedJWEAlgs / supportedJWEEncs mirror the discovery advertisement.
+// Kept here so the DCR handler doesn't depend on the oidc package.
+var supportedJWEAlgs = map[string]bool{
+	"RSA-OAEP-256":   true,
+	"RSA-OAEP":       true,
+	"ECDH-ES":        true,
+	"ECDH-ES+A128KW": true,
+	"ECDH-ES+A256KW": true,
+}
+
+var supportedJWEEncs = map[string]bool{
+	"A256GCM":       true,
+	"A128GCM":       true,
+	"A256CBC-HS512": true,
+	"A128CBC-HS256": true,
+}
+
+// validateEncryptionPair enforces that alg/enc are either both empty or
+// both set and supported. Returns a user-facing message suitable for
+// invalid_client_metadata responses.
+func validateEncryptionPair(field, alg, enc string) error {
+	if alg == "" && enc == "" {
+		return nil
+	}
+	if alg == "" || enc == "" {
+		return pkg.ErrInvalidRequest(field + "_alg and _enc must be set together")
+	}
+	if !supportedJWEAlgs[alg] {
+		return pkg.ErrInvalidRequest("unsupported " + field + "_alg: " + alg)
+	}
+	if !supportedJWEEncs[enc] {
+		return pkg.ErrInvalidRequest("unsupported " + field + "_enc: " + enc)
+	}
+	return nil
 }
 
 // Register handles POST /register for Dynamic Client Registration.
@@ -71,6 +115,15 @@ func (h *DCRHandler) Register(c *gin.Context) {
 	}
 	if len(req.RedirectURIs) == 0 {
 		pkg.HandleError(c, pkg.ErrInvalidRequest("redirect_uris is required"))
+		return
+	}
+
+	if err := validateEncryptionPair("id_token_encrypted_response", req.IDTokenEncryptedResponseAlg, req.IDTokenEncryptedResponseEnc); err != nil {
+		pkg.HandleError(c, err)
+		return
+	}
+	if err := validateEncryptionPair("userinfo_encrypted_response", req.UserinfoEncryptedResponseAlg, req.UserinfoEncryptedResponseEnc); err != nil {
+		pkg.HandleError(c, err)
 		return
 	}
 
@@ -97,6 +150,17 @@ func (h *DCRHandler) Register(c *gin.Context) {
 		IsPublic:        isPublic,
 		RequirePKCE:     req.RequirePKCE,
 		RequestURIs:     req.RequestURIs,
+	}
+	if req.JWKSUri != "" {
+		input.JWKSUri = &req.JWKSUri
+	}
+	if req.IDTokenEncryptedResponseAlg != "" {
+		input.IDTokenEncryptedResponseAlg = &req.IDTokenEncryptedResponseAlg
+		input.IDTokenEncryptedResponseEnc = &req.IDTokenEncryptedResponseEnc
+	}
+	if req.UserinfoEncryptedResponseAlg != "" {
+		input.UserinfoEncryptedResponseAlg = &req.UserinfoEncryptedResponseAlg
+		input.UserinfoEncryptedResponseEnc = &req.UserinfoEncryptedResponseEnc
 	}
 
 	if req.Scope != "" {
@@ -130,6 +194,18 @@ func (h *DCRHandler) Register(c *gin.Context) {
 		RequestURIs:             result.Client.RequestURIs,
 		RegistrationAccessToken: rawRAT,
 	}
+	if result.Client.IDTokenEncryptedResponseAlg != nil {
+		resp.IDTokenEncryptedResponseAlg = *result.Client.IDTokenEncryptedResponseAlg
+	}
+	if result.Client.IDTokenEncryptedResponseEnc != nil {
+		resp.IDTokenEncryptedResponseEnc = *result.Client.IDTokenEncryptedResponseEnc
+	}
+	if result.Client.UserinfoEncryptedResponseAlg != nil {
+		resp.UserinfoEncryptedResponseAlg = *result.Client.UserinfoEncryptedResponseAlg
+	}
+	if result.Client.UserinfoEncryptedResponseEnc != nil {
+		resp.UserinfoEncryptedResponseEnc = *result.Client.UserinfoEncryptedResponseEnc
+	}
 
 	c.JSON(http.StatusCreated, resp)
 }
@@ -152,6 +228,18 @@ func (h *DCRHandler) ReadRegistration(c *gin.Context) {
 		TokenEndpointAuthMethod: client.TokenAuthMethod,
 		RequirePKCE:             client.RequirePKCE,
 		RequestURIs:             client.RequestURIs,
+	}
+	if client.IDTokenEncryptedResponseAlg != nil {
+		resp.IDTokenEncryptedResponseAlg = *client.IDTokenEncryptedResponseAlg
+	}
+	if client.IDTokenEncryptedResponseEnc != nil {
+		resp.IDTokenEncryptedResponseEnc = *client.IDTokenEncryptedResponseEnc
+	}
+	if client.UserinfoEncryptedResponseAlg != nil {
+		resp.UserinfoEncryptedResponseAlg = *client.UserinfoEncryptedResponseAlg
+	}
+	if client.UserinfoEncryptedResponseEnc != nil {
+		resp.UserinfoEncryptedResponseEnc = *client.UserinfoEncryptedResponseEnc
 	}
 
 	c.JSON(http.StatusOK, resp)
@@ -194,6 +282,25 @@ func (h *DCRHandler) UpdateRegistration(c *gin.Context) {
 	if req.RequestURIs != nil {
 		client.RequestURIs = pq.StringArray(req.RequestURIs)
 	}
+	if err := validateEncryptionPair("id_token_encrypted_response", req.IDTokenEncryptedResponseAlg, req.IDTokenEncryptedResponseEnc); err != nil {
+		pkg.HandleError(c, err)
+		return
+	}
+	if err := validateEncryptionPair("userinfo_encrypted_response", req.UserinfoEncryptedResponseAlg, req.UserinfoEncryptedResponseEnc); err != nil {
+		pkg.HandleError(c, err)
+		return
+	}
+	if req.IDTokenEncryptedResponseAlg != "" {
+		client.IDTokenEncryptedResponseAlg = &req.IDTokenEncryptedResponseAlg
+		client.IDTokenEncryptedResponseEnc = &req.IDTokenEncryptedResponseEnc
+	}
+	if req.UserinfoEncryptedResponseAlg != "" {
+		client.UserinfoEncryptedResponseAlg = &req.UserinfoEncryptedResponseAlg
+		client.UserinfoEncryptedResponseEnc = &req.UserinfoEncryptedResponseEnc
+	}
+	if req.JWKSUri != "" {
+		client.JWKSUri = &req.JWKSUri
+	}
 
 	if err := h.service.repo.Update(client); err != nil {
 		pkg.HandleError(c, pkg.ErrInternal("failed to update client"))
@@ -211,6 +318,18 @@ func (h *DCRHandler) UpdateRegistration(c *gin.Context) {
 		TokenEndpointAuthMethod: client.TokenAuthMethod,
 		RequirePKCE:             client.RequirePKCE,
 		RequestURIs:             client.RequestURIs,
+	}
+	if client.IDTokenEncryptedResponseAlg != nil {
+		resp.IDTokenEncryptedResponseAlg = *client.IDTokenEncryptedResponseAlg
+	}
+	if client.IDTokenEncryptedResponseEnc != nil {
+		resp.IDTokenEncryptedResponseEnc = *client.IDTokenEncryptedResponseEnc
+	}
+	if client.UserinfoEncryptedResponseAlg != nil {
+		resp.UserinfoEncryptedResponseAlg = *client.UserinfoEncryptedResponseAlg
+	}
+	if client.UserinfoEncryptedResponseEnc != nil {
+		resp.UserinfoEncryptedResponseEnc = *client.UserinfoEncryptedResponseEnc
 	}
 
 	c.JSON(http.StatusOK, resp)

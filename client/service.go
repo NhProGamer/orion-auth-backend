@@ -40,6 +40,11 @@ type CreateInput struct {
 	RefreshTokenTTL *int     `json:"refresh_token_ttl"`
 	IDTokenTTL      *int     `json:"id_token_ttl"`
 	RequestURIs     []string `json:"request_uris"`
+	JWKSUri         *string  `json:"jwks_uri,omitempty"`
+	IDTokenEncryptedResponseAlg  *string `json:"id_token_encrypted_response_alg,omitempty"`
+	IDTokenEncryptedResponseEnc  *string `json:"id_token_encrypted_response_enc,omitempty"`
+	UserinfoEncryptedResponseAlg *string `json:"userinfo_encrypted_response_alg,omitempty"`
+	UserinfoEncryptedResponseEnc *string `json:"userinfo_encrypted_response_enc,omitempty"`
 }
 
 type UpdateInput struct {
@@ -57,6 +62,11 @@ type UpdateInput struct {
 	IDTokenTTL      *int     `json:"id_token_ttl"`
 	Active          *bool    `json:"active"`
 	RequestURIs     []string `json:"request_uris"`
+	JWKSUri         *string  `json:"jwks_uri,omitempty"`
+	IDTokenEncryptedResponseAlg  *string `json:"id_token_encrypted_response_alg,omitempty"`
+	IDTokenEncryptedResponseEnc  *string `json:"id_token_encrypted_response_enc,omitempty"`
+	UserinfoEncryptedResponseAlg *string `json:"userinfo_encrypted_response_alg,omitempty"`
+	UserinfoEncryptedResponseEnc *string `json:"userinfo_encrypted_response_enc,omitempty"`
 }
 
 type CreateResponse struct {
@@ -110,6 +120,21 @@ func (s *Service) Create(input CreateInput) (*CreateResponse, error) {
 	}
 	if len(input.RequestURIs) > 0 {
 		client.RequestURIs = pq.StringArray(input.RequestURIs)
+	}
+	if input.JWKSUri != nil {
+		client.JWKSUri = input.JWKSUri
+	}
+	if input.IDTokenEncryptedResponseAlg != nil {
+		client.IDTokenEncryptedResponseAlg = input.IDTokenEncryptedResponseAlg
+	}
+	if input.IDTokenEncryptedResponseEnc != nil {
+		client.IDTokenEncryptedResponseEnc = input.IDTokenEncryptedResponseEnc
+	}
+	if input.UserinfoEncryptedResponseAlg != nil {
+		client.UserinfoEncryptedResponseAlg = input.UserinfoEncryptedResponseAlg
+	}
+	if input.UserinfoEncryptedResponseEnc != nil {
+		client.UserinfoEncryptedResponseEnc = input.UserinfoEncryptedResponseEnc
 	}
 
 	var rawSecret string
@@ -222,6 +247,21 @@ func (s *Service) Update(id uuid.UUID, input UpdateInput) (*model.OAuthClient, e
 	}
 	if input.RequestURIs != nil {
 		client.RequestURIs = pq.StringArray(input.RequestURIs)
+	}
+	if input.JWKSUri != nil {
+		client.JWKSUri = input.JWKSUri
+	}
+	if input.IDTokenEncryptedResponseAlg != nil {
+		client.IDTokenEncryptedResponseAlg = input.IDTokenEncryptedResponseAlg
+	}
+	if input.IDTokenEncryptedResponseEnc != nil {
+		client.IDTokenEncryptedResponseEnc = input.IDTokenEncryptedResponseEnc
+	}
+	if input.UserinfoEncryptedResponseAlg != nil {
+		client.UserinfoEncryptedResponseAlg = input.UserinfoEncryptedResponseAlg
+	}
+	if input.UserinfoEncryptedResponseEnc != nil {
+		client.UserinfoEncryptedResponseEnc = input.UserinfoEncryptedResponseEnc
 	}
 
 	if err := s.repo.Update(client); err != nil {
