@@ -325,6 +325,9 @@ func (s *Service) UpdateProvider(id uuid.UUID, input UpdateProviderInput) (*mode
 	if err := s.repo.UpdateProvider(p); err != nil {
 		return nil, pkg.ErrInternal("failed to update provider")
 	}
+	if s.builder != nil {
+		s.builder.Invalidate(p.ID)
+	}
 	return p, nil
 }
 
@@ -332,7 +335,13 @@ func (s *Service) DeleteProvider(id uuid.UUID) error {
 	if _, err := s.GetProvider(id); err != nil {
 		return err
 	}
-	return s.repo.DeleteProvider(id)
+	if err := s.repo.DeleteProvider(id); err != nil {
+		return err
+	}
+	if s.builder != nil {
+		s.builder.Invalidate(id)
+	}
+	return nil
 }
 
 // --- Social Login ---

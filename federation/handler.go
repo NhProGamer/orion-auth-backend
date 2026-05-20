@@ -60,6 +60,7 @@ func (h *Handler) RegisterAuthenticatedRoutes(authenticated *gin.RouterGroup, re
 func (h *Handler) RegisterAdminRoutes(admin *gin.RouterGroup) {
 	admin.POST("/federation", h.CreateProvider)
 	admin.GET("/federation", h.ListProviders)
+	admin.GET("/federation/:id", h.GetProvider)
 	admin.PATCH("/federation/:id", h.UpdateProvider)
 	admin.DELETE("/federation/:id", h.DeleteProvider)
 }
@@ -448,6 +449,29 @@ func (h *Handler) CreateProvider(c *gin.Context) {
 	pkg.Created(c, gin.H{"provider": p})
 }
 
+// GetProvider godoc
+// @Summary      Get a single federation provider
+// @Tags         Admin - Federation
+// @Produce      json
+// @Param        id path string true "Provider ID"
+// @Success      200 {object} map[string]any
+// @Failure      404 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/admin/federation/{id} [get]
+func (h *Handler) GetProvider(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		pkg.HandleError(c, pkg.ErrBadRequest("invalid provider ID"))
+		return
+	}
+	p, err := h.service.GetProvider(id)
+	if err != nil {
+		pkg.HandleError(c, err)
+		return
+	}
+	pkg.OK(c, gin.H{"provider": p})
+}
+
 // ListProviders godoc
 // @Summary      List all federation providers
 // @Tags         Admin - Federation
@@ -494,10 +518,37 @@ func (h *Handler) UpdateProvider(c *gin.Context) {
 		return
 	}
 
+	// Compose an audit diff that captures which configuration knobs the
+	// admin touched. ClientSecret presence is recorded but its value is
+	// never logged.
+	changed := map[string]any{"provider_id": id}
+	if input.ClientID != nil {
+		changed["client_id"] = *input.ClientID
+	}
+	if input.ClientSecret != nil {
+		changed["client_secret_rotated"] = true
+	}
+	if input.IssuerURL != nil {
+		changed["issuer_url"] = *input.IssuerURL
+	}
+	if input.JWKSUri != nil {
+		changed["jwks_uri"] = *input.JWKSUri
+	}
+	if input.SyncOnLogin != nil {
+		changed["sync_on_login"] = *input.SyncOnLogin
+	}
+	if input.AllowLinkConfirmation != nil {
+		changed["allow_link_confirmation"] = *input.AllowLinkConfirmation
+	}
+	if len(input.AttributeMapper) > 0 {
+		changed["attribute_mapper_changed"] = true
+	}
+	if input.Active != nil {
+		changed["active"] = *input.Active
+	}
+
 	if h.auditService != nil {
-		h.auditService.LogFromContext(c, audit.ActionFederationProviderUpdated, map[string]any{
-			"provider_id": id,
-		})
+		h.auditService.LogFromContext(c, audit.ActionFederationProviderUpdated, changed)
 	}
 
 	pkg.OK(c, gin.H{"provider": p})
