@@ -2,6 +2,7 @@ package invitation
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -212,7 +213,11 @@ func (h *Handler) GetSettings(c *gin.Context) {
 }
 
 type UpdateSettingsInput struct {
-	RegistrationEnabled *bool `json:"registration_enabled"`
+	RegistrationEnabled     *bool   `json:"registration_enabled"`
+	InvitationsDefaultRole  *string `json:"invitations_default_role"`
+	DefaultAccessTokenTTL   *int    `json:"default_access_token_ttl"`
+	DefaultRefreshTokenTTL  *int    `json:"default_refresh_token_ttl"`
+	DefaultIDTokenTTL       *int    `json:"default_id_token_ttl"`
 }
 
 // UpdateSettings godoc
@@ -233,21 +238,52 @@ func (h *Handler) UpdateSettings(c *gin.Context) {
 		return
 	}
 
+	changed := map[string]any{}
+	apply := func(key string, value string, audit any) error {
+		if err := h.service.UpdateSetting(key, value); err != nil {
+			return err
+		}
+		changed[key] = audit
+		return nil
+	}
+
 	if input.RegistrationEnabled != nil {
 		val := "false"
 		if *input.RegistrationEnabled {
 			val = "true"
 		}
-		if err := h.service.UpdateSetting("registration_enabled", val); err != nil {
+		if err := apply("registration_enabled", val, *input.RegistrationEnabled); err != nil {
 			pkg.HandleError(c, err)
 			return
 		}
-
-		if h.auditService != nil {
-			h.auditService.LogFromContext(c, audit.ActionSettingsUpdated, map[string]any{
-				"registration_enabled": *input.RegistrationEnabled,
-			})
+	}
+	if input.InvitationsDefaultRole != nil {
+		if err := apply("invitations_default_role", *input.InvitationsDefaultRole, *input.InvitationsDefaultRole); err != nil {
+			pkg.HandleError(c, err)
+			return
 		}
+	}
+	if input.DefaultAccessTokenTTL != nil {
+		if err := apply("default_access_token_ttl", strconv.Itoa(*input.DefaultAccessTokenTTL), *input.DefaultAccessTokenTTL); err != nil {
+			pkg.HandleError(c, err)
+			return
+		}
+	}
+	if input.DefaultRefreshTokenTTL != nil {
+		if err := apply("default_refresh_token_ttl", strconv.Itoa(*input.DefaultRefreshTokenTTL), *input.DefaultRefreshTokenTTL); err != nil {
+			pkg.HandleError(c, err)
+			return
+		}
+	}
+	if input.DefaultIDTokenTTL != nil {
+		if err := apply("default_id_token_ttl", strconv.Itoa(*input.DefaultIDTokenTTL), *input.DefaultIDTokenTTL); err != nil {
+			pkg.HandleError(c, err)
+			return
+		}
+	}
+
+	if h.auditService != nil && len(changed) > 0 {
+		h.auditService.LogFromContext(c, audit.ActionSettingsUpdated, changed)
 	}
 
 	settings, err := h.service.GetAllSettings()
