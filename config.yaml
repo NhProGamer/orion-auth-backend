@@ -23,6 +23,11 @@ auth:
   password_min_length: 8
   max_failed_attempts: 5
   lockout_duration: "15m"
+  # Base64-encoded AES-256 (32 bytes) used to seal per-client HMAC keys
+  # (client_secret_jwt) and federation client_secrets at rest. Override at
+  # runtime with ORION_AUTH_HMAC_SECRET_ENCRYPTION_KEY. Empty disables
+  # both features with a startup warning.
+  hmac_secret_encryption_key: ""
 
 argon2:
   memory: 65536 # 64MB

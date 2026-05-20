@@ -120,6 +120,19 @@ func Load() (*Config, error) {
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	viper.AutomaticEnv()
 
+	// Sensitive keys that should resolve from env even if the on-disk
+	// config.yaml does not declare them. viper.Unmarshal only honours
+	// AutomaticEnv for keys it already knows about, so we bind these
+	// explicitly to avoid silent fallbacks to the empty string in
+	// container deployments that ship without a populated config.yaml.
+	for _, key := range []string{
+		"auth.hmac_secret_encryption_key",
+		"database.password",
+		"smtp.password",
+	} {
+		_ = viper.BindEnv(key)
+	}
+
 	if err := viper.ReadInConfig(); err != nil {
 		slog.Warn("config file not found, using env vars only", "error", err)
 	}
