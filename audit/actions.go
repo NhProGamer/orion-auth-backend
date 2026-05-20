@@ -54,6 +54,14 @@ const (
 	ActionSettingsUpdated   = "settings.updated"
 )
 
+// Registration form (regform) actions
+const (
+	ActionRegFormFieldCreated    = "regform.field_created"
+	ActionRegFormFieldUpdated    = "regform.field_updated"
+	ActionRegFormFieldDeleted    = "regform.field_deleted"
+	ActionRegFormFieldsReordered = "regform.fields_reordered"
+)
+
 // Federation actions
 const (
 	ActionFederationProviderCreated = "federation.provider_created"

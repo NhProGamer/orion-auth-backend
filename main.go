@@ -40,6 +40,7 @@ import (
 	"orion-auth-backend/policy"
 	"orion-auth-backend/rbac"
 	"orion-auth-backend/reauth"
+	"orion-auth-backend/regform"
 	"orion-auth-backend/resource"
 	"orion-auth-backend/session"
 	"orion-auth-backend/user"
@@ -91,6 +92,7 @@ func main() {
 	fedRepo := federation.NewRepository(db)
 	reauthRepo := reauth.NewRepository(db)
 	passkeyRepo := passkey.NewRepository(db)
+	regFormRepo := regform.NewRepository(db)
 
 	// Services
 	userService := user.NewService(userRepo, hasher, cfg.Auth)
@@ -110,6 +112,7 @@ func main() {
 	invRepo := invitation.NewRepository(db)
 	invService := invitation.NewService(invRepo, userService, rbacService, emailSender, cfg.Issuer)
 	fedService.SetProvisioningDependencies(userService, invService, invService)
+	regFormService := regform.NewService(regFormRepo)
 
 	// WebAuthn / Passkeys
 	wa, err := webauthn.New(&webauthn.Config{
@@ -190,6 +193,7 @@ func main() {
 	auditHandler := audit.NewHandler(auditService)
 	fedHandler := federation.NewHandler(fedService)
 	invHandler := invitation.NewHandler(invService)
+	regFormHandler := regform.NewHandler(regFormService)
 	policyHandler := policy.NewHandler(policyService)
 	resourceHandler := resource.NewHandler(resourceService)
 	reauthHandler := reauth.NewHandler(reauthService)
@@ -227,6 +231,7 @@ func main() {
 	rbacHandler.SetAuditService(auditService)
 	fedHandler.SetAuditService(auditService)
 	invHandler.SetAuditService(auditService)
+	regFormHandler.SetAuditService(auditService)
 	invHandler.SetFederationLister(&federationListerAdapter{fedService: fedService})
 	policyHandler.SetAuditService(auditService)
 	resourceHandler.SetAuditService(auditService)
@@ -258,6 +263,7 @@ func main() {
 		auditHandler:      auditHandler,
 		fedHandler:        fedHandler,
 		invHandler:        invHandler,
+		regFormHandler:    regFormHandler,
 		policyHandler:     policyHandler,
 		resourceHandler:   resourceHandler,
 		reauthHandler:     reauthHandler,
@@ -322,6 +328,7 @@ type setupRouterArgs struct {
 	auditHandler    *audit.Handler
 	fedHandler      *federation.Handler
 	invHandler      *invitation.Handler
+	regFormHandler  *regform.Handler
 	policyHandler   *policy.Handler
 	resourceHandler *resource.Handler
 	reauthHandler   *reauth.Handler
@@ -408,6 +415,7 @@ func setupRouter(a setupRouterArgs) *gin.Engine {
 	a.userHandler.RegisterRoutes(public, nil, nil, nil)
 	a.invHandler.RegisterPublicRoutes(public)
 	a.fedHandler.RegisterPublicRoutes(public)
+	a.regFormHandler.RegisterPublicRoutes(public)
 	// Token-based account flows (no bearer): email-change confirm + deletion cancel.
 	a.accountHandler.RegisterRoutes(public, nil, nil, nil, nil, nil)
 	// Public passkey login (usernameless): begin + finish only.
@@ -456,6 +464,7 @@ func setupRouter(a setupRouterArgs) *gin.Engine {
 	userAdmin.Use(rbac.RequireAnyPermission(rbacService, "users:read", "users:write"))
 	a.userHandler.RegisterAdminRoutes(userAdmin)
 	a.invHandler.RegisterAdminRoutes(userAdmin)
+	a.regFormHandler.RegisterAdminRoutes(userAdmin)
 
 	// Client management (requires clients:read or clients:write)
 	clientAdmin := adminBase.Group("")
