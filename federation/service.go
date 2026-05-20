@@ -154,6 +154,7 @@ type CreateProviderInput struct {
 
 type UpdateProviderInput struct {
 	DisplayName           *string         `json:"display_name"`
+	Type                  *string         `json:"type"`
 	ClientID              *string         `json:"client_id"`
 	ClientSecret          *string         `json:"client_secret"`
 	IssuerURL             *string         `json:"issuer_url"`
@@ -204,6 +205,11 @@ func (s *Service) CreateProvider(input CreateProviderInput) (*model.FederationPr
 	}
 	if err := validateAttributeMapper(input.AttributeMapper); err != nil {
 		return nil, err
+	}
+	switch input.Type {
+	case ProviderTypeOIDC, ProviderTypeOAuth2:
+	default:
+		return nil, pkg.ErrBadRequest("type must be 'oidc' or 'oauth2'")
 	}
 
 	sealed, err := s.sealSecret(input.ClientSecret)
@@ -280,6 +286,14 @@ func (s *Service) UpdateProvider(id uuid.UUID, input UpdateProviderInput) (*mode
 
 	if input.DisplayName != nil {
 		p.DisplayName = input.DisplayName
+	}
+	if input.Type != nil {
+		switch *input.Type {
+		case ProviderTypeOIDC, ProviderTypeOAuth2:
+			p.Type = *input.Type
+		default:
+			return nil, pkg.ErrBadRequest("type must be 'oidc' or 'oauth2'")
+		}
 	}
 	if input.ClientID != nil {
 		p.ClientID = *input.ClientID
