@@ -379,7 +379,14 @@ func (s *Service) CreateFromFederation(input FederationProvisionInput, roleIDs [
 	}
 
 	if s.roleAssigner != nil {
-		for _, rid := range roleIDs {
+		// Caller-supplied roles (from an invitation) take precedence.
+		// Otherwise fall back to the default user role, matching the
+		// behaviour of the password-based Register path.
+		assignRoles := roleIDs
+		if len(assignRoles) == 0 && s.defaultRoleID != uuid.Nil {
+			assignRoles = []uuid.UUID{s.defaultRoleID}
+		}
+		for _, rid := range assignRoles {
 			if err := s.roleAssigner.AssignRole(u.ID, rid); err != nil {
 				slog.Warn("failed to assign role to federation-created user", "user_id", u.ID, "role_id", rid, "error", err)
 			}
