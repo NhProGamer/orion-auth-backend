@@ -905,6 +905,122 @@ func (s *Service) AuthorizeConsent(input AuthorizeConsentInput, ipAddress, userA
 	return s.completeAuthorize(req, ipAddress, userAgent)
 }
 
+// ResumeAuthorizeAfterExternalLogin pivots an in-flight authorization
+// request onto a user authenticated by an external federation provider.
+// The request must not yet be authenticated; the function records
+// req.UserID, the "fed:<provider>" auth method, computes consent and MFA
+// requirements, and persists the row. Callers (federation handler) act
+// on the returned flags to either: complete the flow (no consent or MFA
+// needed), redirect to AuthUI consent, or redirect to AuthUI MFA.
+func (s *Service) ResumeAuthorizeAfterExternalLogin(requestID, userID uuid.UUID, providerName, ipAddress, userAgent string) (*AuthorizeLoginResponse, error) {
+	_ = ipAddress
+	_ = userAgent
+	req, err := s.repo.FindAuthRequest(requestID)
+	if err != nil || req == nil {
+		return nil, pkg.ErrInvalidRequest("invalid or expired authorization request")
+	}
+	if req.IsExpired() {
+		return nil, pkg.ErrInvalidRequest("authorization request expired")
+	}
+	if req.Authenticated {
+		return nil, pkg.ErrInvalidRequest("authorization request already authenticated")
+	}
+
+	u, err := s.userService.GetByID(userID)
+	if err != nil || u == nil {
+		return nil, pkg.ErrInternal("federated user not found")
+	}
+	if !u.Active {
+		return nil, pkg.ErrForbidden("account is deactivated")
+	}
+
+	client, err := s.repo.findClient(req.ClientID.String())
+	if err != nil {
+		return nil, pkg.ErrServerError("failed to look up client")
+	}
+
+	consent, _ := s.repo.FindActiveConsent(u.ID, req.ClientID)
+	needsConsent := !(consent != nil && consent.CoversScopes(req.Scopes))
+	if !needsConsent {
+		// already covered
+	} else if client.IsFirstParty {
+		needsConsent = false
+	}
+
+	hasMFA := false
+	if s.mfaValidator != nil {
+		hasMFA, _ = s.mfaValidator.HasMFA(u.ID)
+	}
+	needsMFA := hasMFA
+
+	req.UserID = &u.ID
+	req.AuthMethods = append(req.AuthMethods, "fed:"+providerName)
+	now := time.Now()
+	if !needsMFA {
+		req.Authenticated = true
+		req.AuthTime = &now
+	}
+
+	if req.Prompt != nil && *req.Prompt == "consent" {
+		needsConsent = true
+	}
+	if !needsConsent && req.Authenticated {
+		req.ConsentGiven = true
+	}
+
+	if err := s.repo.UpdateAuthRequest(req); err != nil {
+		return nil, pkg.ErrServerError("failed to update authorization request")
+	}
+
+	return &AuthorizeLoginResponse{
+		RequestID:       req.ID,
+		Authenticated:   !needsMFA,
+		RequiresConsent: needsConsent,
+		RequiresMFA:     needsMFA,
+		Scopes:          req.Scopes,
+	}, nil
+}
+
+// BuildAuthorizeRedirectURL renders the final URL the browser should land
+// on after a successful authorize completion. Honours the response_mode
+// hint (query | fragment); defaults to query.
+func BuildAuthorizeRedirectURL(resp *AuthorizeConsentResponse) (string, error) {
+	if resp == nil || resp.RedirectURI == "" {
+		return "", pkg.ErrServerError("missing redirect_uri in authorize response")
+	}
+	u, err := url.Parse(resp.RedirectURI)
+	if err != nil {
+		return "", pkg.ErrServerError("invalid redirect_uri: " + err.Error())
+	}
+	params := url.Values{}
+	if resp.Code != "" {
+		params.Set("code", resp.Code)
+	}
+	if resp.State != "" {
+		params.Set("state", resp.State)
+	}
+	if resp.Issuer != "" {
+		params.Set("iss", resp.Issuer)
+	}
+	if resp.AccessToken != "" {
+		params.Set("access_token", resp.AccessToken)
+		params.Set("token_type", resp.TokenType)
+	}
+	if resp.IDToken != "" {
+		params.Set("id_token", resp.IDToken)
+	}
+	if resp.ResponseMode == "fragment" {
+		u.Fragment = params.Encode()
+	} else {
+		if u.RawQuery == "" {
+			u.RawQuery = params.Encode()
+		} else {
+			u.RawQuery = u.RawQuery + "&" + params.Encode()
+		}
+	}
+	return u.String(), nil
+}
+
 // CompleteAuthorizeFirstParty generates the code when no consent is needed (first-party or pre-consented).
 func (s *Service) CompleteAuthorizeFirstParty(requestID uuid.UUID, ipAddress, userAgent string) (*AuthorizeConsentResponse, error) {
 	req, err := s.repo.FindAuthRequest(requestID)

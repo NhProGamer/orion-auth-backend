@@ -105,6 +105,8 @@ func main() {
 	auditService := audit.NewService(db)
 	fedService := federation.NewService(fedRepo, cfg.Issuer, hmacEncKey)
 	fedService.SetStateRepository(federation.NewStateRepository(db))
+	fedService.SetAuthUIBaseURL(cfg.AuthUI.BaseURL)
+	fedService.SetOAuthResumer(newFederationOAuthAdapter(oauthService))
 	invRepo := invitation.NewRepository(db)
 	invService := invitation.NewService(invRepo, userService, rbacService, emailSender, cfg.Issuer)
 	fedService.SetProvisioningDependencies(userService, invService, invService)
@@ -505,6 +507,41 @@ func chainMW(mws ...gin.HandlerFunc) gin.HandlerFunc {
 			mw(c)
 		}
 	}
+}
+
+// federationOAuthAdapter bridges federation.OAuthResumer onto the real
+// oauth.Service. Lives in main so the two packages stay decoupled at
+// compile time.
+type federationOAuthAdapter struct{ inner *oauth.Service }
+
+func newFederationOAuthAdapter(s *oauth.Service) *federationOAuthAdapter {
+	return &federationOAuthAdapter{inner: s}
+}
+
+func (a *federationOAuthAdapter) ResumeAuthorizeAfterExternalLogin(requestID, userID uuid.UUID, providerName, ip, ua string) (*federation.OAuthLoginStatus, error) {
+	resp, err := a.inner.ResumeAuthorizeAfterExternalLogin(requestID, userID, providerName, ip, ua)
+	if err != nil {
+		return nil, err
+	}
+	return &federation.OAuthLoginStatus{
+		RequestID:       resp.RequestID,
+		Authenticated:   resp.Authenticated,
+		RequiresConsent: resp.RequiresConsent,
+		RequiresMFA:     resp.RequiresMFA,
+		Scopes:          resp.Scopes,
+	}, nil
+}
+
+func (a *federationOAuthAdapter) CompleteAuthorizeFirstParty(requestID uuid.UUID, ip, ua string) (*federation.OAuthCompletion, error) {
+	resp, err := a.inner.CompleteAuthorizeFirstParty(requestID, ip, ua)
+	if err != nil {
+		return nil, err
+	}
+	url, err := oauth.BuildAuthorizeRedirectURL(resp)
+	if err != nil {
+		return nil, err
+	}
+	return &federation.OAuthCompletion{RedirectURL: url}, nil
 }
 
 // loadHMACEncryptionKey decodes the base64 AES-256 key used to seal

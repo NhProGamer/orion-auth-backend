@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -34,6 +35,8 @@ type Service struct {
 	users             UserProvisioner
 	registration      RegistrationGate
 	invitations       InvitationValidator
+	oauthResumer      OAuthResumer
+	authUIBase        string
 	issuer            string
 	hmacEncryptionKey []byte
 }
@@ -72,6 +75,33 @@ func (s *Service) SetProvisioningDependencies(users UserProvisioner, reg Registr
 	s.registration = reg
 	s.invitations = invs
 }
+
+// SetOAuthResumer wires the OrionAuth authorize-flow continuation. Required
+// for federation callbacks to resume an /authorize in progress instead of
+// just dropping the user on a generic post-login page.
+func (s *Service) SetOAuthResumer(r OAuthResumer) {
+	s.oauthResumer = r
+}
+
+// SetAuthUIBaseURL configures the SPA origin the federation handler
+// redirects to for interactive flows (link confirmation, onboarding,
+// consent, MFA). Falls back to the issuer URL when empty.
+func (s *Service) SetAuthUIBaseURL(u string) {
+	s.authUIBase = strings.TrimRight(u, "/")
+}
+
+// AuthUIBaseURL returns the configured AuthUI origin (or the issuer as
+// fallback). Exposed so the handler can build redirect URLs.
+func (s *Service) AuthUIBaseURL() string {
+	if s.authUIBase != "" {
+		return s.authUIBase
+	}
+	return strings.TrimRight(s.issuer, "/")
+}
+
+// OAuthResumer exposes the wired continuation client so handlers can call
+// directly without needing another setter pair.
+func (s *Service) OAuthResumerClient() OAuthResumer { return s.oauthResumer }
 
 // sealSecret encrypts a provider client_secret with the server-side AES key.
 // Returns the wire-format ciphertext (12-byte nonce || ciphertext+tag).

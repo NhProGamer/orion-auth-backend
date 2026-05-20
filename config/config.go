@@ -17,8 +17,17 @@ type Config struct {
 	SMTP     SMTPConfig     `mapstructure:"smtp"`
 	WebAuthn WebAuthnConfig `mapstructure:"webauthn"`
 	Account  AccountConfig  `mapstructure:"account"`
+	AuthUI   AuthUIConfig   `mapstructure:"auth_ui"`
 	Issuer       string `mapstructure:"issuer"`
 	PairwiseSalt string `mapstructure:"pairwise_salt"`
+}
+
+// AuthUIConfig points to the AuthUI SPA frontend the backend redirects to
+// for interactive flows (federation continuation, link confirmation,
+// onboarding). When BaseURL is empty the issuer URL is used (same-origin
+// deployment).
+type AuthUIConfig struct {
+	BaseURL string `mapstructure:"base_url"`
 }
 
 type ServerConfig struct {

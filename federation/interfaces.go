@@ -44,3 +44,25 @@ type InvitationValidator interface {
 	ValidateToken(rawToken string) (*model.Invitation, error)
 	ConsumeToken(inv *model.Invitation) error
 }
+
+// OAuthResumer continues an in-flight OrionAuth authorize request after the
+// user has been authenticated via federation. Implemented by oauth.Service.
+type OAuthResumer interface {
+	ResumeAuthorizeAfterExternalLogin(requestID, userID uuid.UUID, providerName, ip, ua string) (*OAuthLoginStatus, error)
+	CompleteAuthorizeFirstParty(requestID uuid.UUID, ip, ua string) (*OAuthCompletion, error)
+}
+
+// OAuthLoginStatus mirrors oauth.AuthorizeLoginResponse without dragging
+// the oauth package into the federation interface contract.
+type OAuthLoginStatus struct {
+	RequestID       uuid.UUID
+	Authenticated   bool
+	RequiresConsent bool
+	RequiresMFA     bool
+	Scopes          []string
+}
+
+// OAuthCompletion is the rendered redirect target after completeAuthorize.
+type OAuthCompletion struct {
+	RedirectURL string
+}
