@@ -92,7 +92,7 @@ func (s *Service) Register(input RegisterInput) (*model.User, error) {
 
 	user := &model.User{
 		Email:        input.Email,
-		PasswordHash: hash,
+		PasswordHash: &hash,
 		DisplayName:  input.DisplayName,
 		Active:       true,
 	}
@@ -131,7 +131,14 @@ func (s *Service) Authenticate(input LoginInput) (*model.User, error) {
 		return nil, pkg.ErrAccountLocked("account is temporarily locked due to too many failed login attempts")
 	}
 
-	match, err := s.hasher.Verify(input.Password, user.PasswordHash)
+	// Federated-only accounts have no local password yet. Refuse the login
+	// without revealing whether the email exists; the user must complete
+	// the account or sign in via the federation provider.
+	if user.PasswordHash == nil {
+		return nil, pkg.ErrUnauthorized("invalid email or password")
+	}
+
+	match, err := s.hasher.Verify(input.Password, *user.PasswordHash)
 	if err != nil || !match {
 		s.incrementFailedAttempts(user)
 		return nil, pkg.ErrUnauthorized("invalid email or password")
@@ -179,7 +186,7 @@ func (s *Service) RegisterAdmin(input RegisterInput, roleIDs []uuid.UUID) (*mode
 
 	u := &model.User{
 		Email:        input.Email,
-		PasswordHash: hash,
+		PasswordHash: &hash,
 		DisplayName:  input.DisplayName,
 		Active:       true,
 	}
@@ -277,7 +284,97 @@ func (s *Service) SetPassword(id uuid.UUID, newPassword string) error {
 	if err != nil {
 		return pkg.ErrInternal("failed to hash password")
 	}
-	return s.repo.UpdateFields(id, map[string]any{"password_hash": hash})
+	return s.repo.UpdateFields(id, map[string]any{
+		"password_hash":     hash,
+		"must_set_password": false,
+	})
+}
+
+// SetInitialPassword finalises onboarding for a user provisioned without a
+// local password (federation-only signup). Allowed only when the user
+// currently has no PasswordHash or carries the MustSetPassword flag, to
+// avoid letting authenticated users bypass the standard ChangePassword
+// flow (which requires the current password).
+func (s *Service) SetInitialPassword(id uuid.UUID, newPassword string) error {
+	if len(newPassword) < s.cfg.PasswordMinLen {
+		return pkg.ErrBadRequest(fmt.Sprintf("password must be at least %d characters", s.cfg.PasswordMinLen))
+	}
+	u, err := s.GetByID(id)
+	if err != nil {
+		return err
+	}
+	if u.PasswordHash != nil && !u.MustSetPassword {
+		return pkg.ErrBadRequest("password already set; use the change-password endpoint instead")
+	}
+	hash, err := s.hasher.Hash(newPassword)
+	if err != nil {
+		return pkg.ErrInternal("failed to hash password")
+	}
+	return s.repo.UpdateFields(id, map[string]any{
+		"password_hash":     hash,
+		"must_set_password": false,
+	})
+}
+
+// FederationProvisionInput carries the subset of normalised claims used to
+// create or refresh a user from a federation provider.
+type FederationProvisionInput struct {
+	Email         string
+	EmailVerified bool
+	DisplayName   string
+	AvatarURL     string
+}
+
+// CreateFromFederation inserts a brand-new user with no local password.
+// The caller (federation.Service.findOrProvisionUser) is responsible for
+// gating this call by registration_enabled / invitation tokens; this
+// method only enforces the basic email-uniqueness and persistence
+// invariants. The returned user has MustSetPassword=true so the AuthUI
+// onboarding flow forces the user through SetInitialPassword.
+func (s *Service) CreateFromFederation(input FederationProvisionInput, roleIDs []uuid.UUID) (*model.User, error) {
+	email := strings.ToLower(strings.TrimSpace(input.Email))
+	if email == "" {
+		return nil, pkg.ErrBadRequest("federation provider returned no email")
+	}
+
+	existing, err := s.repo.FindByEmail(email)
+	if err != nil {
+		return nil, pkg.ErrInternal("failed to check existing user")
+	}
+	if existing != nil {
+		return nil, pkg.ErrConflict("email already registered")
+	}
+
+	u := &model.User{
+		Email:           email,
+		EmailVerified:   input.EmailVerified,
+		MustSetPassword: true,
+		Active:          true,
+	}
+	if input.DisplayName != "" {
+		d := input.DisplayName
+		u.DisplayName = &d
+	}
+	if input.AvatarURL != "" {
+		a := input.AvatarURL
+		u.AvatarURL = &a
+	}
+
+	if err := s.repo.Create(u); err != nil {
+		slog.Error("failed to create user via federation path", "error", err)
+		return nil, pkg.ErrInternal("failed to create user")
+	}
+
+	if s.roleAssigner != nil {
+		for _, rid := range roleIDs {
+			if err := s.roleAssigner.AssignRole(u.ID, rid); err != nil {
+				slog.Warn("failed to assign role to federation-created user", "user_id", u.ID, "role_id", rid, "error", err)
+			}
+		}
+	}
+
+	slog.Info("user provisioned via federation", "user_id", u.ID, "email", u.Email, "email_verified", input.EmailVerified)
+	return u, nil
 }
 
 // Unlock clears the lock-out state on a user — failed login attempts reset
@@ -386,15 +483,17 @@ func (s *Service) UpdateProfile(id uuid.UUID, input UpdateProfileInput) (*model.
 
 // VerifyPassword returns true iff the supplied plaintext matches the user's
 // stored hash. Used by the reauth package to validate password-based step-up.
+// Returns false (no error) when the user has no local password yet (a
+// federation-only account that has not completed onboarding).
 func (s *Service) VerifyPassword(id uuid.UUID, password string) (bool, error) {
 	user, err := s.repo.FindByID(id)
 	if err != nil {
 		return false, err
 	}
-	if user == nil {
+	if user == nil || user.PasswordHash == nil {
 		return false, nil
 	}
-	return s.hasher.Verify(password, user.PasswordHash)
+	return s.hasher.Verify(password, *user.PasswordHash)
 }
 
 // UpdateFields is a thin pass-through used by the account package to apply
@@ -428,7 +527,11 @@ func (s *Service) ChangePassword(id uuid.UUID, input ChangePasswordInput) error 
 		return err
 	}
 
-	match, err := s.hasher.Verify(input.CurrentPassword, user.PasswordHash)
+	if user.PasswordHash == nil {
+		return pkg.ErrBadRequest("account has no password set yet; use the set-password endpoint instead")
+	}
+
+	match, err := s.hasher.Verify(input.CurrentPassword, *user.PasswordHash)
 	if err != nil || !match {
 		return pkg.ErrUnauthorized("current password is incorrect")
 	}

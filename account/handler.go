@@ -56,6 +56,15 @@ func (h *Handler) RegisterRoutes(
 		}
 		pwd.PUT("/me/password", h.ChangePassword)
 
+		// SetInitialPassword has no step-up requirement: the user has just
+		// authenticated via the federation provider and has no other
+		// reauth method until the password is set.
+		setPwd := authenticated.Group("")
+		if changePasswordPerm != nil {
+			setPwd.Use(changePasswordPerm)
+		}
+		setPwd.POST("/me/set-password", h.SetInitialPassword)
+
 		email := authenticated.Group("")
 		if changeEmailPerm != nil {
 			email.Use(changeEmailPerm)
@@ -105,6 +114,42 @@ func (h *Handler) ChangePassword(c *gin.Context) {
 		h.auditService.LogFromContext(c, audit.ActionAccountPasswordChanged, nil)
 	}
 	pkg.OK(c, gin.H{"message": "password changed"})
+}
+
+// SetInitialPasswordInput is the body of POST /me/set-password.
+type SetInitialPasswordInput struct {
+	Password string `json:"password" binding:"required"`
+}
+
+// SetInitialPassword godoc
+// @Summary  Finalise federation onboarding by setting the initial local password
+// @Tags     Account
+// @Accept   json
+// @Produce  json
+// @Param    body body account.SetInitialPasswordInput true "new password"
+// @Success  200 {object} map[string]any
+// @Failure  400 {object} map[string]any
+// @Security BearerAuth
+// @Router   /api/v1/me/set-password [post]
+func (h *Handler) SetInitialPassword(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		pkg.HandleError(c, pkg.ErrUnauthorized("not authenticated"))
+		return
+	}
+	var input SetInitialPasswordInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		pkg.HandleError(c, pkg.ErrBadRequest("invalid request body: "+err.Error()))
+		return
+	}
+	if err := h.service.SetInitialPassword(userID, input.Password); err != nil {
+		pkg.HandleError(c, err)
+		return
+	}
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionAccountPasswordChanged, map[string]any{"initial": true})
+	}
+	pkg.OK(c, gin.H{"message": "password set"})
 }
 
 // RequestEmailChange godoc

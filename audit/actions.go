@@ -59,6 +59,12 @@ const (
 	ActionFederationProviderCreated = "federation.provider_created"
 	ActionFederationProviderUpdated = "federation.provider_updated"
 	ActionFederationProviderDeleted = "federation.provider_deleted"
+	ActionFederationLoginSucceeded  = "federation.login_succeeded"
+	ActionFederationLoginFailed     = "federation.login_failed"
+	ActionFederationAccountLinked   = "federation.account_linked"
+	ActionFederationAccountUnlinked = "federation.account_unlinked"
+	ActionFederationUserProvisioned = "federation.user_provisioned"
+	ActionFederationLinkConfirmFail = "federation.link_confirm_failed"
 )
 
 // Resource actions

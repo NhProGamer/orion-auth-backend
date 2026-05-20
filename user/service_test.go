@@ -166,9 +166,10 @@ func TestRegister_Success(t *testing.T) {
 	require.NotNil(t, user)
 	assert.Equal(t, "alice@example.com", user.Email)
 	assert.True(t, user.Active)
-	assert.NotEmpty(t, user.PasswordHash)
+	require.NotNil(t, user.PasswordHash)
+	assert.NotEmpty(t, *user.PasswordHash)
 	// Verify the hash is valid
-	match, err := hasher.Verify("strongpassword", user.PasswordHash)
+	match, err := hasher.Verify("strongpassword", *user.PasswordHash)
 	require.NoError(t, err)
 	assert.True(t, match)
 }

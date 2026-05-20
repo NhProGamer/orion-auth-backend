@@ -31,6 +31,9 @@ type Service struct {
 	repo              RepositoryInterface
 	stateRepo         StateRepositoryInterface
 	builder           *Builder
+	users             UserProvisioner
+	registration      RegistrationGate
+	invitations       InvitationValidator
 	issuer            string
 	hmacEncryptionKey []byte
 }
@@ -59,6 +62,15 @@ func (s *Service) SetStateRepository(repo StateRepositoryInterface) {
 // SetBuilder lets tests inject a stub Builder.
 func (s *Service) SetBuilder(b *Builder) {
 	s.builder = b
+}
+
+// SetProvisioningDependencies wires the user provisioning, registration
+// gate, and invitation validator. Required for ProcessCallback to actually
+// log a user in (otherwise it returns the validated claims only).
+func (s *Service) SetProvisioningDependencies(users UserProvisioner, reg RegistrationGate, invs InvitationValidator) {
+	s.users = users
+	s.registration = reg
+	s.invitations = invs
 }
 
 // sealSecret encrypts a provider client_secret with the server-side AES key.

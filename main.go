@@ -107,6 +107,7 @@ func main() {
 	fedService.SetStateRepository(federation.NewStateRepository(db))
 	invRepo := invitation.NewRepository(db)
 	invService := invitation.NewService(invRepo, userService, rbacService, emailSender, cfg.Issuer)
+	fedService.SetProvisioningDependencies(userService, invService, invService)
 
 	// WebAuthn / Passkeys
 	wa, err := webauthn.New(&webauthn.Config{

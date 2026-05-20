@@ -13,7 +13,8 @@ type User struct {
 	EmailVerified          bool            `gorm:"default:false" json:"email_verified"`
 	EmailVerifyToken       *string         `gorm:"type:varchar(255)" json:"-"`
 	EmailVerifyExpiresAt   *time.Time      `json:"-"`
-	PasswordHash           string          `gorm:"type:varchar(255);not null" json:"-"`
+	PasswordHash           *string         `gorm:"type:varchar(255)" json:"-"`
+	MustSetPassword        bool            `gorm:"not null;default:false" json:"must_set_password"`
 	PasswordResetToken     *string         `gorm:"type:varchar(255)" json:"-"`
 	PasswordResetExpiresAt *time.Time      `json:"-"`
 	DisplayName            *string         `gorm:"type:varchar(255)" json:"display_name,omitempty"`

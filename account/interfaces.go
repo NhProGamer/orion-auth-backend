@@ -16,6 +16,7 @@ type UserStore interface {
 	FindByDeletionToken(tokenHash string) (*model.User, error)
 	UpdateFields(id uuid.UUID, fields map[string]any) error
 	ChangePassword(id uuid.UUID, input user.ChangePasswordInput) error
+	SetInitialPassword(id uuid.UUID, newPassword string) error
 }
 
 // SessionRevoker revokes user sessions after sensitive changes (password,

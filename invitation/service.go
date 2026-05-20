@@ -143,6 +143,37 @@ func (s *Service) RegisterWithInvite(input RegisterInviteInput) (*model.User, er
 	return newUser, nil
 }
 
+// ValidateToken looks up an invitation by token without consuming it.
+// Returns nil if no such invitation exists or it has expired or is used.
+// Useful for federation-driven onboarding which finalises invitation
+// consumption only after the user has been provisioned.
+func (s *Service) ValidateToken(rawToken string) (*model.Invitation, error) {
+	if rawToken == "" {
+		return nil, nil
+	}
+	tokenHash := crypto.HashToken(rawToken)
+	inv, err := s.repo.FindByToken(tokenHash)
+	if err != nil {
+		return nil, pkg.ErrInternal("failed to check invitation")
+	}
+	if inv == nil || inv.Used || inv.IsExpired() {
+		return nil, nil
+	}
+	return inv, nil
+}
+
+// ConsumeToken marks an invitation as used. Idempotent — safe to call
+// multiple times after a successful federation provisioning.
+func (s *Service) ConsumeToken(inv *model.Invitation) error {
+	now := time.Now()
+	inv.Used = true
+	inv.UsedAt = &now
+	if err := s.repo.MarkUsed(inv); err != nil {
+		return pkg.ErrInternal("failed to mark invitation as used")
+	}
+	return nil
+}
+
 // Settings
 
 func (s *Service) IsRegistrationEnabled() bool {

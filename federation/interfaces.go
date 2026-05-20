@@ -4,6 +4,7 @@ import (
 	"github.com/google/uuid"
 
 	"orion-auth-backend/model"
+	"orion-auth-backend/user"
 )
 
 type RepositoryInterface interface {
@@ -18,4 +19,28 @@ type RepositoryInterface interface {
 	FindLinksByUser(userID uuid.UUID) ([]model.FederationLink, error)
 	DeleteLink(id uuid.UUID) error
 	FindLinkByID(id uuid.UUID) (*model.FederationLink, error)
+}
+
+// UserProvisioner is the subset of user.Service operations the federation
+// flow needs to look up, create and verify accounts. Kept narrow so the
+// federation package stays decoupled from the user package internals.
+type UserProvisioner interface {
+	FindByEmail(email string) (*model.User, error)
+	GetByID(id uuid.UUID) (*model.User, error)
+	CreateFromFederation(input user.FederationProvisionInput, roleIDs []uuid.UUID) (*model.User, error)
+	VerifyPassword(id uuid.UUID, password string) (bool, error)
+}
+
+// RegistrationGate decides whether self-service signup is currently open,
+// allowing the federation flow to auto-provision unknown emails without
+// an invitation token. Implemented by invitation.Service.
+type RegistrationGate interface {
+	IsRegistrationEnabled() bool
+}
+
+// InvitationValidator looks up and consumes invitation tokens carried by
+// the federation flow. Implemented by invitation.Service.
+type InvitationValidator interface {
+	ValidateToken(rawToken string) (*model.Invitation, error)
+	ConsumeToken(inv *model.Invitation) error
 }

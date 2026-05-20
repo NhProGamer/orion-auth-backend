@@ -65,7 +65,7 @@ func TestUser(hasher *crypto.Argon2Hasher, password string) *model.User {
 	return &model.User{
 		BaseModel:    model.BaseModel{ID: id, CreatedAt: time.Now(), UpdatedAt: time.Now()},
 		Email:        "test@example.com",
-		PasswordHash: hash,
+		PasswordHash: &hash,
 		DisplayName:  &name,
 		Active:       true,
 	}

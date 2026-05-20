@@ -54,6 +54,26 @@ func (s *Service) ChangePassword(userID uuid.UUID, input user.ChangePasswordInpu
 	return nil
 }
 
+// SetInitialPassword finalises onboarding for a federation-provisioned
+// user. Sessions are not revoked because the user has none to invalidate
+// outside the current one. A change-notice email is still sent so the
+// account-owner sees the trail.
+func (s *Service) SetInitialPassword(userID uuid.UUID, newPassword string) error {
+	u, err := s.users.GetByID(userID)
+	if err != nil {
+		return err
+	}
+	if err := s.users.SetInitialPassword(userID, newPassword); err != nil {
+		return err
+	}
+	if s.mailer != nil {
+		if err := s.mailer.SendPasswordChangedNotice(u.Email); err != nil {
+			slog.Warn("failed to send initial-password notice", "user_id", userID, "error", err)
+		}
+	}
+	return nil
+}
+
 // --- Email change (two-step) ---
 
 type ChangeEmailRequestInput struct {

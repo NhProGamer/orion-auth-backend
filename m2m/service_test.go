@@ -30,6 +30,8 @@ type setPwdCall struct {
 	pwd string
 }
 
+func ptrStr(s string) *string { return &s }
+
 func newMockUsers() *mockUsers {
 	return &mockUsers{users: map[uuid.UUID]*model.User{}}
 }
@@ -73,7 +75,7 @@ func (m *mockUsers) RegisterAdmin(input user.RegisterInput, roleIDs []uuid.UUID)
 	u := &model.User{
 		BaseModel:    model.BaseModel{ID: id, CreatedAt: time.Now(), UpdatedAt: time.Now()},
 		Email:        input.Email,
-		PasswordHash: "hash",
+		PasswordHash: ptrStr("hash"),
 		Active:       true,
 	}
 	if input.DisplayName != nil {

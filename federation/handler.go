@@ -28,6 +28,7 @@ func (h *Handler) SetAuditService(s *audit.Service) {
 func (h *Handler) RegisterPublicRoutes(public *gin.RouterGroup) {
 	public.GET("/auth/federation/:provider", h.InitSocialLogin)
 	public.GET("/auth/federation/:provider/callback", h.Callback)
+	public.POST("/auth/federation/confirm-link", h.ConfirmLink)
 }
 
 // RegisterAuthenticatedRoutes registers endpoints that require auth.
@@ -138,6 +139,54 @@ func (h *Handler) Callback(c *gin.Context) {
 		"picture":          cbCtx.Claims.Picture,
 		"oauth_request_id": cbCtx.AuthRequest.OAuthRequestID,
 		"return_to":        cbCtx.AuthRequest.ReturnTo,
+	})
+}
+
+// ConfirmLinkInput is the body of POST /api/v1/auth/federation/confirm-link.
+type ConfirmLinkInput struct {
+	Token    string `json:"token" binding:"required"`
+	Password string `json:"password" binding:"required"`
+}
+
+// ConfirmLink godoc
+// @Summary  Confirm a federation account link by supplying the local password
+// @Tags     Federation
+// @Accept   json
+// @Produce  json
+// @Param    body body federation.ConfirmLinkInput true "Pending link token + local password"
+// @Success  200 {object} map[string]any
+// @Failure  400 {object} map[string]any
+// @Failure  401 {object} map[string]any
+// @Router   /api/v1/auth/federation/confirm-link [post]
+func (h *Handler) ConfirmLink(c *gin.Context) {
+	var input ConfirmLinkInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		pkg.HandleError(c, pkg.ErrBadRequest("invalid request body: "+err.Error()))
+		return
+	}
+	result, err := h.service.ConfirmLink(input.Token, input.Password)
+	if err != nil {
+		if IsInvalidConfirmPassword(err) {
+			if h.auditService != nil {
+				h.auditService.LogFromContext(c, audit.ActionFederationLinkConfirmFail, nil)
+			}
+			pkg.HandleError(c, pkg.ErrUnauthorized("invalid password"))
+			return
+		}
+		pkg.HandleError(c, err)
+		return
+	}
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionFederationAccountLinked, map[string]any{
+			"user_id": result.User.ID,
+		})
+	}
+	// Phase 7 will attach session creation + continuation redirect. For now
+	// the endpoint just confirms the link.
+	pkg.OK(c, gin.H{
+		"user_id":          result.User.ID,
+		"oauth_request_id": result.OAuthRequestID,
+		"return_to":        result.ReturnTo,
 	})
 }
 
