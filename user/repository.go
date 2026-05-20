@@ -2,6 +2,7 @@ package user
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -48,13 +49,28 @@ func (r *Repository) UpdateFields(id uuid.UUID, fields map[string]any) error {
 }
 
 func (r *Repository) List(page, perPage int) ([]model.User, int64, error) {
+	return r.Search("", page, perPage)
+}
+
+// Search lists users matching a case-insensitive substring against email,
+// display_name, or the stringified ID. An empty query returns all rows.
+// The query is filtered DB-side so pagination stays consistent.
+func (r *Repository) Search(q string, page, perPage int) ([]model.User, int64, error) {
 	var users []model.User
 	var total int64
 
-	r.db.Model(&model.User{}).Count(&total)
+	query := r.db.Model(&model.User{})
+	if q != "" {
+		like := "%" + strings.ToLower(q) + "%"
+		query = query.Where(
+			"LOWER(email) LIKE ? OR LOWER(COALESCE(display_name, '')) LIKE ? OR id::text LIKE ?",
+			like, like, like,
+		)
+	}
+	query.Count(&total)
 
 	offset := (page - 1) * perPage
-	err := r.db.Offset(offset).Limit(perPage).Order("created_at DESC").Find(&users).Error
+	err := query.Offset(offset).Limit(perPage).Order("created_at DESC").Find(&users).Error
 	return users, total, err
 }
 

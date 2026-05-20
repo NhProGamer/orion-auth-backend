@@ -147,6 +147,13 @@ func (m *mockUserRepo) List(page, perPage int) ([]model.User, int64, error) {
 	return nil, 0, nil
 }
 
+func (m *mockUserRepo) Search(_ string, page, perPage int) ([]model.User, int64, error) {
+	if m.listFn != nil {
+		return m.listFn(page, perPage)
+	}
+	return nil, 0, nil
+}
+
 func (m *mockUserRepo) Delete(id uuid.UUID) error {
 	if m.deleteFn != nil {
 		return m.deleteFn(id)

@@ -14,6 +14,7 @@ type RepositoryInterface interface {
 	Update(user *model.User) error
 	UpdateFields(id uuid.UUID, fields map[string]any) error
 	List(page, perPage int) ([]model.User, int64, error)
+	Search(q string, page, perPage int) ([]model.User, int64, error)
 	Delete(id uuid.UUID) error
 	FindByResetToken(tokenHash string) (*model.User, error)
 	FindByVerifyToken(tokenHash string) (*model.User, error)

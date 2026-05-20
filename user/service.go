@@ -159,6 +159,12 @@ func (s *Service) List(page, perPage int) ([]model.User, int64, error) {
 	return s.repo.List(page, perPage)
 }
 
+// Search lists users matching a case-insensitive substring against email,
+// display name or ID. An empty q returns the full paginated list.
+func (s *Service) Search(q string, page, perPage int) ([]model.User, int64, error) {
+	return s.repo.Search(q, page, perPage)
+}
+
 // RegisterAdmin creates a user with explicit control over which roles are
 // assigned, bypassing the default-role hook. Used by the M2M provisioning
 // API where the caller specifies the exact rôle set. If roleIDs is empty,

@@ -88,8 +88,9 @@ func (h *Handler) RegisterAdminRoutes(admin *gin.RouterGroup) {
 // @Router       /api/v1/admin/users [get]
 func (h *Handler) AdminListUsers(c *gin.Context) {
 	page, perPage := pkg.ParsePagination(c)
+	q := c.Query("q")
 
-	users, total, err := h.service.List(page, perPage)
+	users, total, err := h.service.Search(q, page, perPage)
 	if err != nil {
 		pkg.HandleError(c, pkg.ErrInternal("failed to list users"))
 		return
