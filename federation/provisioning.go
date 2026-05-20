@@ -15,7 +15,10 @@ import (
 	"orion-auth-backend/user"
 )
 
-const pendingLinkTTL = 5 * time.Minute
+const (
+	pendingLinkTTL   = 5 * time.Minute
+	pendingSignupTTL = 15 * time.Minute
+)
 
 // ProvisionOutcome describes what happened during findOrProvisionUser.
 type ProvisionKind int
@@ -24,9 +27,14 @@ const (
 	// ProvisionLoginExisting indicates an existing FederationLink matched and
 	// the user can be logged in directly.
 	ProvisionLoginExisting ProvisionKind = iota
-	// ProvisionCreated indicates a brand-new user was provisioned from the
-	// claims (registration-enabled or invitation-driven path).
-	ProvisionCreated
+	// ProvisionPendingSignup indicates the federated identity does not match
+	// any local account and the policy allows signup (registration_enabled
+	// or a valid invitation). A pending_signup_token has been staged; the
+	// caller must redirect the AuthUI to /complete-account?token=... where
+	// the user picks a local password. The actual User and FederationLink
+	// rows are only created in CompleteSignup, so abandoning the flow
+	// leaves no orphan account behind.
+	ProvisionPendingSignup
 	// ProvisionPendingLinkConfirmation indicates an email match was found and
 	// a pending_link_token was emitted; the caller must redirect the AuthUI
 	// to /link-account?token=... where the user proves possession of the
@@ -36,9 +44,10 @@ const (
 
 // ProvisionOutcome bundles the result of the provisioning step.
 type ProvisionOutcome struct {
-	Kind             ProvisionKind
-	User             *model.User // set for LoginExisting and Created
-	PendingLinkToken string      // set for PendingLinkConfirmation (raw, return to AuthUI)
+	Kind               ProvisionKind
+	User               *model.User // set only for LoginExisting
+	PendingLinkToken   string      // set for PendingLinkConfirmation (raw, return to AuthUI)
+	PendingSignupToken string      // set for PendingSignup (raw, return to AuthUI)
 }
 
 // ErrAccountExistsLinkRequired is returned when an email collision happens
@@ -111,60 +120,71 @@ func (s *Service) FindOrProvisionUser(ctx *CallbackContext) (*ProvisionOutcome, 
 		}, nil
 	}
 
-	// 3. Unknown email — gate signup on registration_enabled or invitation.
-	roleIDs, err := s.resolveSignupGate(authReq)
+	// 3. Unknown email — gate signup on registration_enabled or invitation,
+	// then stage the pending signup so the user picks a local password
+	// before any DB row is created. Invitation tokens are NOT consumed
+	// here; CompleteSignup consumes them only on successful provisioning,
+	// so abandoned flows never burn an invite.
+	if err := s.checkSignupAllowed(authReq); err != nil {
+		return nil, err
+	}
+
+	token, err := s.stagePendingSignup(provider, claims, normEmail, authReq)
 	if err != nil {
 		return nil, err
 	}
-
-	newUser, err := s.users.CreateFromFederation(user.FederationProvisionInput{
-		Email:         normEmail,
-		EmailVerified: claims.EmailVerified,
-		DisplayName:   claims.Name,
-		AvatarURL:     claims.Picture,
-	}, roleIDs)
-	if err != nil {
-		return nil, err
-	}
-
-	if _, err := s.createLink(newUser.ID, provider, claims); err != nil {
-		return nil, err
-	}
-
-	slog.Info("federation user provisioned + linked", "user_id", newUser.ID, "provider", provider.Name)
-	return &ProvisionOutcome{Kind: ProvisionCreated, User: newUser}, nil
+	slog.Info("federation signup staged", "provider", provider.Name, "email", normEmail)
+	return &ProvisionOutcome{Kind: ProvisionPendingSignup, PendingSignupToken: token}, nil
 }
 
-// resolveSignupGate enforces the registration policy and returns the role
-// IDs that should be assigned to the new user (drawn from an invitation
-// when one is present).
-func (s *Service) resolveSignupGate(authReq *model.FederationAuthRequest) ([]uuid.UUID, error) {
-	// Invitation path: validate (without consuming) and use its role set.
+// checkSignupAllowed enforces the registration policy without consuming an
+// invitation. CompleteSignup re-validates and consumes on success.
+func (s *Service) checkSignupAllowed(authReq *model.FederationAuthRequest) error {
 	if authReq.InvitationToken != nil && *authReq.InvitationToken != "" && s.invitations != nil {
 		inv, err := s.invitations.ValidateToken(*authReq.InvitationToken)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if inv != nil {
-			roleIDs := make([]uuid.UUID, 0, len(inv.RoleIDs))
-			for _, raw := range inv.RoleIDs {
-				if id, err := uuid.Parse(raw); err == nil {
-					roleIDs = append(roleIDs, id)
-				}
-			}
-			// Consume immediately so the same token cannot be reused even
-			// if user creation downstream fails — invitations are single-use.
-			if err := s.invitations.ConsumeToken(inv); err != nil {
-				slog.Warn("failed to consume invitation after federation signup", "error", err)
-			}
-			return roleIDs, nil
+			return nil
 		}
 	}
-
 	if s.registration == nil || !s.registration.IsRegistrationEnabled() {
-		return nil, ErrRegistrationDisabled
+		return ErrRegistrationDisabled
 	}
-	return nil, nil
+	return nil
+}
+
+// stagePendingSignup persists the validated claims under a one-shot token.
+func (s *Service) stagePendingSignup(provider *model.FederationProvider, claims ProviderClaims, normEmail string, authReq *model.FederationAuthRequest) (string, error) {
+	rawToken, err := crypto.GenerateRandomString(32)
+	if err != nil {
+		return "", pkg.ErrInternal("failed to generate pending-signup token")
+	}
+	rawBytes, err := json.Marshal(claims.Raw)
+	if err != nil {
+		return "", pkg.ErrInternal("failed to marshal raw claims")
+	}
+	pending := &model.FederationPendingSignup{
+		TokenHash:       crypto.HashToken(rawToken),
+		ProviderID:      provider.ID,
+		ExternalID:      claims.ExternalID,
+		Email:           normEmail,
+		EmailVerified:   claims.EmailVerified,
+		DisplayName:     nullableString(claims.Name),
+		AvatarURL:       nullableString(claims.Picture),
+		RawClaims:       rawBytes,
+		OAuthRequestID:  authReq.OAuthRequestID,
+		ReturnTo:        authReq.ReturnTo,
+		InvitationToken: authReq.InvitationToken,
+		IPAddress:       authReq.IPAddress,
+		UserAgent:       authReq.UserAgent,
+		ExpiresAt:       time.Now().Add(pendingSignupTTL),
+	}
+	if err := s.stateRepo.InsertPendingSignup(pending); err != nil {
+		return "", pkg.ErrInternal("failed to persist pending signup")
+	}
+	return rawToken, nil
 }
 
 // stagePendingLink generates a one-shot opaque token, hashes it (SHA-256)
@@ -287,6 +307,183 @@ func (s *Service) ConfirmLink(rawToken, password string) (*ConfirmLinkResult, er
 		OAuthRequestID: pending.OAuthRequestID,
 		ReturnTo:       pending.ReturnTo,
 	}, nil
+}
+
+// CompleteSignupInput carries the data the AuthUI collects on the
+// /complete-account form: the staging token and the password the user
+// chose. DisplayName lets the user override the value carried by the
+// provider claim if desired.
+type CompleteSignupInput struct {
+	Token       string
+	Password    string
+	DisplayName string
+}
+
+// CompleteSignupResult is what CompleteSignup hands back to the handler
+// so it can create a session and resume continuation context.
+type CompleteSignupResult struct {
+	User           *model.User
+	OAuthRequestID *uuid.UUID
+	ReturnTo       *string
+}
+
+// CompleteSignup consumes a pending signup token, finalises the User row
+// (with the chosen password set, MustSetPassword=false), creates the
+// FederationLink, and consumes the invitation if one was attached.
+func (s *Service) CompleteSignup(in CompleteSignupInput) (*CompleteSignupResult, error) {
+	if in.Token == "" || in.Password == "" {
+		return nil, pkg.ErrBadRequest("token and password are required")
+	}
+	if s.users == nil || s.stateRepo == nil {
+		return nil, pkg.ErrInternal("federation dependencies are not wired")
+	}
+
+	pending, err := s.stateRepo.ConsumePendingSignup(crypto.HashToken(in.Token))
+	if err != nil {
+		return nil, pkg.ErrInternal("failed to consume pending signup")
+	}
+	if pending == nil {
+		return nil, pkg.ErrBadRequest("invalid or expired signup token")
+	}
+
+	provider, err := s.repo.FindProviderByID(pending.ProviderID)
+	if err != nil || provider == nil {
+		return nil, pkg.ErrInternal("pending signup references unknown provider")
+	}
+
+	// Re-validate the signup gate: either the registration toggle is
+	// still on, or the original invitation token is still valid. This
+	// closes the race where an admin disables signup mid-flow.
+	var invitation *model.Invitation
+	if pending.InvitationToken != nil && *pending.InvitationToken != "" && s.invitations != nil {
+		invitation, err = s.invitations.ValidateToken(*pending.InvitationToken)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if invitation == nil {
+		if s.registration == nil || !s.registration.IsRegistrationEnabled() {
+			return nil, ErrRegistrationDisabled
+		}
+	}
+
+	displayName := in.DisplayName
+	if displayName == "" && pending.DisplayName != nil {
+		displayName = *pending.DisplayName
+	}
+	avatar := ""
+	if pending.AvatarURL != nil {
+		avatar = *pending.AvatarURL
+	}
+
+	roleIDs := []uuid.UUID(nil)
+	if invitation != nil {
+		for _, raw := range invitation.RoleIDs {
+			if id, e := uuid.Parse(raw); e == nil {
+				roleIDs = append(roleIDs, id)
+			}
+		}
+	}
+
+	newUser, err := s.users.CreateFromFederation(user.FederationProvisionInput{
+		Email:         pending.Email,
+		EmailVerified: pending.EmailVerified,
+		DisplayName:   displayName,
+		AvatarURL:     avatar,
+		Password:      in.Password,
+	}, roleIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	// At this point the user exists in DB. Link creation failure leaves
+	// an orphan user, which is acceptable (and recoverable: the user can
+	// log in locally and re-attempt federation linking from /me).
+	claimsForLink := ProviderClaims{
+		ExternalID: pending.ExternalID,
+		Email:      pending.Email,
+		Raw:        decodeRawClaims(pending.RawClaims),
+	}
+	if _, err := s.createLink(newUser.ID, provider, claimsForLink); err != nil {
+		slog.Warn("federation link creation failed after signup", "user_id", newUser.ID, "error", err)
+	}
+
+	if invitation != nil && s.invitations != nil {
+		if err := s.invitations.ConsumeToken(invitation); err != nil {
+			slog.Warn("failed to consume invitation after federation signup", "error", err)
+		}
+	}
+
+	slog.Info("federation signup completed", "user_id", newUser.ID, "provider", provider.Name)
+	return &CompleteSignupResult{
+		User:           newUser,
+		OAuthRequestID: pending.OAuthRequestID,
+		ReturnTo:       pending.ReturnTo,
+	}, nil
+}
+
+// PendingSignupView is the read-only projection used by the AuthUI to
+// render the /complete-account form (email + display name suggestion,
+// provider label). It deliberately omits the raw claims and the
+// invitation token.
+type PendingSignupView struct {
+	ProviderName        string
+	ProviderDisplayName string
+	Email               string
+	EmailVerified       bool
+	DisplayName         string
+	ExpiresAt           time.Time
+}
+
+// PeekPendingSignup returns the read-only projection of a staged signup
+// for the AuthUI's onboarding form, without consuming the token.
+func (s *Service) PeekPendingSignup(rawToken string) (*PendingSignupView, error) {
+	if rawToken == "" {
+		return nil, pkg.ErrBadRequest("token is required")
+	}
+	if s.stateRepo == nil {
+		return nil, pkg.ErrInternal("federation state store is not configured")
+	}
+	pending, err := s.stateRepo.GetPendingSignup(crypto.HashToken(rawToken))
+	if err != nil {
+		return nil, pkg.ErrInternal("failed to load pending signup")
+	}
+	if pending == nil {
+		return nil, pkg.ErrBadRequest("invalid or expired signup token")
+	}
+	provider, err := s.repo.FindProviderByID(pending.ProviderID)
+	if err != nil || provider == nil {
+		return nil, pkg.ErrInternal("pending signup references unknown provider")
+	}
+	displayName := ""
+	if pending.DisplayName != nil {
+		displayName = *pending.DisplayName
+	}
+	providerDisplay := provider.Name
+	if provider.DisplayName != nil && *provider.DisplayName != "" {
+		providerDisplay = *provider.DisplayName
+	}
+	return &PendingSignupView{
+		ProviderName:        provider.Name,
+		ProviderDisplayName: providerDisplay,
+		Email:               pending.Email,
+		EmailVerified:       pending.EmailVerified,
+		DisplayName:         displayName,
+		ExpiresAt:           pending.ExpiresAt,
+	}, nil
+}
+
+// decodeRawClaims safely unmarshals the JSONB claims blob back into a map.
+// Returns an empty map on any error so callers can keep going.
+func decodeRawClaims(raw json.RawMessage) map[string]any {
+	if len(raw) == 0 {
+		return map[string]any{}
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return map[string]any{}
+	}
+	return out
 }
 
 // invalidPasswordSentinel is exported indirectly via IsInvalidConfirmPassword

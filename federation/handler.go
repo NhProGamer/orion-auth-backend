@@ -33,6 +33,8 @@ func (h *Handler) RegisterPublicRoutes(public *gin.RouterGroup) {
 	public.GET("/auth/federation/:provider", h.InitSocialLogin)
 	public.GET("/auth/federation/:provider/callback", h.Callback)
 	public.POST("/auth/federation/confirm-link", h.ConfirmLink)
+	public.GET("/auth/federation/pending-signup", h.PeekPendingSignup)
+	public.POST("/auth/federation/complete-signup", h.CompleteSignup)
 }
 
 // RegisterAuthenticatedRoutes registers endpoints that require auth.
@@ -150,14 +152,9 @@ func (h *Handler) Callback(c *gin.Context) {
 	case ProvisionPendingLinkConfirmation:
 		c.Redirect(http.StatusFound, h.service.AuthUIBaseURL()+"/link-account?token="+url.QueryEscape(outcome.PendingLinkToken))
 		return
-	case ProvisionCreated:
-		if h.auditService != nil {
-			h.auditService.LogFromContext(c, audit.ActionFederationUserProvisioned, map[string]any{
-				"user_id":  outcome.User.ID,
-				"provider": providerName,
-			})
-		}
-		h.continueAfterLogin(c, providerName, outcome.User, cbCtx.AuthRequest)
+	case ProvisionPendingSignup:
+		c.Redirect(http.StatusFound, h.service.AuthUIBaseURL()+"/complete-account?token="+url.QueryEscape(outcome.PendingSignupToken))
+		return
 	case ProvisionLoginExisting:
 		if h.auditService != nil {
 			h.auditService.LogFromContext(c, audit.ActionFederationLoginSucceeded, map[string]any{
@@ -346,6 +343,84 @@ func (h *Handler) computeContinuationURL(c *gin.Context, providerName string, u 
 		return authUI + "/login?error=authorize_complete_failed"
 	}
 	return completion.RedirectURL
+}
+
+// PeekPendingSignup godoc
+// @Summary  Read-only view of a pending federation signup
+// @Tags     Federation
+// @Produce  json
+// @Param    token query string true "Pending signup token from /complete-account redirect"
+// @Success  200 {object} map[string]any
+// @Failure  400 {object} map[string]any
+// @Router   /api/v1/auth/federation/pending-signup [get]
+func (h *Handler) PeekPendingSignup(c *gin.Context) {
+	view, err := h.service.PeekPendingSignup(c.Query("token"))
+	if err != nil {
+		pkg.HandleError(c, err)
+		return
+	}
+	pkg.OK(c, gin.H{
+		"provider_name":         view.ProviderName,
+		"provider_display_name": view.ProviderDisplayName,
+		"email":                 view.Email,
+		"email_verified":        view.EmailVerified,
+		"display_name":          view.DisplayName,
+		"expires_at":            view.ExpiresAt,
+	})
+}
+
+// CompleteSignupHTTPInput is the body of POST /api/v1/auth/federation/complete-signup.
+type CompleteSignupHTTPInput struct {
+	Token       string `json:"token" binding:"required"`
+	Password    string `json:"password" binding:"required"`
+	DisplayName string `json:"display_name"`
+}
+
+// CompleteSignup godoc
+// @Summary  Finalise a federation signup by setting the local password
+// @Tags     Federation
+// @Accept   json
+// @Produce  json
+// @Param    body body federation.CompleteSignupHTTPInput true "Pending signup token + chosen password"
+// @Success  200 {object} map[string]any
+// @Failure  400 {object} map[string]any
+// @Router   /api/v1/auth/federation/complete-signup [post]
+func (h *Handler) CompleteSignup(c *gin.Context) {
+	var input CompleteSignupHTTPInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		pkg.HandleError(c, pkg.ErrBadRequest("invalid request body: "+err.Error()))
+		return
+	}
+	result, err := h.service.CompleteSignup(CompleteSignupInput{
+		Token:       input.Token,
+		Password:    input.Password,
+		DisplayName: input.DisplayName,
+	})
+	if err != nil {
+		pkg.HandleError(c, err)
+		return
+	}
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionFederationUserProvisioned, map[string]any{
+			"user_id": result.User.ID,
+		})
+	}
+
+	// Best-effort provider name lookup for the resumed authorize log.
+	providerName := "federation"
+	if links, _ := h.service.repo.FindLinksByUser(result.User.ID); len(links) > 0 {
+		if prov, _ := h.service.repo.FindProviderByID(links[0].ProviderID); prov != nil {
+			providerName = prov.Name
+		}
+	}
+	stub := &model.FederationAuthRequest{
+		OAuthRequestID: result.OAuthRequestID,
+		ReturnTo:       result.ReturnTo,
+	}
+	pkg.OK(c, gin.H{
+		"user_id":  result.User.ID,
+		"redirect": h.computeContinuationURL(c, providerName, result.User, stub),
+	})
 }
 
 // ListLinkedAccounts godoc

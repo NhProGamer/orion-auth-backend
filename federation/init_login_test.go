@@ -14,14 +14,16 @@ import (
 
 // mockStateRepo implements StateRepositoryInterface in-memory.
 type mockStateRepo struct {
-	authRequests map[string]*model.FederationAuthRequest
-	pending      map[string]*model.FederationPendingLink
+	authRequests   map[string]*model.FederationAuthRequest
+	pending        map[string]*model.FederationPendingLink
+	pendingSignups map[string]*model.FederationPendingSignup
 }
 
 func newMockStateRepo() *mockStateRepo {
 	return &mockStateRepo{
-		authRequests: map[string]*model.FederationAuthRequest{},
-		pending:      map[string]*model.FederationPendingLink{},
+		authRequests:   map[string]*model.FederationAuthRequest{},
+		pending:        map[string]*model.FederationPendingLink{},
+		pendingSignups: map[string]*model.FederationPendingSignup{},
 	}
 }
 func (m *mockStateRepo) InsertAuthRequest(req *model.FederationAuthRequest) error {
@@ -44,6 +46,19 @@ func (m *mockStateRepo) ConsumePendingLink(tokenHash string) (*model.FederationP
 	return p, nil
 }
 func (m *mockStateRepo) DeleteExpiredPendingLinks() (int64, error) { return 0, nil }
+func (m *mockStateRepo) InsertPendingSignup(p *model.FederationPendingSignup) error {
+	m.pendingSignups[p.TokenHash] = p
+	return nil
+}
+func (m *mockStateRepo) ConsumePendingSignup(tokenHash string) (*model.FederationPendingSignup, error) {
+	p := m.pendingSignups[tokenHash]
+	delete(m.pendingSignups, tokenHash)
+	return p, nil
+}
+func (m *mockStateRepo) GetPendingSignup(tokenHash string) (*model.FederationPendingSignup, error) {
+	return m.pendingSignups[tokenHash], nil
+}
+func (m *mockStateRepo) DeleteExpiredPendingSignups() (int64, error) { return 0, nil }
 
 func TestInitSocialLogin_GeneratesStatePKCEAndNonce(t *testing.T) {
 	srv := mockOIDCServer(t)

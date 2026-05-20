@@ -38,6 +38,7 @@ func runCleanup(db *gorm.DB) {
 		{"passkey_challenges", "DELETE FROM passkey_challenges WHERE expires_at < ?", []any{now}},
 		{"federation_auth_requests", "DELETE FROM federation_auth_requests WHERE expires_at < ?", []any{now}},
 		{"federation_pending_links", "DELETE FROM federation_pending_links WHERE expires_at < ?", []any{now}},
+		{"federation_pending_signups", "DELETE FROM federation_pending_signups WHERE expires_at < ?", []any{now}},
 		// RFC 9068 denylist: drop JTI entries whose underlying JWT has
 		// already expired (they can no longer pass signature validation
 		// anyway).

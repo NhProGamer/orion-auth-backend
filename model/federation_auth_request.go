@@ -45,3 +45,28 @@ type FederationPendingLink struct {
 }
 
 func (FederationPendingLink) TableName() string { return "federation_pending_links" }
+
+// FederationPendingSignup stages an externally-authenticated identity that
+// has no matching local account yet. The User and FederationLink rows are
+// only materialised when the user POSTs to /complete-signup with a chosen
+// local password. Abandoned rows expire and clean up via the standard
+// cleanup ticker, leaving no orphan accounts behind.
+type FederationPendingSignup struct {
+	TokenHash       string          `gorm:"primaryKey;type:varchar(64)" json:"-"`
+	ProviderID      uuid.UUID       `gorm:"type:uuid;not null" json:"provider_id"`
+	ExternalID      string          `gorm:"type:varchar(255);not null" json:"external_id"`
+	Email           string          `gorm:"type:varchar(255);not null" json:"email"`
+	EmailVerified   bool            `gorm:"not null;default:false" json:"email_verified"`
+	DisplayName     *string         `gorm:"type:varchar(255)" json:"display_name,omitempty"`
+	AvatarURL       *string         `gorm:"type:varchar(512)" json:"avatar_url,omitempty"`
+	RawClaims       json.RawMessage `gorm:"type:jsonb;default:'{}'" json:"raw_claims,omitempty"`
+	OAuthRequestID  *uuid.UUID      `gorm:"column:oauth_request_id;type:uuid" json:"oauth_request_id,omitempty"`
+	ReturnTo        *string         `gorm:"type:varchar(2048)" json:"return_to,omitempty"`
+	InvitationToken *string         `gorm:"type:varchar(255)" json:"-"`
+	IPAddress       *string         `gorm:"column:ip_address;type:inet" json:"ip_address,omitempty"`
+	UserAgent       *string         `gorm:"type:varchar(512)" json:"user_agent,omitempty"`
+	CreatedAt       time.Time       `gorm:"autoCreateTime" json:"created_at"`
+	ExpiresAt       time.Time       `gorm:"not null" json:"expires_at"`
+}
+
+func (FederationPendingSignup) TableName() string { return "federation_pending_signups" }

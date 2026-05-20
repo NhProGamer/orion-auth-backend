@@ -317,24 +317,31 @@ func (s *Service) SetInitialPassword(id uuid.UUID, newPassword string) error {
 }
 
 // FederationProvisionInput carries the subset of normalised claims used to
-// create or refresh a user from a federation provider.
+// create or refresh a user from a federation provider. Password is the
+// chosen local password the user supplies during the /complete-signup
+// step (required: federation-only accounts without a local password are
+// no longer supported by the new staging flow).
 type FederationProvisionInput struct {
 	Email         string
 	EmailVerified bool
 	DisplayName   string
 	AvatarURL     string
+	Password      string
 }
 
-// CreateFromFederation inserts a brand-new user with no local password.
-// The caller (federation.Service.findOrProvisionUser) is responsible for
-// gating this call by registration_enabled / invitation tokens; this
-// method only enforces the basic email-uniqueness and persistence
-// invariants. The returned user has MustSetPassword=true so the AuthUI
-// onboarding flow forces the user through SetInitialPassword.
+// CreateFromFederation inserts a brand-new user with the password the
+// user picked on the /complete-account form. The caller
+// (federation.Service.CompleteSignup) is responsible for gating this
+// call by registration_enabled / invitation tokens; this method only
+// enforces the basic email-uniqueness, password-length, and persistence
+// invariants. MustSetPassword is false: the password is set right away.
 func (s *Service) CreateFromFederation(input FederationProvisionInput, roleIDs []uuid.UUID) (*model.User, error) {
 	email := strings.ToLower(strings.TrimSpace(input.Email))
 	if email == "" {
 		return nil, pkg.ErrBadRequest("federation provider returned no email")
+	}
+	if len(input.Password) < s.cfg.PasswordMinLen {
+		return nil, pkg.ErrBadRequest(fmt.Sprintf("password must be at least %d characters", s.cfg.PasswordMinLen))
 	}
 
 	existing, err := s.repo.FindByEmail(email)
@@ -345,10 +352,16 @@ func (s *Service) CreateFromFederation(input FederationProvisionInput, roleIDs [
 		return nil, pkg.ErrConflict("email already registered")
 	}
 
+	hash, err := s.hasher.Hash(input.Password)
+	if err != nil {
+		return nil, pkg.ErrInternal("failed to hash password")
+	}
+
 	u := &model.User{
 		Email:           email,
 		EmailVerified:   input.EmailVerified,
-		MustSetPassword: true,
+		PasswordHash:    &hash,
+		MustSetPassword: false,
 		Active:          true,
 	}
 	if input.DisplayName != "" {

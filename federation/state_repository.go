@@ -19,6 +19,11 @@ type StateRepositoryInterface interface {
 	InsertPendingLink(p *model.FederationPendingLink) error
 	ConsumePendingLink(tokenHash string) (*model.FederationPendingLink, error)
 	DeleteExpiredPendingLinks() (int64, error)
+
+	InsertPendingSignup(p *model.FederationPendingSignup) error
+	ConsumePendingSignup(tokenHash string) (*model.FederationPendingSignup, error)
+	GetPendingSignup(tokenHash string) (*model.FederationPendingSignup, error)
+	DeleteExpiredPendingSignups() (int64, error)
 }
 
 type StateRepository struct {
@@ -89,5 +94,51 @@ func (r *StateRepository) ConsumePendingLink(tokenHash string) (*model.Federatio
 
 func (r *StateRepository) DeleteExpiredPendingLinks() (int64, error) {
 	res := r.db.Where("expires_at < ?", time.Now()).Delete(&model.FederationPendingLink{})
+	return res.RowsAffected, res.Error
+}
+
+func (r *StateRepository) InsertPendingSignup(p *model.FederationPendingSignup) error {
+	return r.db.Create(p).Error
+}
+
+func (r *StateRepository) ConsumePendingSignup(tokenHash string) (*model.FederationPendingSignup, error) {
+	var p model.FederationPendingSignup
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("token_hash = ?", tokenHash).First(&p).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&model.FederationPendingSignup{}, "token_hash = ?", tokenHash).Error
+	})
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if time.Now().After(p.ExpiresAt) {
+		return nil, nil
+	}
+	return &p, nil
+}
+
+// GetPendingSignup is a read-only lookup. Returns nil when the row is
+// missing or expired; never touches the row so the token remains
+// consumable via ConsumePendingSignup.
+func (r *StateRepository) GetPendingSignup(tokenHash string) (*model.FederationPendingSignup, error) {
+	var p model.FederationPendingSignup
+	if err := r.db.Where("token_hash = ?", tokenHash).First(&p).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if time.Now().After(p.ExpiresAt) {
+		return nil, nil
+	}
+	return &p, nil
+}
+
+func (r *StateRepository) DeleteExpiredPendingSignups() (int64, error) {
+	res := r.db.Where("expires_at < ?", time.Now()).Delete(&model.FederationPendingSignup{})
 	return res.RowsAffected, res.Error
 }

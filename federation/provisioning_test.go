@@ -41,13 +41,13 @@ func (m *mockUsers) GetByID(id uuid.UUID) (*model.User, error) {
 }
 func (m *mockUsers) CreateFromFederation(in user.FederationProvisionInput, roleIDs []uuid.UUID) (*model.User, error) {
 	id, _ := uuid.NewV7()
-	hash := "fed-hash"
-	_ = hash
+	hash := "fed-hash:" + in.Password
 	u := &model.User{
 		BaseModel:       model.BaseModel{ID: id},
 		Email:           in.Email,
 		EmailVerified:   in.EmailVerified,
-		MustSetPassword: true,
+		PasswordHash:    &hash,
+		MustSetPassword: false,
 		Active:          true,
 	}
 	m.addUser(u)
@@ -199,11 +199,11 @@ func TestFindOrProvisionUser_EmailMatchStagesPendingLink(t *testing.T) {
 	assert.Len(t, state.pending, 1, "pending link must be persisted")
 }
 
-func TestFindOrProvisionUser_UnknownEmailWithRegistrationCreatesUser(t *testing.T) {
+func TestFindOrProvisionUser_UnknownEmailWithRegistrationStagesPendingSignup(t *testing.T) {
 	users := newMockUsers()
 	provider := makeProvider(t, false)
 
-	svc, repo, _ := newService(t, users, fakeReg{enabled: true}, &fakeInvitations{})
+	svc, repo, state := newService(t, users, fakeReg{enabled: true}, &fakeInvitations{})
 	require.NoError(t, repo.CreateProvider(provider))
 
 	out, err := svc.FindOrProvisionUser(&CallbackContext{
@@ -212,10 +212,10 @@ func TestFindOrProvisionUser_UnknownEmailWithRegistrationCreatesUser(t *testing.
 		Claims:      ProviderClaims{ExternalID: "ext-1", Email: "bob@example.com", EmailVerified: true, Name: "Bob"},
 	})
 	require.NoError(t, err)
-	assert.Equal(t, ProvisionCreated, out.Kind)
-	require.NotNil(t, out.User)
-	assert.True(t, out.User.MustSetPassword)
-	assert.True(t, out.User.EmailVerified)
+	assert.Equal(t, ProvisionPendingSignup, out.Kind)
+	assert.NotEmpty(t, out.PendingSignupToken)
+	assert.Nil(t, out.User, "user is only materialised on CompleteSignup")
+	assert.Len(t, state.pendingSignups, 1, "pending signup must be persisted")
 }
 
 func TestFindOrProvisionUser_UnknownEmailWithoutRegistrationOrInviteRejected(t *testing.T) {
@@ -248,8 +248,14 @@ func TestFindOrProvisionUser_InvitationOverridesRegistrationGate(t *testing.T) {
 		Claims:      ProviderClaims{ExternalID: "ext-1", Email: "carol@example.com"},
 	})
 	require.NoError(t, err)
-	assert.Equal(t, ProvisionCreated, out.Kind)
-	assert.Len(t, invs.consumed, 1, "invitation must be consumed once user is provisioned")
+	assert.Equal(t, ProvisionPendingSignup, out.Kind)
+	assert.Len(t, invs.consumed, 0, "invitation must NOT be consumed until CompleteSignup completes")
+	require.NotEmpty(t, out.PendingSignupToken)
+
+	// Now complete: invitation is consumed exactly once.
+	_, err = svc.CompleteSignup(CompleteSignupInput{Token: out.PendingSignupToken, Password: "passw0rd-strong"})
+	require.NoError(t, err)
+	assert.Len(t, invs.consumed, 1)
 }
 
 func TestConfirmLink_HappyPathCreatesLink(t *testing.T) {

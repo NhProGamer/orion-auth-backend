@@ -164,10 +164,16 @@ func TestE2E_NewUserAutoProvisioned(t *testing.T) {
 
 	out, err := svc.FindOrProvisionUser(cb)
 	require.NoError(t, err)
-	assert.Equal(t, ProvisionCreated, out.Kind)
-	require.NotNil(t, out.User)
-	assert.True(t, out.User.MustSetPassword)
-	assert.Equal(t, fp.email, out.User.Email)
+	assert.Equal(t, ProvisionPendingSignup, out.Kind)
+	assert.NotEmpty(t, out.PendingSignupToken, "signup must be staged, not committed, until password is set")
+	assert.Nil(t, out.User, "user is only created during CompleteSignup")
+
+	// CompleteSignup finalises the account with the chosen password.
+	res, err := svc.CompleteSignup(CompleteSignupInput{Token: out.PendingSignupToken, Password: "ChosenPasswd1!"})
+	require.NoError(t, err)
+	require.NotNil(t, res.User)
+	assert.False(t, res.User.MustSetPassword)
+	assert.Equal(t, fp.email, res.User.Email)
 }
 
 func TestE2E_ExistingLinkLogsIn(t *testing.T) {
