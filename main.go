@@ -103,7 +103,7 @@ func main() {
 	mfaService := mfa.NewService(mfaRepo, hasher)
 	rbacService := rbac.NewService(rbacRepo)
 	auditService := audit.NewService(db)
-	fedService := federation.NewService(fedRepo, cfg.Issuer)
+	fedService := federation.NewService(fedRepo, cfg.Issuer, hmacEncKey)
 	invRepo := invitation.NewRepository(db)
 	invService := invitation.NewService(invRepo, userService, rbacService, emailSender, cfg.Issuer)
 

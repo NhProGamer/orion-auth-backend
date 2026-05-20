@@ -10,44 +10,121 @@ import (
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 
+	"orion-auth-backend/crypto"
 	"orion-auth-backend/model"
 	"orion-auth-backend/pkg"
 )
 
+// defaultAttributeMapper is the OIDC-standard claim-to-user-field mapping
+// applied when a provider does not declare one explicitly.
+var defaultAttributeMapper = json.RawMessage(`{"external_id":"sub","email":"email","email_verified":"email_verified","name":"name","picture":"picture"}`)
+
 type Service struct {
-	repo   RepositoryInterface
-	issuer string
+	repo              RepositoryInterface
+	issuer            string
+	hmacEncryptionKey []byte
 }
 
-func NewService(repo RepositoryInterface, issuer string) *Service {
-	return &Service{repo: repo, issuer: issuer}
+// NewService constructs the federation service. hmacEncryptionKey is the
+// shared AES-256 key used to seal provider client_secrets at rest (same key
+// used for OAuth client HMAC secrets). When nil, providers cannot be created
+// or updated with a client_secret — operators must rotate via UpdateProvider
+// once the key is configured.
+func NewService(repo RepositoryInterface, issuer string, hmacEncryptionKey []byte) *Service {
+	return &Service{repo: repo, issuer: issuer, hmacEncryptionKey: hmacEncryptionKey}
+}
+
+// sealSecret encrypts a provider client_secret with the server-side AES key.
+// Returns the wire-format ciphertext (12-byte nonce || ciphertext+tag).
+func (s *Service) sealSecret(plaintext string) ([]byte, error) {
+	if len(s.hmacEncryptionKey) == 0 {
+		return nil, pkg.ErrBadRequest("federation client_secret encryption is not configured (auth.hmac_secret_encryption_key is unset)")
+	}
+	return crypto.EncryptHMACSecret([]byte(plaintext), s.hmacEncryptionKey)
+}
+
+// RevealSecret returns the plaintext client_secret of a provider, decrypting
+// it lazily. Prefers the encrypted column; falls back to the legacy plaintext
+// column for backward compatibility with rows created before migration 039.
+func (s *Service) RevealSecret(p *model.FederationProvider) (string, error) {
+	if len(p.ClientSecretEncrypted) > 0 {
+		if len(s.hmacEncryptionKey) == 0 {
+			return "", pkg.ErrInternal("encrypted federation secret cannot be opened (auth.hmac_secret_encryption_key is unset)")
+		}
+		raw, err := crypto.DecryptHMACSecret(p.ClientSecretEncrypted, s.hmacEncryptionKey)
+		if err != nil {
+			return "", pkg.ErrInternal("failed to decrypt federation client_secret")
+		}
+		return string(raw), nil
+	}
+	if p.ClientSecret != nil && *p.ClientSecret != "" {
+		return *p.ClientSecret, nil
+	}
+	return "", pkg.ErrInternal("federation provider has no client_secret configured")
 }
 
 // --- Admin Provider CRUD ---
 
 type CreateProviderInput struct {
-	Name             string   `json:"name" binding:"required"`
-	DisplayName      *string  `json:"display_name"`
-	Type             string   `json:"type" binding:"required"`
-	ClientID         string   `json:"client_id" binding:"required"`
-	ClientSecret     string   `json:"client_secret" binding:"required"`
-	IssuerURL        *string  `json:"issuer_url"`
-	AuthorizationURL *string  `json:"authorization_url"`
-	TokenURL         *string  `json:"token_url"`
-	UserinfoURL      *string  `json:"userinfo_url"`
-	Scopes           []string `json:"scopes"`
+	Name                  string          `json:"name" binding:"required"`
+	DisplayName           *string         `json:"display_name"`
+	Type                  string          `json:"type" binding:"required"`
+	ClientID              string          `json:"client_id" binding:"required"`
+	ClientSecret          string          `json:"client_secret" binding:"required"`
+	IssuerURL             *string         `json:"issuer_url"`
+	AuthorizationURL      *string         `json:"authorization_url"`
+	TokenURL              *string         `json:"token_url"`
+	UserinfoURL           *string         `json:"userinfo_url"`
+	JWKSUri               *string         `json:"jwks_uri,omitempty"`
+	Scopes                []string        `json:"scopes"`
+	AttributeMapper       json.RawMessage `json:"attribute_mapper,omitempty"`
+	SyncOnLogin           *bool           `json:"sync_on_login,omitempty"`
+	AllowLinkConfirmation *bool           `json:"allow_link_confirmation,omitempty"`
 }
 
 type UpdateProviderInput struct {
-	DisplayName      *string  `json:"display_name"`
-	ClientID         *string  `json:"client_id"`
-	ClientSecret     *string  `json:"client_secret"`
-	IssuerURL        *string  `json:"issuer_url"`
-	AuthorizationURL *string  `json:"authorization_url"`
-	TokenURL         *string  `json:"token_url"`
-	UserinfoURL      *string  `json:"userinfo_url"`
-	Scopes           []string `json:"scopes"`
-	Active           *bool    `json:"active"`
+	DisplayName           *string         `json:"display_name"`
+	ClientID              *string         `json:"client_id"`
+	ClientSecret          *string         `json:"client_secret"`
+	IssuerURL             *string         `json:"issuer_url"`
+	AuthorizationURL      *string         `json:"authorization_url"`
+	TokenURL              *string         `json:"token_url"`
+	UserinfoURL           *string         `json:"userinfo_url"`
+	JWKSUri               *string         `json:"jwks_uri,omitempty"`
+	Scopes                []string        `json:"scopes"`
+	AttributeMapper       json.RawMessage `json:"attribute_mapper,omitempty"`
+	SyncOnLogin           *bool           `json:"sync_on_login,omitempty"`
+	AllowLinkConfirmation *bool           `json:"allow_link_confirmation,omitempty"`
+	Active                *bool           `json:"active"`
+}
+
+// validateAttributeMapper enforces a small allowlist of mapper keys to keep
+// the provider configuration auditable. Values must be strings (claim names).
+var allowedMapperKeys = map[string]struct{}{
+	"external_id":    {},
+	"email":          {},
+	"email_verified": {},
+	"name":           {},
+	"picture":        {},
+}
+
+func validateAttributeMapper(raw json.RawMessage) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return pkg.ErrBadRequest("attribute_mapper must be a JSON object")
+	}
+	for k, v := range m {
+		if _, ok := allowedMapperKeys[k]; !ok {
+			return pkg.ErrBadRequest(fmt.Sprintf("attribute_mapper key %q is not allowed", k))
+		}
+		if _, ok := v.(string); !ok {
+			return pkg.ErrBadRequest(fmt.Sprintf("attribute_mapper[%q] must be a string", k))
+		}
+	}
+	return nil
 }
 
 func (s *Service) CreateProvider(input CreateProviderInput) (*model.FederationProvider, error) {
@@ -55,19 +132,36 @@ func (s *Service) CreateProvider(input CreateProviderInput) (*model.FederationPr
 	if existing != nil {
 		return nil, pkg.ErrConflict("provider name already exists")
 	}
+	if err := validateAttributeMapper(input.AttributeMapper); err != nil {
+		return nil, err
+	}
+
+	sealed, err := s.sealSecret(input.ClientSecret)
+	if err != nil {
+		return nil, err
+	}
+
+	mapper := input.AttributeMapper
+	if len(mapper) == 0 {
+		mapper = append(json.RawMessage(nil), defaultAttributeMapper...)
+	}
 
 	p := &model.FederationProvider{
-		Name:             input.Name,
-		DisplayName:      input.DisplayName,
-		Type:             input.Type,
-		ClientID:         input.ClientID,
-		ClientSecret:     input.ClientSecret,
-		IssuerURL:        input.IssuerURL,
-		AuthorizationURL: input.AuthorizationURL,
-		TokenURL:         input.TokenURL,
-		UserinfoURL:      input.UserinfoURL,
-		Scopes:           pq.StringArray(input.Scopes),
-		Active:           true,
+		Name:                  input.Name,
+		DisplayName:           input.DisplayName,
+		Type:                  input.Type,
+		ClientID:              input.ClientID,
+		ClientSecretEncrypted: sealed,
+		IssuerURL:             input.IssuerURL,
+		AuthorizationURL:      input.AuthorizationURL,
+		TokenURL:              input.TokenURL,
+		UserinfoURL:           input.UserinfoURL,
+		JWKSUri:               input.JWKSUri,
+		Scopes:                pq.StringArray(input.Scopes),
+		AttributeMapper:       mapper,
+		SyncOnLogin:           input.SyncOnLogin != nil && *input.SyncOnLogin,
+		AllowLinkConfirmation: input.AllowLinkConfirmation != nil && *input.AllowLinkConfirmation,
+		Active:                true,
 	}
 
 	if err := s.repo.CreateProvider(p); err != nil {
@@ -110,6 +204,9 @@ func (s *Service) UpdateProvider(id uuid.UUID, input UpdateProviderInput) (*mode
 	if err != nil {
 		return nil, err
 	}
+	if err := validateAttributeMapper(input.AttributeMapper); err != nil {
+		return nil, err
+	}
 
 	if input.DisplayName != nil {
 		p.DisplayName = input.DisplayName
@@ -118,7 +215,12 @@ func (s *Service) UpdateProvider(id uuid.UUID, input UpdateProviderInput) (*mode
 		p.ClientID = *input.ClientID
 	}
 	if input.ClientSecret != nil {
-		p.ClientSecret = *input.ClientSecret
+		sealed, err := s.sealSecret(*input.ClientSecret)
+		if err != nil {
+			return nil, err
+		}
+		p.ClientSecretEncrypted = sealed
+		p.ClientSecret = nil // drop any legacy plaintext value
 	}
 	if input.IssuerURL != nil {
 		p.IssuerURL = input.IssuerURL
@@ -132,8 +234,20 @@ func (s *Service) UpdateProvider(id uuid.UUID, input UpdateProviderInput) (*mode
 	if input.UserinfoURL != nil {
 		p.UserinfoURL = input.UserinfoURL
 	}
+	if input.JWKSUri != nil {
+		p.JWKSUri = input.JWKSUri
+	}
 	if input.Scopes != nil {
 		p.Scopes = pq.StringArray(input.Scopes)
+	}
+	if len(input.AttributeMapper) > 0 {
+		p.AttributeMapper = input.AttributeMapper
+	}
+	if input.SyncOnLogin != nil {
+		p.SyncOnLogin = *input.SyncOnLogin
+	}
+	if input.AllowLinkConfirmation != nil {
+		p.AllowLinkConfirmation = *input.AllowLinkConfirmation
 	}
 	if input.Active != nil {
 		p.Active = *input.Active
