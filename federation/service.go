@@ -1,19 +1,27 @@
 package federation
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net/url"
-	"strings"
+	"time"
 
+	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
+	"golang.org/x/oauth2"
 
 	"orion-auth-backend/crypto"
 	"orion-auth-backend/model"
 	"orion-auth-backend/pkg"
 )
+
+// authRequestTTL governs how long a generated state remains valid between
+// the authorize redirect and the provider callback.
+const authRequestTTL = 10 * time.Minute
 
 // defaultAttributeMapper is the OIDC-standard claim-to-user-field mapping
 // applied when a provider does not declare one explicitly.
@@ -21,6 +29,8 @@ var defaultAttributeMapper = json.RawMessage(`{"external_id":"sub","email":"emai
 
 type Service struct {
 	repo              RepositoryInterface
+	stateRepo         StateRepositoryInterface
+	builder           *Builder
 	issuer            string
 	hmacEncryptionKey []byte
 }
@@ -29,9 +39,26 @@ type Service struct {
 // shared AES-256 key used to seal provider client_secrets at rest (same key
 // used for OAuth client HMAC secrets). When nil, providers cannot be created
 // or updated with a client_secret — operators must rotate via UpdateProvider
-// once the key is configured.
+// once the key is configured. stateRepo and builder may be nil for legacy
+// constructions; the real-OAuth code paths verify their presence at use.
 func NewService(repo RepositoryInterface, issuer string, hmacEncryptionKey []byte) *Service {
-	return &Service{repo: repo, issuer: issuer, hmacEncryptionKey: hmacEncryptionKey}
+	return &Service{
+		repo:              repo,
+		issuer:            issuer,
+		hmacEncryptionKey: hmacEncryptionKey,
+		builder:           NewBuilder(),
+	}
+}
+
+// SetStateRepository wires the ephemeral state store. Required for the real
+// authorize/callback OAuth dance (Phase 4+).
+func (s *Service) SetStateRepository(repo StateRepositoryInterface) {
+	s.stateRepo = repo
+}
+
+// SetBuilder lets tests inject a stub Builder.
+func (s *Service) SetBuilder(b *Builder) {
+	s.builder = b
 }
 
 // sealSecret encrypts a provider client_secret with the server-side AES key.
@@ -268,29 +295,98 @@ func (s *Service) DeleteProvider(id uuid.UUID) error {
 
 // --- Social Login ---
 
-// InitSocialLogin returns the authorization URL to redirect the user to.
-func (s *Service) InitSocialLogin(providerName string) (string, error) {
+// InitOptions carries the continuation context the backend will restore on
+// callback (return_to, OAuth authorize continuation, invitation token), plus
+// the request metadata recorded for audit/diagnostics.
+type InitOptions struct {
+	ReturnTo        string
+	OAuthRequestID  *uuid.UUID
+	InvitationToken string
+	IPAddress       string
+	UserAgent       string
+}
+
+// InitSocialLogin builds the provider's authorization URL with state, PKCE
+// (S256) and an OIDC nonce, persists the corresponding auth request so the
+// callback can resume the flow, and returns the absolute URL to which the
+// user should be redirected.
+func (s *Service) InitSocialLogin(ctx context.Context, providerName string, opts InitOptions) (string, error) {
+	if s.stateRepo == nil {
+		return "", pkg.ErrInternal("federation state store is not configured")
+	}
 	provider, err := s.repo.FindProviderByName(providerName)
 	if err != nil || provider == nil {
 		return "", pkg.ErrNotFound("provider not found")
 	}
 
-	if provider.AuthorizationURL == nil {
-		return "", pkg.ErrBadRequest("provider has no authorization URL configured")
+	secret, err := s.RevealSecret(provider)
+	if err != nil {
+		return "", err
 	}
 
-	callbackURL := fmt.Sprintf("%s/api/v1/auth/federation/%s/callback", s.issuer, provider.Name)
-	scopes := strings.Join(provider.Scopes, " ")
-
-	params := url.Values{
-		"client_id":     {provider.ClientID},
-		"redirect_uri":  {callbackURL},
-		"response_type": {"code"},
-		"scope":         {scopes},
+	state, err := crypto.GenerateRandomString(32)
+	if err != nil {
+		return "", pkg.ErrInternal("failed to generate state")
+	}
+	codeVerifier, err := crypto.GenerateRandomString(32)
+	if err != nil {
+		return "", pkg.ErrInternal("failed to generate PKCE verifier")
+	}
+	nonce, err := crypto.GenerateRandomString(16)
+	if err != nil {
+		return "", pkg.ErrInternal("failed to generate nonce")
 	}
 
-	authURL := *provider.AuthorizationURL + "?" + params.Encode()
+	callbackURL := s.callbackURL(provider)
+	oc, err := s.builder.ForProvider(ctx, provider, secret, callbackURL)
+	if err != nil {
+		return "", err
+	}
+
+	challenge := pkceS256Challenge(codeVerifier)
+	authURL := oc.Config.AuthCodeURL(
+		state,
+		oauth2.AccessTypeOffline,
+		oauth2.SetAuthURLParam("code_challenge", challenge),
+		oauth2.SetAuthURLParam("code_challenge_method", "S256"),
+		oidc.Nonce(nonce),
+	)
+
+	req := &model.FederationAuthRequest{
+		State:           state,
+		ProviderID:      provider.ID,
+		CodeVerifier:    codeVerifier,
+		Nonce:           nonce,
+		ReturnTo:        nullableString(opts.ReturnTo),
+		OAuthRequestID:  opts.OAuthRequestID,
+		InvitationToken: nullableString(opts.InvitationToken),
+		IPAddress:       nullableString(opts.IPAddress),
+		UserAgent:       nullableString(opts.UserAgent),
+		ExpiresAt:       time.Now().Add(authRequestTTL),
+	}
+	if err := s.stateRepo.InsertAuthRequest(req); err != nil {
+		return "", pkg.ErrInternal("failed to persist federation auth request")
+	}
+
+	slog.Info("federation login initiated", "provider", provider.Name, "state", state)
 	return authURL, nil
+}
+
+func (s *Service) callbackURL(p *model.FederationProvider) string {
+	return fmt.Sprintf("%s/api/v1/auth/federation/%s/callback", s.issuer, p.Name)
+}
+
+func pkceS256Challenge(verifier string) string {
+	sum := sha256.Sum256([]byte(verifier))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+func nullableString(s string) *string {
+	if s == "" {
+		return nil
+	}
+	v := s
+	return &v
 }
 
 // CallbackResult represents the result of processing a federation callback.

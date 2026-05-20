@@ -1,6 +1,8 @@
 package federation
 
 import (
+	"net/http"
+
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
@@ -61,22 +63,39 @@ func (h *Handler) RegisterAdminRoutes(admin *gin.RouterGroup) {
 // InitSocialLogin godoc
 // @Summary      Initiate social login via a federation provider
 // @Tags         Federation
-// @Produce      json
-// @Param        provider path string true "Provider name"
-// @Success      200 {object} map[string]any
+// @Param        provider          path  string true  "Provider name"
+// @Param        return_to         query string false "Absolute URL to redirect to after success"
+// @Param        oauth_request_id  query string false "Continuation: in-progress OrionAuth authorize request ID"
+// @Param        invitation_token  query string false "Pre-bind a social signup to an invitation"
+// @Success      302
 // @Failure      400 {object} map[string]any
 // @Failure      404 {object} map[string]any
 // @Router       /api/v1/auth/federation/{provider} [get]
 func (h *Handler) InitSocialLogin(c *gin.Context) {
 	providerName := c.Param("provider")
 
-	authURL, err := h.service.InitSocialLogin(providerName)
+	opts := InitOptions{
+		ReturnTo:        c.Query("return_to"),
+		InvitationToken: c.Query("invitation_token"),
+		IPAddress:       c.ClientIP(),
+		UserAgent:       c.Request.UserAgent(),
+	}
+	if raw := c.Query("oauth_request_id"); raw != "" {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			pkg.HandleError(c, pkg.ErrBadRequest("oauth_request_id must be a UUID"))
+			return
+		}
+		opts.OAuthRequestID = &id
+	}
+
+	authURL, err := h.service.InitSocialLogin(c.Request.Context(), providerName, opts)
 	if err != nil {
 		pkg.HandleError(c, err)
 		return
 	}
 
-	pkg.OK(c, gin.H{"authorization_url": authURL})
+	c.Redirect(http.StatusFound, authURL)
 }
 
 // Callback godoc

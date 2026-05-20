@@ -104,6 +104,7 @@ func main() {
 	rbacService := rbac.NewService(rbacRepo)
 	auditService := audit.NewService(db)
 	fedService := federation.NewService(fedRepo, cfg.Issuer, hmacEncKey)
+	fedService.SetStateRepository(federation.NewStateRepository(db))
 	invRepo := invitation.NewRepository(db)
 	invService := invitation.NewService(invRepo, userService, rbacService, emailSender, cfg.Issuer)
 
