@@ -1,6 +1,7 @@
 package federation
 
 import (
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -125,6 +126,7 @@ func (h *Handler) Callback(c *gin.Context) {
 
 	cbCtx, err := h.service.ProcessCallback(c.Request.Context(), providerName, code, state)
 	if err != nil {
+		slog.Warn("federation callback failed", "provider", providerName, "error", err)
 		h.recordLoginFailure(c, providerName, err)
 		h.redirectLoginError(c, "callback_failed")
 		return

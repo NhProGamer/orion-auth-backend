@@ -90,13 +90,14 @@ func (s *Service) SetAuthUIBaseURL(u string) {
 	s.authUIBase = strings.TrimRight(u, "/")
 }
 
-// AuthUIBaseURL returns the configured AuthUI origin (or the issuer as
-// fallback). Exposed so the handler can build redirect URLs.
+// AuthUIBaseURL returns the configured AuthUI origin (or the issuer
+// suffixed by /ui as fallback — the AuthUI SPA's default mount point).
+// Exposed so the handler can build redirect URLs.
 func (s *Service) AuthUIBaseURL() string {
 	if s.authUIBase != "" {
 		return s.authUIBase
 	}
-	return strings.TrimRight(s.issuer, "/")
+	return strings.TrimRight(s.issuer, "/") + "/ui"
 }
 
 // OAuthResumer exposes the wired continuation client so handlers can call
