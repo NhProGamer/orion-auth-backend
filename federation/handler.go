@@ -177,14 +177,13 @@ func (h *Handler) continueAfterLogin(c *gin.Context, providerName string, u *mod
 	resumer := h.service.OAuthResumerClient()
 	authUI := h.service.AuthUIBaseURL()
 
-	onboardingSuffix := ""
-	if u.MustSetPassword {
-		onboardingSuffix = "?onboarding=set_password"
-	}
-
 	// Standalone social login (no OAuth in flight): go to return_to or home.
+	// Onboarding (must_set_password) is left to the downstream client to
+	// detect via /me — a backend-driven onboarding redirect would need its
+	// own short-lived token because the AuthUI has no bearer to call
+	// /me/set-password at this point. Tracked as a follow-up.
 	if authReq.OAuthRequestID == nil || resumer == nil {
-		target := authUI + "/" + onboardingSuffix
+		target := authUI + "/"
 		if authReq.ReturnTo != nil && safeReturnTo(*authReq.ReturnTo, authUI) {
 			target = *authReq.ReturnTo
 		}
@@ -214,11 +213,7 @@ func (h *Handler) continueAfterLogin(c *gin.Context, providerName string, u *mod
 		h.redirectLoginError(c, "authorize_complete_failed")
 		return
 	}
-	final := completion.RedirectURL
-	if u.MustSetPassword {
-		final = authUI + "/complete-account" + onboardingSuffix + "&continue=" + url.QueryEscape(completion.RedirectURL)
-	}
-	c.Redirect(http.StatusFound, final)
+	c.Redirect(http.StatusFound, completion.RedirectURL)
 }
 
 func (h *Handler) redirectLoginError(c *gin.Context, code string) {
@@ -327,12 +322,8 @@ func (h *Handler) computeContinuationURL(c *gin.Context, providerName string, u 
 	resumer := h.service.OAuthResumerClient()
 	authUI := h.service.AuthUIBaseURL()
 
-	onboardingSuffix := ""
-	if u.MustSetPassword {
-		onboardingSuffix = "?onboarding=set_password"
-	}
 	if authReq.OAuthRequestID == nil || resumer == nil {
-		target := authUI + "/" + onboardingSuffix
+		target := authUI + "/"
 		if authReq.ReturnTo != nil && safeReturnTo(*authReq.ReturnTo, authUI) {
 			target = *authReq.ReturnTo
 		}
@@ -351,9 +342,6 @@ func (h *Handler) computeContinuationURL(c *gin.Context, providerName string, u 
 	completion, err := resumer.CompleteAuthorizeFirstParty(status.RequestID, c.ClientIP(), c.Request.UserAgent())
 	if err != nil {
 		return authUI + "/login?error=authorize_complete_failed"
-	}
-	if u.MustSetPassword {
-		return authUI + "/complete-account" + onboardingSuffix + "&continue=" + url.QueryEscape(completion.RedirectURL)
 	}
 	return completion.RedirectURL
 }
