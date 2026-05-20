@@ -398,61 +398,179 @@ type CallbackResult struct {
 	IsNewLink  bool      `json:"is_new_link"`
 }
 
-// ProcessCallback processes the callback from the external provider.
-// In a real implementation, this would exchange the code for tokens and fetch user info.
-// For now, it accepts the external user info directly (the consuming app handles the token exchange).
-type CallbackInput struct {
-	ExternalID string          `json:"external_id" binding:"required"`
-	Email      string          `json:"email"`
-	Metadata   json.RawMessage `json:"metadata"`
+// ProviderClaims is the normalised view of an authenticated external
+// identity, derived from either an id_token or a userinfo response and
+// shaped through the provider's configured attribute_mapper.
+type ProviderClaims struct {
+	ExternalID    string
+	Email         string
+	EmailVerified bool
+	Name          string
+	Picture       string
+	Raw           map[string]any
 }
 
-func (s *Service) ProcessCallback(providerName string, input CallbackInput, existingUserID *uuid.UUID) (*CallbackResult, error) {
+// CallbackContext bundles everything the downstream provisioning logic
+// (Phase 6) needs to act on a successful authorize callback: the provider
+// row, the consumed auth-request (with its continuation context) and the
+// validated claims.
+type CallbackContext struct {
+	Provider    *model.FederationProvider
+	AuthRequest *model.FederationAuthRequest
+	Claims      ProviderClaims
+	RawIDToken  string // empty for non-OIDC providers
+}
+
+// ProcessCallback validates the state, exchanges the authorization code,
+// verifies the id_token (OIDC) or fetches userinfo (OAuth 2.0), applies
+// the attribute mapper, and returns the normalised claims plus the
+// consumed auth request.
+func (s *Service) ProcessCallback(ctx context.Context, providerName, code, state string) (*CallbackContext, error) {
+	if s.stateRepo == nil {
+		return nil, pkg.ErrInternal("federation state store is not configured")
+	}
+	if code == "" || state == "" {
+		return nil, pkg.ErrBadRequest("code and state are required")
+	}
+
+	authReq, err := s.stateRepo.ConsumeAuthRequest(state)
+	if err != nil {
+		return nil, pkg.ErrInternal("failed to consume federation state")
+	}
+	if authReq == nil {
+		return nil, pkg.ErrBadRequest("invalid or expired state")
+	}
+
 	provider, err := s.repo.FindProviderByName(providerName)
 	if err != nil || provider == nil {
 		return nil, pkg.ErrNotFound("provider not found")
 	}
-
-	// Check if this external account is already linked
-	link, _ := s.repo.FindLink(provider.ID, input.ExternalID)
-
-	if link != nil {
-		// Account already linked, return the user
-		return &CallbackResult{
-			UserID:     link.UserID,
-			ExternalID: input.ExternalID,
-			Email:      input.Email,
-		}, nil
+	if provider.ID != authReq.ProviderID {
+		return nil, pkg.ErrBadRequest("state does not match provider")
 	}
 
-	// New link
-	if existingUserID == nil {
-		return nil, pkg.ErrBadRequest("no user ID provided for account linking; user must be authenticated")
+	secret, err := s.RevealSecret(provider)
+	if err != nil {
+		return nil, err
 	}
 
-	emailPtr := &input.Email
-	if input.Email == "" {
-		emailPtr = nil
+	oc, err := s.builder.ForProvider(ctx, provider, secret, s.callbackURL(provider))
+	if err != nil {
+		return nil, err
 	}
 
-	newLink := &model.FederationLink{
-		UserID:     *existingUserID,
-		ProviderID: provider.ID,
-		ExternalID: input.ExternalID,
-		Email:      emailPtr,
-		Metadata:   input.Metadata,
+	httpCtx := s.builder.HTTPContext(ctx)
+	tok, err := oc.Config.Exchange(httpCtx, code,
+		oauth2.SetAuthURLParam("code_verifier", authReq.CodeVerifier),
+	)
+	if err != nil {
+		slog.Warn("federation code exchange failed", "provider", providerName, "error", err)
+		return nil, pkg.ErrBadRequest("code exchange failed: " + err.Error())
 	}
 
-	if err := s.repo.CreateLink(newLink); err != nil {
-		return nil, pkg.ErrInternal("failed to create federation link")
+	rawClaims, rawIDToken, err := s.extractClaims(httpCtx, oc, tok, authReq.Nonce)
+	if err != nil {
+		return nil, err
 	}
 
-	slog.Info("federation link created", "user_id", existingUserID, "provider", providerName, "external_id", input.ExternalID)
-	return &CallbackResult{
-		UserID:     *existingUserID,
-		ExternalID: input.ExternalID,
-		Email:      input.Email,
-		IsNewLink:  true,
+	claims, err := applyAttributeMapper(rawClaims, provider.AttributeMapper)
+	if err != nil {
+		return nil, err
+	}
+	claims.Raw = rawClaims
+
+	return &CallbackContext{
+		Provider:    provider,
+		AuthRequest: authReq,
+		Claims:      claims,
+		RawIDToken:  rawIDToken,
+	}, nil
+}
+
+// extractClaims pulls either id_token claims (OIDC) or userinfo claims
+// (OAuth 2.0) out of a token response. For OIDC providers, the id_token's
+// signature, issuer, audience, expiry and nonce are validated.
+func (s *Service) extractClaims(ctx context.Context, oc *OAuthClient, tok *oauth2.Token, expectedNonce string) (map[string]any, string, error) {
+	if oc.IsOIDC {
+		rawIDToken, _ := tok.Extra("id_token").(string)
+		if rawIDToken == "" {
+			return nil, "", pkg.ErrBadRequest("provider response missing id_token")
+		}
+		idToken, err := oc.Verifier.Verify(ctx, rawIDToken)
+		if err != nil {
+			return nil, "", pkg.ErrBadRequest("id_token verification failed: " + err.Error())
+		}
+		if idToken.Nonce != expectedNonce {
+			return nil, "", pkg.ErrBadRequest("id_token nonce mismatch")
+		}
+		var claims map[string]any
+		if err := idToken.Claims(&claims); err != nil {
+			return nil, "", pkg.ErrInternal("failed to decode id_token claims")
+		}
+		return claims, rawIDToken, nil
+	}
+
+	if oc.UserinfoURL == "" {
+		return nil, "", pkg.ErrBadRequest("oauth2 provider requires userinfo_url")
+	}
+	client := oc.Config.Client(ctx, tok)
+	resp, err := client.Get(oc.UserinfoURL)
+	if err != nil {
+		return nil, "", pkg.ErrBadRequest("userinfo fetch failed: " + err.Error())
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		return nil, "", pkg.ErrBadRequest(fmt.Sprintf("userinfo returned HTTP %d", resp.StatusCode))
+	}
+	var claims map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&claims); err != nil {
+		return nil, "", pkg.ErrBadRequest("userinfo response is not JSON")
+	}
+	return claims, "", nil
+}
+
+// applyAttributeMapper reads the provider's claim-to-field mapping (with a
+// safe default fallback) and projects the raw claim map onto a structured
+// ProviderClaims value.
+func applyAttributeMapper(raw map[string]any, mapper json.RawMessage) (ProviderClaims, error) {
+	m := map[string]string{}
+	source := mapper
+	if len(source) == 0 {
+		source = defaultAttributeMapper
+	}
+	if err := json.Unmarshal(source, &m); err != nil {
+		return ProviderClaims{}, pkg.ErrInternal("invalid attribute_mapper stored on provider")
+	}
+	pick := func(key string) string {
+		claim, ok := m[key]
+		if !ok || claim == "" {
+			return ""
+		}
+		v, ok := raw[claim]
+		if !ok || v == nil {
+			return ""
+		}
+		s, _ := v.(string)
+		return s
+	}
+	pickBool := func(key string) bool {
+		claim, ok := m[key]
+		if !ok || claim == "" {
+			return false
+		}
+		v, ok := raw[claim]
+		if !ok || v == nil {
+			return false
+		}
+		b, _ := v.(bool)
+		return b
+	}
+	return ProviderClaims{
+		ExternalID:    pick("external_id"),
+		Email:         pick("email"),
+		EmailVerified: pickBool("email_verified"),
+		Name:          pick("name"),
+		Picture:       pick("picture"),
 	}, nil
 }
 
