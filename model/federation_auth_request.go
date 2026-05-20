@@ -16,7 +16,7 @@ type FederationAuthRequest struct {
 	CodeVerifier    string     `gorm:"type:varchar(128);not null" json:"-"`
 	Nonce           string     `gorm:"type:varchar(128);not null" json:"-"`
 	ReturnTo        *string    `gorm:"type:varchar(2048)" json:"return_to,omitempty"`
-	OAuthRequestID  *uuid.UUID `gorm:"type:uuid" json:"oauth_request_id,omitempty"`
+	OAuthRequestID  *uuid.UUID `gorm:"column:oauth_request_id;type:uuid" json:"oauth_request_id,omitempty"`
 	InvitationToken *string    `gorm:"type:varchar(255)" json:"-"`
 	IPAddress       *string    `gorm:"column:ip_address;type:inet" json:"ip_address,omitempty"`
 	UserAgent       *string    `gorm:"type:varchar(512)" json:"user_agent,omitempty"`
@@ -36,7 +36,7 @@ type FederationPendingLink struct {
 	ExternalID      string          `gorm:"type:varchar(255);not null" json:"external_id"`
 	Email           *string         `gorm:"type:varchar(255)" json:"email,omitempty"`
 	RawClaims       json.RawMessage `gorm:"type:jsonb;default:'{}'" json:"raw_claims,omitempty"`
-	OAuthRequestID  *uuid.UUID      `gorm:"type:uuid" json:"oauth_request_id,omitempty"`
+	OAuthRequestID  *uuid.UUID      `gorm:"column:oauth_request_id;type:uuid" json:"oauth_request_id,omitempty"`
 	ReturnTo        *string         `gorm:"type:varchar(2048)" json:"return_to,omitempty"`
 	IPAddress       *string         `gorm:"column:ip_address;type:inet" json:"ip_address,omitempty"`
 	UserAgent       *string         `gorm:"type:varchar(512)" json:"user_agent,omitempty"`
