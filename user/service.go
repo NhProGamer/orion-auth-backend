@@ -29,6 +29,7 @@ type Service struct {
 	emailSender     email.Sender
 	roleAssigner    RoleAssigner
 	defaultRoleID   uuid.UUID
+	regForm         RegFormProvider
 }
 
 func NewService(repo RepositoryInterface, hasher *crypto.Argon2Hasher, cfg config.AuthConfig) *Service {
@@ -47,10 +48,27 @@ func (s *Service) SetDefaultRole(roleID uuid.UUID, assigner RoleAssigner) {
 	s.roleAssigner = assigner
 }
 
+// SetRegFormProvider wires the admin-configurable registration-fields
+// schema. When nil, Register and CreateFromFederation behave as before
+// (no validation or storage of extra_fields).
+func (s *Service) SetRegFormProvider(p RegFormProvider) {
+	s.regForm = p
+}
+
 type RegisterInput struct {
-	Email       string  `json:"email" binding:"required,email"`
-	Password    string  `json:"password" binding:"required"`
-	DisplayName *string `json:"display_name"`
+	Email       string         `json:"email" binding:"required,email"`
+	Password    string         `json:"password" binding:"required"`
+	DisplayName *string        `json:"display_name"`
+	ExtraFields map[string]any `json:"extra_fields,omitempty"`
+}
+
+// RegFormProvider exposes the registration-fields schema lookup so
+// user.Service can validate and apply admin-defined extra fields
+// without taking a direct dependency on the regform package. Injected
+// via SetRegFormProvider; nil = no dynamic fields (legacy behaviour).
+type RegFormProvider interface {
+	ListForContext(context string) ([]model.RegistrationField, error)
+	Apply(u *model.User, extras map[string]any, schema []model.RegistrationField, context string) error
 }
 
 type LoginInput struct {
@@ -95,6 +113,10 @@ func (s *Service) Register(input RegisterInput) (*model.User, error) {
 		PasswordHash: &hash,
 		DisplayName:  input.DisplayName,
 		Active:       true,
+	}
+
+	if err := s.applyRegFormExtras(user, input.ExtraFields, "register"); err != nil {
+		return nil, err
 	}
 
 	if err := s.repo.Create(user); err != nil {
@@ -326,13 +348,15 @@ func (s *Service) SetInitialPassword(id uuid.UUID, newPassword string) error {
 // create or refresh a user from a federation provider. Password is the
 // chosen local password the user supplies during the /complete-signup
 // step (required: federation-only accounts without a local password are
-// no longer supported by the new staging flow).
+// no longer supported by the new staging flow). ExtraFields carries the
+// admin-defined dynamic fields collected on /complete-account.
 type FederationProvisionInput struct {
 	Email         string
 	EmailVerified bool
 	DisplayName   string
 	AvatarURL     string
 	Password      string
+	ExtraFields   map[string]any
 }
 
 // CreateFromFederation inserts a brand-new user with the password the
@@ -377,6 +401,10 @@ func (s *Service) CreateFromFederation(input FederationProvisionInput, roleIDs [
 	if input.AvatarURL != "" {
 		a := input.AvatarURL
 		u.AvatarURL = &a
+	}
+
+	if err := s.applyRegFormExtras(u, input.ExtraFields, "federation"); err != nil {
+		return nil, err
 	}
 
 	if err := s.repo.Create(u); err != nil {
@@ -759,4 +787,18 @@ func mergeProfileMetadata(dst *model.ProfileMetadata, src *model.ProfileMetadata
 	if src.Address != nil {
 		dst.Address = src.Address
 	}
+}
+
+// applyRegFormExtras validates and writes the admin-defined dynamic
+// fields onto the user about to be persisted. No-op when the
+// registration-fields provider is not wired (legacy deployments).
+func (s *Service) applyRegFormExtras(u *model.User, extras map[string]any, context string) error {
+	if s.regForm == nil {
+		return nil
+	}
+	schema, err := s.regForm.ListForContext(context)
+	if err != nil {
+		return err
+	}
+	return s.regForm.Apply(u, extras, schema, context)
 }

@@ -281,6 +281,13 @@ func (s *Service) Delete(id uuid.UUID) error {
 	return nil
 }
 
+// Apply is a thin pass-through over the package-level Apply function so
+// the Service satisfies user.RegFormProvider without exposing the
+// internal applicator at the call site.
+func (s *Service) Apply(u *model.User, extras map[string]any, schema []model.RegistrationField, context string) error {
+	return Apply(u, extras, schema, context)
+}
+
 func (s *Service) Reorder(in ReorderInput) error {
 	if len(in.IDs) == 0 {
 		return pkg.ErrBadRequest("ids must be a non-empty list")

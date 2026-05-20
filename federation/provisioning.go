@@ -317,6 +317,7 @@ type CompleteSignupInput struct {
 	Token       string
 	Password    string
 	DisplayName string
+	ExtraFields map[string]any
 }
 
 // CompleteSignupResult is what CompleteSignup hands back to the handler
@@ -391,6 +392,7 @@ func (s *Service) CompleteSignup(in CompleteSignupInput) (*CompleteSignupResult,
 		DisplayName:   displayName,
 		AvatarURL:     avatar,
 		Password:      in.Password,
+		ExtraFields:   in.ExtraFields,
 	}, roleIDs)
 	if err != nil {
 		return nil, err

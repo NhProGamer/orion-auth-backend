@@ -371,9 +371,10 @@ func (h *Handler) PeekPendingSignup(c *gin.Context) {
 
 // CompleteSignupHTTPInput is the body of POST /api/v1/auth/federation/complete-signup.
 type CompleteSignupHTTPInput struct {
-	Token       string `json:"token" binding:"required"`
-	Password    string `json:"password" binding:"required"`
-	DisplayName string `json:"display_name"`
+	Token       string         `json:"token" binding:"required"`
+	Password    string         `json:"password" binding:"required"`
+	DisplayName string         `json:"display_name"`
+	ExtraFields map[string]any `json:"extra_fields,omitempty"`
 }
 
 // CompleteSignup godoc
@@ -395,6 +396,7 @@ func (h *Handler) CompleteSignup(c *gin.Context) {
 		Token:       input.Token,
 		Password:    input.Password,
 		DisplayName: input.DisplayName,
+		ExtraFields: input.ExtraFields,
 	})
 	if err != nil {
 		pkg.HandleError(c, err)

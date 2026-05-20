@@ -113,6 +113,7 @@ func main() {
 	invService := invitation.NewService(invRepo, userService, rbacService, emailSender, cfg.Issuer)
 	fedService.SetProvisioningDependencies(userService, invService, invService)
 	regFormService := regform.NewService(regFormRepo)
+	userService.SetRegFormProvider(regFormService)
 
 	// WebAuthn / Passkeys
 	wa, err := webauthn.New(&webauthn.Config{
