@@ -319,11 +319,22 @@ func (s *Service) applyRequestedClaims(requestedClaimsJSON, target string, u *mo
 // ValidateIDToken parses and validates an ID token, returning the subject (user ID).
 // Used for id_token_hint validation in prompt=none and end_session flows.
 func (s *Service) ValidateIDToken(tokenString string) (uuid.UUID, error) {
+	claims, err := s.validateIDTokenClaims(tokenString)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return idTokenSubject(claims)
+}
+
+// validateIDTokenClaims parses and signature-validates an ID token, returning
+// the full claim set. Callers that need claims beyond `sub` (e.g. `aud` to
+// resolve the client during RP-Initiated Logout when client_id is not in the
+// query per spec) use this directly.
+func (s *Service) validateIDTokenClaims(tokenString string) (jwt.MapClaims, error) {
 	s.mu.RLock()
 	keys := s.allKeys
 	s.mu.RUnlock()
 
-	// Build a key function that tries all known keys
 	keyFunc := func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
 			return nil, errors.New("unexpected signing method")
@@ -351,25 +362,47 @@ func (s *Service) ValidateIDToken(tokenString string) (uuid.UUID, error) {
 		jwt.WithValidMethods([]string{"RS256"}),
 	)
 	if err != nil {
-		return uuid.Nil, err
+		return nil, err
 	}
 
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok || !token.Valid {
-		return uuid.Nil, errors.New("invalid token claims")
+		return nil, errors.New("invalid token claims")
 	}
+	return claims, nil
+}
 
+func idTokenSubject(claims jwt.MapClaims) (uuid.UUID, error) {
 	sub, ok := claims["sub"].(string)
 	if !ok {
 		return uuid.Nil, errors.New("missing sub claim")
 	}
-
 	userID, err := uuid.Parse(sub)
 	if err != nil {
 		return uuid.Nil, errors.New("invalid sub claim")
 	}
-
 	return userID, nil
+}
+
+// idTokenAudience extracts the first UUID-shaped audience from an ID token's
+// `aud` claim, which may be either a string (single audience) or a []any
+// (multiple). Returns uuid.Nil if none match.
+func idTokenAudience(claims jwt.MapClaims) uuid.UUID {
+	switch v := claims["aud"].(type) {
+	case string:
+		if id, err := uuid.Parse(v); err == nil {
+			return id
+		}
+	case []any:
+		for _, a := range v {
+			if s, ok := a.(string); ok {
+				if id, err := uuid.Parse(s); err == nil {
+					return id
+				}
+			}
+		}
+	}
+	return uuid.Nil
 }
 
 // --- Access Token JWT (RFC 9068) ---
@@ -810,15 +843,19 @@ type EndSessionResponse struct {
 
 func (s *Service) EndSession(params EndSessionParams) (*EndSessionResponse, error) {
 	var userID *uuid.UUID
+	var hintClientID uuid.UUID
 
 	// Validate id_token_hint if provided
 	if params.IDTokenHint != "" {
-		uid, err := s.ValidateIDToken(params.IDTokenHint)
+		claims, err := s.validateIDTokenClaims(params.IDTokenHint)
 		if err != nil {
 			slog.Warn("invalid id_token_hint in end_session", "error", err)
 			// Per spec, invalid id_token_hint should not prevent logout display
 		} else {
-			userID = &uid
+			if uid, err := idTokenSubject(claims); err == nil {
+				userID = &uid
+			}
+			hintClientID = idTokenAudience(claims)
 		}
 	}
 
@@ -846,18 +883,38 @@ func (s *Service) EndSession(params EndSessionParams) (*EndSessionResponse, erro
 		}
 	}
 
-	// Validate post_logout_redirect_uri
+	// Validate post_logout_redirect_uri. Per OIDC RP-Initiated Logout 1.0 §2,
+	// `client_id` is OPTIONAL — if not in the query, derive it from
+	// id_token_hint.aud, which we've already signature-validated above.
 	if params.PostLogoutRedirectURI != "" {
-		validRedirect := false
+		var resolvedClientID uuid.UUID
+		if params.ClientID != "" {
+			if id, err := uuid.Parse(params.ClientID); err == nil {
+				resolvedClientID = id
+			}
+		}
+		if resolvedClientID == uuid.Nil {
+			resolvedClientID = hintClientID
+		}
 
-		// Look up client to validate the post_logout_redirect_uri
-		if params.ClientID != "" && s.clientFinder != nil {
-			clientUUID, err := uuid.Parse(params.ClientID)
-			if err == nil {
-				client, err := s.clientFinder.FindActiveByID(clientUUID)
-				if err == nil && client != nil && client.HasPostLogoutRedirectURI(params.PostLogoutRedirectURI) {
-					validRedirect = true
-				}
+		validRedirect := false
+		var rejectReason string
+		switch {
+		case resolvedClientID == uuid.Nil:
+			rejectReason = "no client_id (query or id_token_hint.aud)"
+		case s.clientFinder == nil:
+			rejectReason = "no client finder configured"
+		default:
+			client, err := s.clientFinder.FindActiveByID(resolvedClientID)
+			switch {
+			case err != nil:
+				rejectReason = "client lookup failed: " + err.Error()
+			case client == nil:
+				rejectReason = "client not found or inactive"
+			case !client.HasPostLogoutRedirectURI(params.PostLogoutRedirectURI):
+				rejectReason = "uri not in client's post_logout_redirect_uris whitelist"
+			default:
+				validRedirect = true
 			}
 		}
 
@@ -867,6 +924,12 @@ func (s *Service) EndSession(params EndSessionParams) (*EndSessionResponse, erro
 				redirectURI += "?state=" + params.State
 			}
 			resp.RedirectURI = redirectURI
+		} else {
+			slog.Warn("post_logout_redirect_uri rejected",
+				"uri", params.PostLogoutRedirectURI,
+				"client_id_param", params.ClientID,
+				"client_id_from_hint", hintClientID,
+				"reason", rejectReason)
 		}
 	}
 
