@@ -655,29 +655,43 @@ func seedAdminUser(db *gorm.DB, userService *user.Service, rbacService *rbac.Ser
 
 func seedAdminClient(db *gorm.DB, issuer string) {
 	clientID := uuid.MustParse(adminClientID)
+	postLogoutURI := issuer + "/admin/"
 
-	var count int64
-	if err := db.Model(&model.OAuthClient{}).Where("id = ?", clientID).Count(&count).Error; err != nil {
-		slog.Error("failed to check admin client", "error", err)
+	var existing model.OAuthClient
+	err := db.Where("id = ?", clientID).First(&existing).Error
+	if err == nil {
+		// Self-heal: ensure post_logout_redirect_uris contains the AdminUI
+		// origin so end_session can validate it. The seed predated the
+		// post-logout flow; older databases have an empty whitelist.
+		if !existing.HasPostLogoutRedirectURI(postLogoutURI) {
+			existing.PostLogoutRedirectURIs = append(existing.PostLogoutRedirectURIs, postLogoutURI)
+			if err := db.Model(&existing).Update("post_logout_redirect_uris", existing.PostLogoutRedirectURIs).Error; err != nil {
+				slog.Error("failed to backfill admin client post_logout_redirect_uris", "error", err)
+			} else {
+				slog.Info("admin client post_logout_redirect_uris backfilled", "uri", postLogoutURI)
+			}
+		}
 		return
 	}
-	if count > 0 {
+	if err != gorm.ErrRecordNotFound {
+		slog.Error("failed to check admin client", "error", err)
 		return
 	}
 
 	adminClient := &model.OAuthClient{
-		Name:            "Admin UI",
-		RedirectURIs:    pq.StringArray{issuer + "/admin/callback"},
-		GrantTypes:      pq.StringArray{"authorization_code", "refresh_token"},
-		ResponseTypes:   pq.StringArray{"code"},
-		Scopes:          pq.StringArray{"openid", "profile", "email"},
-		TokenAuthMethod: "none",
-		IsPublic:        true,
-		IsFirstParty:    true,
-		AccessTokenTTL:  3600,
-		RefreshTokenTTL: 86400,
-		IDTokenTTL:      3600,
-		Active:          true,
+		Name:                   "Admin UI",
+		RedirectURIs:           pq.StringArray{issuer + "/admin/callback"},
+		PostLogoutRedirectURIs: pq.StringArray{postLogoutURI},
+		GrantTypes:             pq.StringArray{"authorization_code", "refresh_token"},
+		ResponseTypes:          pq.StringArray{"code"},
+		Scopes:                 pq.StringArray{"openid", "profile", "email"},
+		TokenAuthMethod:        "none",
+		IsPublic:               true,
+		IsFirstParty:           true,
+		AccessTokenTTL:         3600,
+		RefreshTokenTTL:        86400,
+		IDTokenTTL:             3600,
+		Active:                 true,
 	}
 	adminClient.ID = clientID
 
