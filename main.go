@@ -428,6 +428,7 @@ func setupRouter(a setupRouterArgs) *gin.Engine {
 	a.invHandler.RegisterPublicRoutes(public)
 	a.fedHandler.RegisterPublicRoutes(public)
 	a.regFormHandler.RegisterPublicRoutes(public)
+	a.passwordHandler.RegisterPublicRoutes(public)
 	// Token-based account flows (no bearer): email-change confirm + deletion cancel.
 	a.accountHandler.RegisterRoutes(public, nil, nil, nil, nil, nil)
 	// Public passkey login (usernameless): begin + finish only.
