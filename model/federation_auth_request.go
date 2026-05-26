@@ -18,10 +18,16 @@ type FederationAuthRequest struct {
 	ReturnTo        *string    `gorm:"type:varchar(2048)" json:"return_to,omitempty"`
 	OAuthRequestID  *uuid.UUID `gorm:"column:oauth_request_id;type:uuid" json:"oauth_request_id,omitempty"`
 	InvitationToken *string    `gorm:"type:varchar(255)" json:"-"`
-	IPAddress       *string    `gorm:"column:ip_address;type:inet" json:"ip_address,omitempty"`
-	UserAgent       *string    `gorm:"type:varchar(512)" json:"user_agent,omitempty"`
-	CreatedAt       time.Time  `gorm:"autoCreateTime" json:"created_at"`
-	ExpiresAt       time.Time  `gorm:"not null" json:"expires_at"`
+	// LinkUserID is set when the auth request was initiated by an already-
+	// authenticated user who wants to attach this federation identity to their
+	// existing local account. The callback short-circuits on this value:
+	// instead of provisioning or logging in, it creates a federation_link for
+	// LinkUserID and redirects to ReturnTo.
+	LinkUserID *uuid.UUID `gorm:"column:link_user_id;type:uuid" json:"link_user_id,omitempty"`
+	IPAddress  *string    `gorm:"column:ip_address;type:inet" json:"ip_address,omitempty"`
+	UserAgent  *string    `gorm:"type:varchar(512)" json:"user_agent,omitempty"`
+	CreatedAt  time.Time  `gorm:"autoCreateTime" json:"created_at"`
+	ExpiresAt  time.Time  `gorm:"not null" json:"expires_at"`
 }
 
 func (FederationAuthRequest) TableName() string { return "federation_auth_requests" }
