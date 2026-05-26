@@ -363,11 +363,15 @@ func (s *Service) DeleteProvider(id uuid.UUID) error {
 
 // InitOptions carries the continuation context the backend will restore on
 // callback (return_to, OAuth authorize continuation, invitation token), plus
-// the request metadata recorded for audit/diagnostics.
+// the request metadata recorded for audit/diagnostics. When LinkUserID is set
+// the auth request is flagged as a deliberate link initiated by that user;
+// the callback short-circuits the login/provisioning paths and creates a
+// federation_link for that user instead.
 type InitOptions struct {
 	ReturnTo        string
 	OAuthRequestID  *uuid.UUID
 	InvitationToken string
+	LinkUserID      *uuid.UUID
 	IPAddress       string
 	UserAgent       string
 }
@@ -426,6 +430,7 @@ func (s *Service) InitSocialLogin(ctx context.Context, providerName string, opts
 		ReturnTo:        nullableString(opts.ReturnTo),
 		OAuthRequestID:  opts.OAuthRequestID,
 		InvitationToken: nullableString(opts.InvitationToken),
+		LinkUserID:      opts.LinkUserID,
 		IPAddress:       nullableString(opts.IPAddress),
 		UserAgent:       nullableString(opts.UserAgent),
 		ExpiresAt:       time.Now().Add(authRequestTTL),
@@ -436,6 +441,22 @@ func (s *Service) InitSocialLogin(ctx context.Context, providerName string, opts
 
 	slog.Info("federation login initiated", "provider", provider.Name, "state", state)
 	return authURL, nil
+}
+
+// BeginLink starts the OAuth dance with the intent of attaching the
+// returned external identity to an already-authenticated local user. The
+// resulting URL must be opened in the user's browser; the callback handler
+// will short-circuit on the LinkUserID stamped here and create the
+// federation_link directly.
+func (s *Service) BeginLink(ctx context.Context, userID uuid.UUID, providerName string, opts InitOptions) (string, error) {
+	if userID == uuid.Nil {
+		return "", pkg.ErrBadRequest("user id is required for begin-link")
+	}
+	opts.LinkUserID = &userID
+	// A link flow can never carry a public-login continuation context.
+	opts.OAuthRequestID = nil
+	opts.InvitationToken = ""
+	return s.InitSocialLogin(ctx, providerName, opts)
 }
 
 func (s *Service) callbackURL(p *model.FederationProvider) string {

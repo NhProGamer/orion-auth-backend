@@ -40,14 +40,19 @@ const (
 	// to /link-account?token=... where the user proves possession of the
 	// existing local account with their password.
 	ProvisionPendingLinkConfirmation
+	// ProvisionAuthenticatedLink indicates the auth request was initiated
+	// by an already-authenticated user (BeginLink) and the federation_link
+	// has been created for that user. No login or session is started.
+	ProvisionAuthenticatedLink
 )
 
 // ProvisionOutcome bundles the result of the provisioning step.
 type ProvisionOutcome struct {
 	Kind               ProvisionKind
-	User               *model.User // set only for LoginExisting
-	PendingLinkToken   string      // set for PendingLinkConfirmation (raw, return to AuthUI)
-	PendingSignupToken string      // set for PendingSignup (raw, return to AuthUI)
+	User               *model.User            // set only for LoginExisting
+	PendingLinkToken   string                 // set for PendingLinkConfirmation (raw, return to AuthUI)
+	PendingSignupToken string                 // set for PendingSignup (raw, return to AuthUI)
+	Link               *model.FederationLink  // set for AuthenticatedLink
 }
 
 // ErrAccountExistsLinkRequired is returned when an email collision happens
@@ -59,6 +64,12 @@ var ErrAccountExistsLinkRequired = pkg.ErrBadRequest("account exists; sign in wi
 // ErrRegistrationDisabled is returned when the email is unknown but neither
 // public registration is enabled nor a valid invitation was attached.
 var ErrRegistrationDisabled = pkg.ErrBadRequest("public registration is disabled; an invitation is required")
+
+// ErrIdentityLinkedToOtherUser is returned during BeginLink callback when
+// the federation identity returned by the provider is already linked to a
+// different local user. Reusing the same external identity across two
+// accounts would let an attacker hijack a session.
+var ErrIdentityLinkedToOtherUser = pkg.ErrConflict("this provider identity is already linked to another account")
 
 // FindOrProvisionUser is the policy engine of the federation callback. It
 // decides whether to log in an existing user, provision a new one, or
@@ -74,6 +85,14 @@ func (s *Service) FindOrProvisionUser(ctx *CallbackContext) (*ProvisionOutcome, 
 
 	if claims.ExternalID == "" {
 		return nil, pkg.ErrBadRequest("federation provider returned no subject identifier")
+	}
+
+	// 0. Authenticated link flow short-circuit. When the auth request was
+	// initiated by an already-logged-in user via BeginLink, we either
+	// idempotently return the existing link for that user, refuse if the
+	// identity is bound to a different account, or create the link fresh.
+	if authReq.LinkUserID != nil {
+		return s.completeAuthenticatedLink(*authReq.LinkUserID, provider, claims)
 	}
 
 	// 1. Existing link → straight login.
@@ -241,6 +260,42 @@ func (s *Service) createLink(userID uuid.UUID, provider *model.FederationProvide
 		return nil, pkg.ErrInternal("failed to create federation link")
 	}
 	return link, nil
+}
+
+// completeAuthenticatedLink is the BeginLink callback handler. It enforces:
+//
+//   - the auth user still exists,
+//   - the returned external identity is not already attached to a different
+//     local user (would let an attacker hijack identities),
+//   - idempotency: if the auth user already has this exact link, the
+//     existing row is returned without error.
+//
+// On success a fresh federation_link is persisted bound to the auth user.
+func (s *Service) completeAuthenticatedLink(userID uuid.UUID, provider *model.FederationProvider, claims ProviderClaims) (*ProvisionOutcome, error) {
+	u, err := s.users.GetByID(userID)
+	if err != nil {
+		return nil, pkg.ErrInternal("failed to load user for link")
+	}
+	if u == nil {
+		return nil, pkg.ErrBadRequest("the user that initiated the link no longer exists")
+	}
+
+	existing, err := s.repo.FindLink(provider.ID, claims.ExternalID)
+	if err != nil {
+		return nil, pkg.ErrInternal("failed to look up federation link")
+	}
+	if existing != nil {
+		if existing.UserID != userID {
+			return nil, ErrIdentityLinkedToOtherUser
+		}
+		return &ProvisionOutcome{Kind: ProvisionAuthenticatedLink, User: u, Link: existing}, nil
+	}
+
+	link, err := s.createLink(userID, provider, claims)
+	if err != nil {
+		return nil, err
+	}
+	return &ProvisionOutcome{Kind: ProvisionAuthenticatedLink, User: u, Link: link}, nil
 }
 
 // ConfirmLinkResult is what ConfirmLink hands back to the handler so it

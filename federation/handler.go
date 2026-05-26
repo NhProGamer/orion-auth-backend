@@ -137,6 +137,12 @@ func (h *Handler) Callback(c *gin.Context) {
 	outcome, err := h.service.FindOrProvisionUser(cbCtx)
 	if err != nil {
 		h.recordLoginFailure(c, providerName, err)
+		// Authenticated link errors land back on the AuthUI's linked-accounts
+		// screen with a precise status so the SPA can show a usable message.
+		if cbCtx.AuthRequest.LinkUserID != nil {
+			h.redirectLinkResult(c, cbCtx.AuthRequest, providerName, linkResultFromErr(err))
+			return
+		}
 		switch {
 		case err == ErrAccountExistsLinkRequired:
 			h.redirectLoginError(c, "account_exists_link_required")
@@ -149,6 +155,17 @@ func (h *Handler) Callback(c *gin.Context) {
 	}
 
 	switch outcome.Kind {
+	case ProvisionAuthenticatedLink:
+		if h.auditService != nil {
+			h.auditService.LogFromContext(c, audit.ActionFederationAccountLinked, map[string]any{
+				"user_id":     outcome.User.ID,
+				"provider":    providerName,
+				"link_id":     outcome.Link.ID,
+				"external_id": outcome.Link.ExternalID,
+			})
+		}
+		h.redirectLinkResult(c, cbCtx.AuthRequest, providerName, "linked")
+		return
 	case ProvisionPendingLinkConfirmation:
 		c.Redirect(http.StatusFound, h.service.AuthUIBaseURL()+"/link-account?token="+url.QueryEscape(outcome.PendingLinkToken))
 		return
@@ -164,6 +181,34 @@ func (h *Handler) Callback(c *gin.Context) {
 		}
 		h.continueAfterLogin(c, providerName, outcome.User, cbCtx.AuthRequest)
 	}
+}
+
+// linkResultFromErr maps service errors raised during an authenticated link
+// flow to compact status codes that the AuthUI can interpret without
+// re-parsing prose. Anything unknown maps to "link_failed".
+func linkResultFromErr(err error) string {
+	if err == ErrIdentityLinkedToOtherUser {
+		return "identity_already_linked"
+	}
+	return "link_failed"
+}
+
+// redirectLinkResult sends the user back to the AuthUI after an
+// authenticated link callback. The destination is authReq.ReturnTo when it
+// passes the same-origin allowlist, otherwise the default
+// `/linked-accounts` screen. The status (linked / identity_already_linked /
+// link_failed) and provider name are appended as query params.
+func (h *Handler) redirectLinkResult(c *gin.Context, authReq *model.FederationAuthRequest, providerName, status string) {
+	authUI := h.service.AuthUIBaseURL()
+	target := authUI + "/linked-accounts"
+	if authReq.ReturnTo != nil && safeReturnTo(*authReq.ReturnTo, authUI) {
+		target = *authReq.ReturnTo
+	}
+	sep := "?"
+	if strings.Contains(target, "?") {
+		sep = "&"
+	}
+	c.Redirect(http.StatusFound, target+sep+"link_status="+url.QueryEscape(status)+"&provider="+url.QueryEscape(providerName))
 }
 
 // continueAfterLogin runs the post-provisioning redirect logic shared
