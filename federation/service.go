@@ -667,6 +667,20 @@ func (s *Service) GetLinkedAccounts(userID uuid.UUID) ([]model.FederationLink, e
 	return s.repo.FindLinksByUser(userID)
 }
 
+// GetLinkedAccount returns a single federation link by ID, scoped to the
+// caller. Returns pkg.ErrNotFound when the row does not exist OR when it
+// belongs to another user (no information leak on ownership).
+func (s *Service) GetLinkedAccount(linkID, userID uuid.UUID) (*model.FederationLink, error) {
+	link, err := s.repo.FindLinkByID(linkID)
+	if err != nil {
+		return nil, pkg.ErrInternal("failed to load linked account")
+	}
+	if link == nil || link.UserID != userID {
+		return nil, pkg.ErrNotFound("linked account not found")
+	}
+	return link, nil
+}
+
 func (s *Service) UnlinkAccount(linkID, userID uuid.UUID) error {
 	link, err := s.repo.FindLinkByID(linkID)
 	if err != nil || link == nil {

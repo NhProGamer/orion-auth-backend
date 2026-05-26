@@ -39,15 +39,16 @@ func (h *Handler) RegisterPublicRoutes(public *gin.RouterGroup) {
 
 // RegisterAuthenticatedRoutes registers endpoints that require auth.
 //
-//	readPerm      — account:read_profile (List)
-//	managePerm    — account:manage_linked_accounts (Unlink)
-//	requireReauth — step-up on Unlink
+//	readPerm      — account:read_profile (List, Get)
+//	managePerm    — account:manage_linked_accounts (BeginLink, Unlink)
+//	requireReauth — step-up on BeginLink + Unlink
 func (h *Handler) RegisterAuthenticatedRoutes(authenticated *gin.RouterGroup, readPerm, managePerm, requireReauth gin.HandlerFunc) {
 	read := authenticated.Group("")
 	if readPerm != nil {
 		read.Use(readPerm)
 	}
 	read.GET("/me/linked-accounts", h.ListLinkedAccounts)
+	read.GET("/me/linked-accounts/:id", h.GetLinkedAccount)
 
 	manage := authenticated.Group("")
 	if managePerm != nil {
@@ -56,6 +57,7 @@ func (h *Handler) RegisterAuthenticatedRoutes(authenticated *gin.RouterGroup, re
 	if requireReauth != nil {
 		manage.Use(requireReauth)
 	}
+	manage.POST("/me/linked-accounts/:provider/begin-link", h.BeginLinkAccount)
 	manage.DELETE("/me/linked-accounts/:id", h.UnlinkAccount)
 }
 
@@ -493,6 +495,99 @@ func (h *Handler) ListLinkedAccounts(c *gin.Context) {
 	}
 
 	pkg.List(c, links, len(links))
+}
+
+// GetLinkedAccount godoc
+// @Summary      Get a single linked federation account
+// @Tags         Federation
+// @Produce      json
+// @Param        id path string true "Linked account ID"
+// @Success      200 {object} map[string]any
+// @Failure      401 {object} map[string]any
+// @Failure      404 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/me/linked-accounts/{id} [get]
+func (h *Handler) GetLinkedAccount(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		pkg.HandleError(c, pkg.ErrUnauthorized("not authenticated"))
+		return
+	}
+	linkID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		pkg.HandleError(c, pkg.ErrBadRequest("invalid link ID"))
+		return
+	}
+	link, err := h.service.GetLinkedAccount(linkID, userID)
+	if err != nil {
+		pkg.HandleError(c, err)
+		return
+	}
+	pkg.OK(c, gin.H{"link": link})
+}
+
+// BeginLinkAccountInput is the body of POST /api/v1/me/linked-accounts/{provider}/begin-link.
+type BeginLinkAccountInput struct {
+	// ReturnTo is the URL the AuthUI wants the user to land on after the
+	// provider callback completes (must be same-origin with the AuthUI base).
+	// Defaults to AuthUI /linked-accounts when empty.
+	ReturnTo string `json:"return_to,omitempty"`
+}
+
+// BeginLinkAccount godoc
+// @Summary      Start linking a federation account to the current user
+// @Tags         Federation
+// @Accept       json
+// @Produce      json
+// @Param        provider path string                                 true  "Provider name"
+// @Param        body     body federation.BeginLinkAccountInput       false "Optional return_to"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} map[string]any
+// @Failure      401 {object} map[string]any
+// @Failure      403 {object} map[string]any
+// @Failure      404 {object} map[string]any
+// @Security     BearerAuth
+// @Router       /api/v1/me/linked-accounts/{provider}/begin-link [post]
+func (h *Handler) BeginLinkAccount(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		pkg.HandleError(c, pkg.ErrUnauthorized("not authenticated"))
+		return
+	}
+	providerName := c.Param("provider")
+	if providerName == "" {
+		pkg.HandleError(c, pkg.ErrBadRequest("provider is required"))
+		return
+	}
+
+	// Body is optional — SPAs without a return_to can POST an empty body.
+	var input BeginLinkAccountInput
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&input); err != nil {
+			pkg.HandleError(c, pkg.ErrBadRequest("invalid request body: "+err.Error()))
+			return
+		}
+	}
+
+	redirect, err := h.service.BeginLink(c.Request.Context(), userID, providerName, InitOptions{
+		ReturnTo:  input.ReturnTo,
+		IPAddress: c.ClientIP(),
+		UserAgent: c.Request.UserAgent(),
+	})
+	if err != nil {
+		pkg.HandleError(c, err)
+		return
+	}
+
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionFederationLoginSucceeded, map[string]any{
+			"action":   "begin_link",
+			"user_id":  userID,
+			"provider": providerName,
+		})
+	}
+
+	pkg.OK(c, gin.H{"redirect_url": redirect, "provider": providerName})
 }
 
 // UnlinkAccount godoc
