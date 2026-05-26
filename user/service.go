@@ -2,7 +2,6 @@ package user
 
 import (
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"orion-auth-backend/crypto"
 	"orion-auth-backend/email"
 	"orion-auth-backend/model"
+	"orion-auth-backend/password"
 	"orion-auth-backend/pkg"
 )
 
@@ -23,13 +23,14 @@ type RoleAssigner interface {
 }
 
 type Service struct {
-	repo            RepositoryInterface
-	hasher          *crypto.Argon2Hasher
-	cfg             config.AuthConfig
-	emailSender     email.Sender
-	roleAssigner    RoleAssigner
-	defaultRoleID   uuid.UUID
-	regForm         RegFormProvider
+	repo              RepositoryInterface
+	hasher            *crypto.Argon2Hasher
+	cfg               config.AuthConfig
+	emailSender       email.Sender
+	roleAssigner      RoleAssigner
+	defaultRoleID     uuid.UUID
+	regForm           RegFormProvider
+	passwordValidator *password.Validator
 }
 
 func NewService(repo RepositoryInterface, hasher *crypto.Argon2Hasher, cfg config.AuthConfig) *Service {
@@ -53,6 +54,42 @@ func (s *Service) SetDefaultRole(roleID uuid.UUID, assigner RoleAssigner) {
 // (no validation or storage of extra_fields).
 func (s *Service) SetRegFormProvider(p RegFormProvider) {
 	s.regForm = p
+}
+
+// SetPasswordValidator wires the admin-configurable password policy
+// validator. When nil, validatePassword falls back to a default policy
+// (kept for tests and bootstrap before the password package is wired).
+func (s *Service) SetPasswordValidator(v *password.Validator) {
+	s.passwordValidator = v
+}
+
+// validatePassword applies the active password policy. Hints are values
+// the user already typed in the same form (email, display name…); they
+// get fed to zxcvbn so it can penalise passwords that just repeat them.
+func (s *Service) validatePassword(pwd string, hints ...string) error {
+	return s.passwordValidator.Validate(pwd, hints...)
+}
+
+func derefStr(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
+// userHintsForID resolves email + display name for a known user, returning
+// them as zxcvbn hints. Best-effort: a DB miss yields an empty slice so
+// the password validation still runs (just without contextual penalties).
+func (s *Service) userHintsForID(id uuid.UUID) []string {
+	u, err := s.repo.FindByID(id)
+	if err != nil || u == nil {
+		return nil
+	}
+	hints := []string{u.Email}
+	if u.DisplayName != nil && *u.DisplayName != "" {
+		hints = append(hints, *u.DisplayName)
+	}
+	return hints
 }
 
 type RegisterInput struct {
@@ -91,8 +128,8 @@ type ChangePasswordInput struct {
 func (s *Service) Register(input RegisterInput) (*model.User, error) {
 	input.Email = strings.ToLower(strings.TrimSpace(input.Email))
 
-	if len(input.Password) < s.cfg.PasswordMinLen {
-		return nil, pkg.ErrBadRequest(fmt.Sprintf("password must be at least %d characters", s.cfg.PasswordMinLen))
+	if err := s.validatePassword(input.Password, input.Email, derefStr(input.DisplayName)); err != nil {
+		return nil, err
 	}
 
 	existing, err := s.repo.FindByEmail(input.Email)
@@ -195,8 +232,8 @@ func (s *Service) Search(q string, page, perPage int) ([]model.User, int64, erro
 func (s *Service) RegisterAdmin(input RegisterInput, roleIDs []uuid.UUID) (*model.User, error) {
 	input.Email = strings.ToLower(strings.TrimSpace(input.Email))
 
-	if len(input.Password) < s.cfg.PasswordMinLen {
-		return nil, pkg.ErrBadRequest(fmt.Sprintf("password must be at least %d characters", s.cfg.PasswordMinLen))
+	if err := s.validatePassword(input.Password, input.Email, derefStr(input.DisplayName)); err != nil {
+		return nil, err
 	}
 
 	existing, err := s.repo.FindByEmail(input.Email)
@@ -305,8 +342,9 @@ func (s *Service) M2MUpdate(id uuid.UUID, input M2MUpdateInput) (*model.User, er
 // the M2M API — no current-password check, the caller is trusted via scope).
 // Returns the user for downstream side effects (sessions revoke, audit).
 func (s *Service) SetPassword(id uuid.UUID, newPassword string) error {
-	if len(newPassword) < s.cfg.PasswordMinLen {
-		return pkg.ErrBadRequest(fmt.Sprintf("password must be at least %d characters", s.cfg.PasswordMinLen))
+	hints := s.userHintsForID(id)
+	if err := s.validatePassword(newPassword, hints...); err != nil {
+		return err
 	}
 	hash, err := s.hasher.Hash(newPassword)
 	if err != nil {
@@ -324,8 +362,9 @@ func (s *Service) SetPassword(id uuid.UUID, newPassword string) error {
 // avoid letting authenticated users bypass the standard ChangePassword
 // flow (which requires the current password).
 func (s *Service) SetInitialPassword(id uuid.UUID, newPassword string) error {
-	if len(newPassword) < s.cfg.PasswordMinLen {
-		return pkg.ErrBadRequest(fmt.Sprintf("password must be at least %d characters", s.cfg.PasswordMinLen))
+	hints := s.userHintsForID(id)
+	if err := s.validatePassword(newPassword, hints...); err != nil {
+		return err
 	}
 	u, err := s.GetByID(id)
 	if err != nil {
@@ -370,8 +409,8 @@ func (s *Service) CreateFromFederation(input FederationProvisionInput, roleIDs [
 	if email == "" {
 		return nil, pkg.ErrBadRequest("federation provider returned no email")
 	}
-	if len(input.Password) < s.cfg.PasswordMinLen {
-		return nil, pkg.ErrBadRequest(fmt.Sprintf("password must be at least %d characters", s.cfg.PasswordMinLen))
+	if err := s.validatePassword(input.Password, email, input.DisplayName); err != nil {
+		return nil, err
 	}
 
 	existing, err := s.repo.FindByEmail(email)
@@ -572,8 +611,9 @@ func (s *Service) FindByEmail(email string) (*model.User, error) {
 }
 
 func (s *Service) ChangePassword(id uuid.UUID, input ChangePasswordInput) error {
-	if len(input.NewPassword) < s.cfg.PasswordMinLen {
-		return pkg.ErrBadRequest(fmt.Sprintf("password must be at least %d characters", s.cfg.PasswordMinLen))
+	hints := s.userHintsForID(id)
+	if err := s.validatePassword(input.NewPassword, hints...); err != nil {
+		return err
 	}
 
 	user, err := s.GetByID(id)
@@ -704,8 +744,11 @@ type ResetPasswordInput struct {
 }
 
 func (s *Service) ResetPassword(input ResetPasswordInput) error {
-	if len(input.NewPassword) < s.cfg.PasswordMinLen {
-		return pkg.ErrBadRequest(fmt.Sprintf("password must be at least %d characters", s.cfg.PasswordMinLen))
+	// Validate password against the policy first so we don't waste a DB
+	// lookup on obviously bad inputs. zxcvbn user-input hints are skipped
+	// here — we don't know who the user is until the token resolves.
+	if err := s.validatePassword(input.NewPassword); err != nil {
+		return err
 	}
 
 	tokenHash := crypto.HashToken(input.Token)

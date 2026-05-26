@@ -120,6 +120,7 @@ func main() {
 	// settings.password_policy row; reuses the invitation repository
 	// which already owns the settings table helpers.
 	passwordService := password.NewService(invRepo)
+	userService.SetPasswordValidator(password.NewValidator(passwordService))
 
 	// WebAuthn / Passkeys
 	wa, err := webauthn.New(&webauthn.Config{
