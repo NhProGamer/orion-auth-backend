@@ -37,6 +37,7 @@ import (
 	"orion-auth-backend/oauth"
 	"orion-auth-backend/oidc"
 	"orion-auth-backend/passkey"
+	"orion-auth-backend/password"
 	"orion-auth-backend/policy"
 	"orion-auth-backend/rbac"
 	"orion-auth-backend/reauth"
@@ -114,6 +115,11 @@ func main() {
 	fedService.SetProvisioningDependencies(userService, invService, invService)
 	regFormService := regform.NewService(regFormRepo)
 	userService.SetRegFormProvider(regFormService)
+
+	// Password policy (admin-configurable). Reads/writes the
+	// settings.password_policy row; reuses the invitation repository
+	// which already owns the settings table helpers.
+	passwordService := password.NewService(invRepo)
 
 	// WebAuthn / Passkeys
 	wa, err := webauthn.New(&webauthn.Config{
@@ -195,6 +201,7 @@ func main() {
 	fedHandler := federation.NewHandler(fedService)
 	invHandler := invitation.NewHandler(invService)
 	regFormHandler := regform.NewHandler(regFormService)
+	passwordHandler := password.NewHandler(passwordService)
 	policyHandler := policy.NewHandler(policyService)
 	resourceHandler := resource.NewHandler(resourceService)
 	reauthHandler := reauth.NewHandler(reauthService)
@@ -233,6 +240,7 @@ func main() {
 	fedHandler.SetAuditService(auditService)
 	invHandler.SetAuditService(auditService)
 	regFormHandler.SetAuditService(auditService)
+	passwordHandler.SetAuditService(auditService)
 	invHandler.SetFederationLister(&federationListerAdapter{fedService: fedService})
 	policyHandler.SetAuditService(auditService)
 	resourceHandler.SetAuditService(auditService)
@@ -265,6 +273,7 @@ func main() {
 		fedHandler:        fedHandler,
 		invHandler:        invHandler,
 		regFormHandler:    regFormHandler,
+		passwordHandler:   passwordHandler,
 		policyHandler:     policyHandler,
 		resourceHandler:   resourceHandler,
 		reauthHandler:     reauthHandler,
@@ -330,6 +339,7 @@ type setupRouterArgs struct {
 	fedHandler      *federation.Handler
 	invHandler      *invitation.Handler
 	regFormHandler  *regform.Handler
+	passwordHandler *password.Handler
 	policyHandler   *policy.Handler
 	resourceHandler *resource.Handler
 	reauthHandler   *reauth.Handler
@@ -466,6 +476,7 @@ func setupRouter(a setupRouterArgs) *gin.Engine {
 	a.userHandler.RegisterAdminRoutes(userAdmin)
 	a.invHandler.RegisterAdminRoutes(userAdmin)
 	a.regFormHandler.RegisterAdminRoutes(userAdmin)
+	a.passwordHandler.RegisterAdminRoutes(userAdmin)
 
 	// Client management (requires clients:read or clients:write)
 	clientAdmin := adminBase.Group("")

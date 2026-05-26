@@ -54,6 +54,11 @@ const (
 	ActionSettingsUpdated   = "settings.updated"
 )
 
+// Password policy actions
+const (
+	ActionPasswordPolicyUpdated = "password_policy.updated"
+)
+
 // Registration form (regform) actions
 const (
 	ActionRegFormFieldCreated    = "regform.field_created"
