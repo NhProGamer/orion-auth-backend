@@ -29,16 +29,17 @@ const authRequestTTL = 10 * time.Minute
 var defaultAttributeMapper = json.RawMessage(`{"external_id":"sub","email":"email","email_verified":"email_verified","name":"name","picture":"picture"}`)
 
 type Service struct {
-	repo              RepositoryInterface
-	stateRepo         StateRepositoryInterface
-	builder           *Builder
-	users             UserProvisioner
-	registration      RegistrationGate
-	invitations       InvitationValidator
-	oauthResumer      OAuthResumer
-	authUIBase        string
-	issuer            string
-	hmacEncryptionKey []byte
+	repo                   RepositoryInterface
+	stateRepo              StateRepositoryInterface
+	builder                *Builder
+	users                  UserProvisioner
+	registration           RegistrationGate
+	invitations            InvitationValidator
+	oauthResumer           OAuthResumer
+	authUIBase             string
+	allowedReturnToOrigins []string
+	issuer                 string
+	hmacEncryptionKey      []byte
 }
 
 // NewService constructs the federation service. hmacEncryptionKey is the
@@ -98,6 +99,20 @@ func (s *Service) AuthUIBaseURL() string {
 		return s.authUIBase
 	}
 	return strings.TrimRight(s.issuer, "/") + "/ui"
+}
+
+// SetAllowedReturnToOrigins declares the extra origins (scheme+host)
+// that the federation link callback may redirect back to in addition
+// to the AuthUI base. Typically wired from CORSConfig.AllowedOrigins
+// so any SPA cleared to call the API can also receive the link result.
+func (s *Service) SetAllowedReturnToOrigins(origins []string) {
+	s.allowedReturnToOrigins = origins
+}
+
+// AllowedReturnToOrigins returns the configured extra origins. Exposed
+// so the handler can extend its allowlist for link redirects.
+func (s *Service) AllowedReturnToOrigins() []string {
+	return s.allowedReturnToOrigins
 }
 
 // OAuthResumer exposes the wired continuation client so handlers can call

@@ -195,16 +195,19 @@ func linkResultFromErr(err error) string {
 	return "link_failed"
 }
 
-// redirectLinkResult sends the user back to the AuthUI after an
-// authenticated link callback. The destination is authReq.ReturnTo when it
-// passes the same-origin allowlist, otherwise the default
-// `/linked-accounts` screen. The status (linked / identity_already_linked /
-// link_failed) and provider name are appended as query params.
+// redirectLinkResult sends the user back to either the SPA that
+// originated the link flow (when authReq.ReturnTo matches the AuthUI
+// origin or any extra trusted origin) or, as fallback, the AuthUI's
+// /linked-accounts screen. The status (linked / identity_already_linked
+// / link_failed) and provider name are appended as query params.
 func (h *Handler) redirectLinkResult(c *gin.Context, authReq *model.FederationAuthRequest, providerName, status string) {
 	authUI := h.service.AuthUIBaseURL()
 	target := authUI + "/linked-accounts"
-	if authReq.ReturnTo != nil && safeReturnTo(*authReq.ReturnTo, authUI) {
-		target = *authReq.ReturnTo
+	if authReq.ReturnTo != nil {
+		bases := append([]string{authUI}, h.service.AllowedReturnToOrigins()...)
+		if safeReturnTo(*authReq.ReturnTo, bases...) {
+			target = *authReq.ReturnTo
+		}
 	}
 	sep := "?"
 	if strings.Contains(target, "?") {
@@ -276,10 +279,11 @@ func (h *Handler) recordLoginFailure(c *gin.Context, providerName string, err er
 	})
 }
 
-// safeReturnTo enforces a minimal allowlist: only same-origin redirects to
-// the AuthUI base URL are accepted, so an attacker cannot use the
-// federation flow as an open redirect.
-func safeReturnTo(target, authUIBase string) bool {
+// safeReturnTo enforces a minimal allowlist: the target's scheme+host
+// must match one of the allowed bases. Empty/unparsable bases are
+// skipped silently so callers can pass an optional AuthUI base plus
+// an arbitrary list of trusted SPA origins without pre-filtering.
+func safeReturnTo(target string, allowedBases ...string) bool {
 	if target == "" {
 		return false
 	}
@@ -287,11 +291,19 @@ func safeReturnTo(target, authUIBase string) bool {
 	if err != nil {
 		return false
 	}
-	base, err := url.Parse(authUIBase)
-	if err != nil {
-		return false
+	for _, raw := range allowedBases {
+		if raw == "" {
+			continue
+		}
+		base, err := url.Parse(raw)
+		if err != nil {
+			continue
+		}
+		if strings.EqualFold(t.Scheme, base.Scheme) && strings.EqualFold(t.Host, base.Host) {
+			return true
+		}
 	}
-	return strings.EqualFold(t.Scheme, base.Scheme) && strings.EqualFold(t.Host, base.Host)
+	return false
 }
 
 // ConfirmLinkInput is the body of POST /api/v1/auth/federation/confirm-link.

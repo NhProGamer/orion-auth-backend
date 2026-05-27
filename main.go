@@ -109,6 +109,7 @@ func main() {
 	fedService := federation.NewService(fedRepo, cfg.Issuer, hmacEncKey)
 	fedService.SetStateRepository(federation.NewStateRepository(db))
 	fedService.SetAuthUIBaseURL(cfg.AuthUI.BaseURL)
+	fedService.SetAllowedReturnToOrigins(cfg.CORS.AllowedOrigins)
 	fedService.SetOAuthResumer(newFederationOAuthAdapter(oauthService))
 	invRepo := invitation.NewRepository(db)
 	invService := invitation.NewService(invRepo, userService, rbacService, emailSender, cfg.Issuer)
