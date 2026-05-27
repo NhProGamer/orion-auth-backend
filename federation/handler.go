@@ -472,6 +472,23 @@ func (h *Handler) CompleteSignup(c *gin.Context) {
 	})
 }
 
+// linkedAccountResponse enriches a FederationLink with the slug of its
+// provider so SDK consumers can merge the list against /auth/settings
+// without an extra round-trip. ProviderName is empty if the relationship
+// was not preloaded (defensive — repository methods always preload).
+type linkedAccountResponse struct {
+	*model.FederationLink
+	ProviderName string `json:"provider_name"`
+}
+
+func toLinkedAccountResponse(link *model.FederationLink) linkedAccountResponse {
+	r := linkedAccountResponse{FederationLink: link}
+	if link.Provider != nil {
+		r.ProviderName = link.Provider.Name
+	}
+	return r
+}
+
 // ListLinkedAccounts godoc
 // @Summary      List linked federation accounts for the current user
 // @Tags         Federation
@@ -494,7 +511,11 @@ func (h *Handler) ListLinkedAccounts(c *gin.Context) {
 		return
 	}
 
-	pkg.List(c, links, len(links))
+	out := make([]linkedAccountResponse, len(links))
+	for i := range links {
+		out[i] = toLinkedAccountResponse(&links[i])
+	}
+	pkg.List(c, out, len(out))
 }
 
 // GetLinkedAccount godoc
@@ -523,7 +544,7 @@ func (h *Handler) GetLinkedAccount(c *gin.Context) {
 		pkg.HandleError(c, err)
 		return
 	}
-	pkg.OK(c, gin.H{"link": link})
+	pkg.OK(c, gin.H{"link": toLinkedAccountResponse(link)})
 }
 
 // BeginLinkAccountInput is the body of POST /api/v1/me/linked-accounts/{provider}/begin-link.

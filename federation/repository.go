@@ -72,7 +72,7 @@ func (r *Repository) FindLink(providerID uuid.UUID, externalID string) (*model.F
 
 func (r *Repository) FindLinksByUser(userID uuid.UUID) ([]model.FederationLink, error) {
 	var links []model.FederationLink
-	err := r.db.Where("user_id = ?", userID).Find(&links).Error
+	err := r.db.Preload("Provider").Where("user_id = ?", userID).Find(&links).Error
 	return links, err
 }
 
@@ -82,7 +82,7 @@ func (r *Repository) DeleteLink(id uuid.UUID) error {
 
 func (r *Repository) FindLinkByID(id uuid.UUID) (*model.FederationLink, error) {
 	var l model.FederationLink
-	err := r.db.Where("id = ?", id).First(&l).Error
+	err := r.db.Preload("Provider").Where("id = ?", id).First(&l).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}

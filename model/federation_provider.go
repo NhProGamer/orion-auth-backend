@@ -38,6 +38,7 @@ type FederationLink struct {
 	ExternalID string          `gorm:"type:varchar(255);not null" json:"external_id"`
 	Email      *string         `gorm:"type:varchar(255)" json:"email,omitempty"`
 	Metadata   json.RawMessage `gorm:"type:jsonb;default:'{}'" json:"metadata,omitempty"`
+	Provider   *FederationProvider `gorm:"foreignKey:ProviderID" json:"-"`
 }
 
 func (FederationLink) TableName() string {
