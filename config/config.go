@@ -70,6 +70,13 @@ type AuthConfig struct {
 	// seal per-client HMAC keys (client_secret_jwt). When empty,
 	// client_secret_jwt support is disabled with a startup warning.
 	HMACSecretEncryptionKey string `mapstructure:"hmac_secret_encryption_key"`
+
+	// DCRInitialAccessToken, when non-empty, gates POST /register behind an
+	// operator-issued Bearer token (RFC 7591 §3). Empty leaves the
+	// endpoint open — RFC compliant but unsafe in most production
+	// deployments. Override at runtime with
+	// ORION_AUTH_DCR_INITIAL_ACCESS_TOKEN.
+	DCRInitialAccessToken string `mapstructure:"dcr_initial_access_token"`
 }
 
 type Argon2Config struct {
@@ -127,6 +134,7 @@ func Load() (*Config, error) {
 	// container deployments that ship without a populated config.yaml.
 	for _, key := range []string{
 		"auth.hmac_secret_encryption_key",
+		"auth.dcr_initial_access_token",
 		"database.password",
 		"smtp.password",
 	} {

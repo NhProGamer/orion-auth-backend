@@ -265,6 +265,10 @@ func main() {
 
 	// Dynamic Client Registration handler
 	dcrHandler := client.NewDCRHandler(clientService)
+	dcrHandler.SetInitialAccessToken(cfg.Auth.DCRInitialAccessToken)
+	if cfg.Auth.DCRInitialAccessToken == "" {
+		slog.Warn("DCR /register is open (no initial_access_token configured); set ORION_AUTH_DCR_INITIAL_ACCESS_TOKEN in production")
+	}
 
 	// Router
 	router := setupRouter(setupRouterArgs{

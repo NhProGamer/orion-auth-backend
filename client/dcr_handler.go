@@ -1,6 +1,7 @@
 package client
 
 import (
+	"crypto/subtle"
 	"net/http"
 	"strings"
 	"time"
@@ -16,12 +17,29 @@ import (
 )
 
 // DCRHandler handles Dynamic Client Registration (RFC 7591 + RFC 7592).
+//
+// When initialAccessTokenHash is non-empty, POST /register requires a
+// matching Bearer token (the operator-issued "initial access token" per
+// RFC 7591 §3). When empty, registration is open — RFC compliant but
+// unsafe in most production deployments, see audit Vuln 5.
 type DCRHandler struct {
-	service *Service
+	service                *Service
+	initialAccessTokenHash string // SHA-256 hex of the configured token; empty disables the gate
 }
 
 func NewDCRHandler(service *Service) *DCRHandler {
 	return &DCRHandler{service: service}
+}
+
+// SetInitialAccessToken hashes the supplied token and stores it for
+// constant-time comparison against incoming Bearer headers on /register.
+// Empty raw token leaves the gate disabled.
+func (h *DCRHandler) SetInitialAccessToken(rawToken string) {
+	if rawToken == "" {
+		h.initialAccessTokenHash = ""
+		return
+	}
+	h.initialAccessTokenHash = crypto.HashToken(rawToken)
 }
 
 // DCRRequest represents the OIDC Dynamic Client Registration request body.
@@ -104,6 +122,11 @@ func validateEncryptionPair(field, alg, enc string) error {
 
 // Register handles POST /register for Dynamic Client Registration.
 func (h *DCRHandler) Register(c *gin.Context) {
+	if err := h.checkInitialAccessToken(c); err != nil {
+		pkg.HandleError(c, err)
+		return
+	}
+
 	var req DCRRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		pkg.HandleError(c, pkg.ErrInvalidRequest("invalid request body"))
@@ -405,4 +428,24 @@ func splitScopes(s string) []string {
 		result = append(result, s[start:])
 	}
 	return result
+}
+
+// checkInitialAccessToken enforces an operator-supplied registration gate
+// when SetInitialAccessToken has been wired. Compares the SHA-256 of the
+// supplied bearer to the configured hash in constant time so an attacker
+// can't probe the token byte by byte. Empty hash = gate disabled.
+func (h *DCRHandler) checkInitialAccessToken(c *gin.Context) error {
+	if h.initialAccessTokenHash == "" {
+		return nil
+	}
+	auth := c.GetHeader("Authorization")
+	if !strings.HasPrefix(auth, "Bearer ") {
+		return pkg.ErrUnauthorized("registration requires an initial access token")
+	}
+	raw := strings.TrimPrefix(auth, "Bearer ")
+	got := crypto.HashToken(raw)
+	if subtle.ConstantTimeCompare([]byte(got), []byte(h.initialAccessTokenHash)) != 1 {
+		return pkg.ErrUnauthorized("invalid initial access token")
+	}
+	return nil
 }
