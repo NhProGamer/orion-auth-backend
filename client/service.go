@@ -9,6 +9,7 @@ import (
 	"orion-auth-backend/crypto"
 	"orion-auth-backend/model"
 	"orion-auth-backend/pkg"
+	"orion-auth-backend/pkg/netsafety"
 )
 
 type Service struct {
@@ -98,6 +99,12 @@ type CreateResponse struct {
 }
 
 func (s *Service) Create(input CreateInput) (*CreateResponse, error) {
+	if input.JWKSUri != nil && *input.JWKSUri != "" {
+		if err := netsafety.ValidatePublicHTTPSURL(*input.JWKSUri); err != nil {
+			return nil, pkg.ErrInvalidRequest("invalid jwks_uri: " + err.Error())
+		}
+	}
+
 	authMethod := "client_secret_basic"
 	if input.TokenAuthMethod != nil {
 		authMethod = *input.TokenAuthMethod
@@ -246,6 +253,12 @@ func (s *Service) GetByID(id uuid.UUID) (*model.OAuthClient, error) {
 }
 
 func (s *Service) Update(id uuid.UUID, input UpdateInput) (*model.OAuthClient, error) {
+	if input.JWKSUri != nil && *input.JWKSUri != "" {
+		if err := netsafety.ValidatePublicHTTPSURL(*input.JWKSUri); err != nil {
+			return nil, pkg.ErrInvalidRequest("invalid jwks_uri: " + err.Error())
+		}
+	}
+
 	client, err := s.GetByID(id)
 	if err != nil {
 		return nil, err

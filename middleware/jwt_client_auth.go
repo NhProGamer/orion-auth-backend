@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	appCrypto "orion-auth-backend/crypto"
+	"orion-auth-backend/pkg/netsafety"
 )
 
 // JWKSCache caches remote JWKS documents with a TTL.
@@ -72,7 +73,25 @@ type jwkKey struct {
 	E   string `json:"e"`
 }
 
+// jwksURLValidator gates fetchJWKS. Defaults to netsafety production check;
+// integration tests that spin up an httptest JWKS on http://127.0.0.1 swap
+// in a permissive version via SetJWKSURLValidatorForTest.
+var jwksURLValidator = netsafety.ValidatePublicHTTPSURL
+
+// SetJWKSURLValidatorForTest overrides the JWKS URL validator (test-only).
+// Returns a restore function.
+func SetJWKSURLValidatorForTest(fn func(string) error) func() {
+	prev := jwksURLValidator
+	jwksURLValidator = fn
+	return func() { jwksURLValidator = prev }
+}
+
 func fetchJWKS(jwksURI string) (map[string]*rsa.PublicKey, error) {
+	// SSRF defence: refuse to fetch private/loopback/link-local hosts before
+	// any DNS round-trip. The jwks_uri is client-controlled via DCR.
+	if err := jwksURLValidator(jwksURI); err != nil {
+		return nil, fmt.Errorf("jwks_uri rejected: %w", err)
+	}
 	httpClient := &http.Client{Timeout: 10 * time.Second}
 	resp, err := httpClient.Get(jwksURI)
 	if err != nil {

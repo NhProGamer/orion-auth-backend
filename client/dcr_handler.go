@@ -12,6 +12,7 @@ import (
 	"orion-auth-backend/crypto"
 	"orion-auth-backend/model"
 	"orion-auth-backend/pkg"
+	"orion-auth-backend/pkg/netsafety"
 )
 
 // DCRHandler handles Dynamic Client Registration (RFC 7591 + RFC 7592).
@@ -299,6 +300,10 @@ func (h *DCRHandler) UpdateRegistration(c *gin.Context) {
 		client.UserinfoEncryptedResponseEnc = &req.UserinfoEncryptedResponseEnc
 	}
 	if req.JWKSUri != "" {
+		if err := netsafety.ValidatePublicHTTPSURL(req.JWKSUri); err != nil {
+			pkg.HandleError(c, pkg.ErrInvalidRequest("invalid jwks_uri: "+err.Error()))
+			return
+		}
 		client.JWKSUri = &req.JWKSUri
 	}
 

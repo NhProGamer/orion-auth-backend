@@ -18,7 +18,40 @@ import (
 	"orion-auth-backend/crypto"
 	"orion-auth-backend/model"
 	"orion-auth-backend/pkg"
+	"orion-auth-backend/pkg/netsafety"
 )
+
+// urlValidator is the function used by CreateProvider/UpdateProvider to
+// refuse internal-network targets in admin-supplied URLs. It defaults to
+// netsafety.ValidatePublicHTTPSURL in production code; integration tests
+// that spin up an httptest IdP on http://127.0.0.1 swap it out via
+// SetURLValidatorForTest.
+var urlValidator = netsafety.ValidatePublicHTTPSURL
+
+// SetURLValidatorForTest overrides the URL validator and returns a restore
+// function. Only intended for integration tests that need to accept
+// loopback http:// targets pointing at httptest.Server.
+func SetURLValidatorForTest(fn func(string) error) func() {
+	prev := urlValidator
+	urlValidator = fn
+	return func() { urlValidator = prev }
+}
+
+// validateProviderURLs runs the active urlValidator on every non-nil/non-empty
+// URL pointer. Used by CreateProvider/UpdateProvider to refuse SSRF-prone
+// hosts (issuer, auth/token/userinfo, jwks).
+func validateProviderURLs(urls ...*string) error {
+	fields := []string{"issuer_url", "authorization_url", "token_url", "userinfo_url", "jwks_uri"}
+	for i, u := range urls {
+		if u == nil || *u == "" {
+			continue
+		}
+		if err := urlValidator(*u); err != nil {
+			return pkg.ErrBadRequest(fmt.Sprintf("invalid %s: %s", fields[i], err.Error()))
+		}
+	}
+	return nil
+}
 
 // authRequestTTL governs how long a generated state remains valid between
 // the authorize redirect and the provider callback.
@@ -227,6 +260,13 @@ func (s *Service) CreateProvider(input CreateProviderInput) (*model.FederationPr
 		return nil, pkg.ErrBadRequest("type must be 'oidc' or 'oauth2'")
 	}
 
+	// SSRF defence: federation HTTP fetches (discovery, JWKS, userinfo,
+	// token) all originate from URLs admins paste in. Refuse anything that
+	// resolves to internal infrastructure.
+	if err := validateProviderURLs(input.IssuerURL, input.AuthorizationURL, input.TokenURL, input.UserinfoURL, input.JWKSUri); err != nil {
+		return nil, err
+	}
+
 	sealed, err := s.sealSecret(input.ClientSecret)
 	if err != nil {
 		return nil, err
@@ -296,6 +336,11 @@ func (s *Service) UpdateProvider(id uuid.UUID, input UpdateProviderInput) (*mode
 		return nil, err
 	}
 	if err := validateAttributeMapper(input.AttributeMapper); err != nil {
+		return nil, err
+	}
+	// SSRF defence: re-validate any URL the admin is pushing to the
+	// provider row. Skipped URLs (nil pointer) are not re-validated.
+	if err := validateProviderURLs(input.IssuerURL, input.AuthorizationURL, input.TokenURL, input.UserinfoURL, input.JWKSUri); err != nil {
 		return nil, err
 	}
 

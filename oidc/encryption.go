@@ -11,6 +11,8 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwe"
 	"github.com/lestrrat-go/jwx/v3/jwk"
+
+	"orion-auth-backend/pkg/netsafety"
 )
 
 // SupportedJWEAlgs is the list of key-management algorithms this server
@@ -90,9 +92,27 @@ func (c *jweJWKSCache) set(uri string, set jwk.Set) {
 	c.mu.Unlock()
 }
 
+// jwksURLValidator is the SSRF gate applied before fetching client JWKS.
+// Defaults to the strict production check; integration tests that serve a
+// JWKS over httptest (plain http on loopback) override it via
+// SetJWKSURLValidatorForTest.
+var jwksURLValidator = netsafety.ValidatePublicHTTPSURL
+
+// SetJWKSURLValidatorForTest swaps the JWKS URL validator used by
+// fetchClientJWKS and returns a restore function. Test-only.
+func SetJWKSURLValidatorForTest(fn func(string) error) func() {
+	prev := jwksURLValidator
+	jwksURLValidator = fn
+	return func() { jwksURLValidator = prev }
+}
+
 func fetchClientJWKS(jwksURI string) (jwk.Set, error) {
 	if set, ok := defaultJWEJWKSCache.get(jwksURI); ok {
 		return set, nil
+	}
+	// SSRF defence: jwks_uri comes from client config (DCR or admin write).
+	if err := jwksURLValidator(jwksURI); err != nil {
+		return nil, fmt.Errorf("client jwks_uri rejected: %w", err)
 	}
 	httpClient := &http.Client{Timeout: 10 * time.Second}
 	resp, err := httpClient.Get(jwksURI)
