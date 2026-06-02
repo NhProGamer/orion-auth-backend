@@ -737,6 +737,25 @@ func (s *Service) SendVerificationEmail(userID uuid.UUID, authRequestID *uuid.UU
 	return nil
 }
 
+// ResendVerificationEmail looks up a user by email and reissues the
+// verification token, ignoring the lookup result when the user does not
+// exist or is already verified — both branches return nil to avoid
+// leaking which is which (anti-enumeration). The optional authRequestID
+// preserves the OAuth context for auto-login post-click.
+func (s *Service) ResendVerificationEmail(email string, authRequestID *uuid.UUID) error {
+	email = strings.ToLower(strings.TrimSpace(email))
+
+	u, err := s.repo.FindByEmail(email)
+	if err != nil {
+		return pkg.ErrInternal("failed to look up user")
+	}
+	if u == nil || u.EmailVerified {
+		return nil
+	}
+
+	return s.SendVerificationEmail(u.ID, authRequestID)
+}
+
 // ConsumeVerificationToken validates and consumes a verification action
 // token: it parses the JWT, ensures the embedded JTI matches the one on
 // record, marks the user as verified, and clears the slot so the link is

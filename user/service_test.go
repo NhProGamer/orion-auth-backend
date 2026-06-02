@@ -571,6 +571,67 @@ func TestSendVerificationEmail_NoSigningKey(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// ResendVerificationEmail
+// ---------------------------------------------------------------------------
+
+func TestResendVerificationEmail_FreshUser(t *testing.T) {
+	hasher := testutil.FastHasher()
+	testUser := testutil.TestUser(hasher, "password123")
+	testUser.EmailVerified = false
+
+	var emailSent bool
+	repo := &mockUserRepo{
+		findByEmailFn: func(_ string) (*model.User, error) { return testUser, nil },
+		findByIDFn:    func(_ uuid.UUID) (*model.User, error) { return testUser, nil },
+		updateFieldsFn: func(_ uuid.UUID, _ map[string]any) error { return nil },
+	}
+	svc := NewService(repo, hasher, testutil.TestAuthConfig())
+	svc.SetEmailSender(&mockEmailSender{
+		sendVerificationEmailFn: func(_, _ string) error {
+			emailSent = true
+			return nil
+		},
+	})
+	svc.SetActionTokenSigningKey(testActionTokenKey())
+
+	require.NoError(t, svc.ResendVerificationEmail("test@example.com", nil))
+	assert.True(t, emailSent)
+}
+
+func TestResendVerificationEmail_UnknownEmail(t *testing.T) {
+	repo := &mockUserRepo{
+		findByEmailFn: func(_ string) (*model.User, error) { return nil, nil },
+	}
+	svc := newTestService(repo)
+	svc.SetActionTokenSigningKey(testActionTokenKey())
+
+	// Anti-enumeration: silent success.
+	require.NoError(t, svc.ResendVerificationEmail("nobody@example.com", nil))
+}
+
+func TestResendVerificationEmail_AlreadyVerified(t *testing.T) {
+	hasher := testutil.FastHasher()
+	verified := testutil.TestUser(hasher, "password123")
+	verified.EmailVerified = true
+
+	var emailSent bool
+	repo := &mockUserRepo{
+		findByEmailFn: func(_ string) (*model.User, error) { return verified, nil },
+	}
+	svc := NewService(repo, hasher, testutil.TestAuthConfig())
+	svc.SetEmailSender(&mockEmailSender{
+		sendVerificationEmailFn: func(_, _ string) error {
+			emailSent = true
+			return nil
+		},
+	})
+	svc.SetActionTokenSigningKey(testActionTokenKey())
+
+	require.NoError(t, svc.ResendVerificationEmail("test@example.com", nil))
+	assert.False(t, emailSent, "must not send to already verified user")
+}
+
+// ---------------------------------------------------------------------------
 // ConsumeVerificationToken
 // ---------------------------------------------------------------------------
 

@@ -72,6 +72,7 @@ func (h *Handler) RegisterRoutes(
 		public.POST("/auth/reset-password", h.ResetPassword)
 		public.POST("/auth/verify-email", h.VerifyEmail)
 		public.GET("/auth/verify-email", h.VerifyEmailLink)
+		public.POST("/auth/resend-verification", h.ResendVerification)
 	}
 
 	if authenticated != nil {
@@ -86,6 +87,7 @@ func (h *Handler) RegisterRoutes(
 			write.Use(updateProfilePerm)
 		}
 		write.PATCH("/me", h.UpdateProfile)
+		write.POST("/me/resend-verification", h.ResendMyVerification)
 	}
 }
 
@@ -488,6 +490,61 @@ func (h *Handler) VerifyEmail(c *gin.Context) {
 	}
 
 	pkg.OK(c, gin.H{"message": "email verified successfully"})
+}
+
+type ResendVerificationInput struct {
+	Email          string  `json:"email" binding:"required,email"`
+	OAuthRequestID *string `json:"oauth_request_id"`
+}
+
+// ResendVerification godoc
+// @Summary      Resend the email verification link
+// @Description  Anti-enumeration: always returns 200 even when the email is unknown or already verified.
+// @Tags         Auth
+// @Accept       json
+// @Produce      json
+// @Param        body  body  user.ResendVerificationInput  true  "Email + optional oauth_request_id"
+// @Success      200   {object}  map[string]any
+// @Router       /api/v1/auth/resend-verification [post]
+func (h *Handler) ResendVerification(c *gin.Context) {
+	var input ResendVerificationInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		pkg.HandleError(c, pkg.ErrBadRequest("invalid request body: "+err.Error()))
+		return
+	}
+
+	var rid *uuid.UUID
+	if input.OAuthRequestID != nil && *input.OAuthRequestID != "" {
+		parsed, err := uuid.Parse(*input.OAuthRequestID)
+		if err == nil {
+			rid = &parsed
+		}
+	}
+
+	_ = h.service.ResendVerificationEmail(input.Email, rid)
+	pkg.OK(c, gin.H{"message": "if the email exists and is not yet verified, a new link has been sent"})
+}
+
+// ResendMyVerification godoc
+// @Summary      Resend the verification email for the authenticated user
+// @Tags         Profile
+// @Produce      json
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} pkg.AppError
+// @Failure      401 {object} pkg.AppError
+// @Security     BearerAuth
+// @Router       /api/v1/me/resend-verification [post]
+func (h *Handler) ResendMyVerification(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		pkg.HandleError(c, pkg.ErrUnauthorized("not authenticated"))
+		return
+	}
+	if err := h.service.SendVerificationEmail(userID, nil); err != nil {
+		pkg.HandleError(c, err)
+		return
+	}
+	pkg.OK(c, gin.H{"message": "verification email sent"})
 }
 
 // VerifyEmailLink godoc
