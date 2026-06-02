@@ -601,6 +601,57 @@ func TestForgotPassword_NonExistentUser(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// AdminTriggerPasswordReset
+// ---------------------------------------------------------------------------
+
+func TestAdminTriggerPasswordReset_Success(t *testing.T) {
+	hasher := testutil.FastHasher()
+	testUser := testutil.TestUser(hasher, "password123")
+
+	var emailSent bool
+	emailMock := &mockEmailSender{
+		sendPasswordResetEmailFn: func(to, token string) error {
+			emailSent = true
+			assert.Equal(t, testUser.Email, to)
+			assert.NotEmpty(t, token)
+			return nil
+		},
+	}
+
+	var storedFields map[string]any
+	repo := &mockUserRepo{
+		findByIDFn: func(id uuid.UUID) (*model.User, error) { return testUser, nil },
+		updateFieldsFn: func(id uuid.UUID, fields map[string]any) error {
+			storedFields = fields
+			return nil
+		},
+	}
+	svc := NewService(repo, hasher, testutil.TestAuthConfig())
+	svc.SetEmailSender(emailMock)
+
+	err := svc.AdminTriggerPasswordReset(testUser.ID)
+
+	require.NoError(t, err)
+	assert.True(t, emailSent)
+	require.NotNil(t, storedFields)
+	assert.NotNil(t, storedFields["password_reset_token"])
+	assert.NotNil(t, storedFields["password_reset_expires_at"])
+}
+
+func TestAdminTriggerPasswordReset_UserNotFound(t *testing.T) {
+	repo := &mockUserRepo{
+		findByIDFn: func(id uuid.UUID) (*model.User, error) { return nil, nil },
+	}
+	svc := newTestService(repo)
+
+	missingID, _ := uuid.NewV7()
+	err := svc.AdminTriggerPasswordReset(missingID)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+// ---------------------------------------------------------------------------
 // ResetPassword
 // ---------------------------------------------------------------------------
 

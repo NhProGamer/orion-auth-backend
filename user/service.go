@@ -738,6 +738,46 @@ func (s *Service) ForgotPassword(input ForgotPasswordInput) error {
 	return nil
 }
 
+// AdminTriggerPasswordReset issues a password reset token for the target user
+// and sends the standard reset email. Unlike ForgotPassword, the user is
+// looked up by ID and missing users yield ErrNotFound — the caller is an
+// authenticated admin, so leaking existence is not a concern.
+func (s *Service) AdminTriggerPasswordReset(userID uuid.UUID) error {
+	u, err := s.repo.FindByID(userID)
+	if err != nil {
+		return pkg.ErrInternal("failed to find user")
+	}
+	if u == nil {
+		return pkg.ErrNotFound("user not found")
+	}
+
+	token, err := crypto.GenerateRandomString(32)
+	if err != nil {
+		return pkg.ErrInternal("failed to generate reset token")
+	}
+
+	tokenHash := crypto.HashToken(token)
+	expiresAt := time.Now().Add(1 * time.Hour)
+
+	if err := s.repo.UpdateFields(u.ID, map[string]any{
+		"password_reset_token":      tokenHash,
+		"password_reset_expires_at": expiresAt,
+	}); err != nil {
+		return pkg.ErrInternal("failed to store reset token")
+	}
+
+	if s.emailSender != nil {
+		if err := s.emailSender.SendPasswordResetEmail(u.Email, token); err != nil {
+			slog.Error("failed to send reset email", "error", err)
+		}
+	} else {
+		slog.Warn("no email sender configured, reset token not sent", "email", u.Email)
+	}
+
+	slog.Info("admin-initiated password reset", "target_user_id", u.ID)
+	return nil
+}
+
 type ResetPasswordInput struct {
 	Token       string `json:"token" binding:"required"`
 	NewPassword string `json:"new_password" binding:"required"`

@@ -72,6 +72,7 @@ func (h *Handler) RegisterAdminRoutes(admin *gin.RouterGroup) {
 	admin.GET("/users/:id", h.AdminGetUser)
 	admin.PATCH("/users/:id", h.AdminUpdateUser)
 	admin.DELETE("/users/:id", h.AdminDeleteUser)
+	admin.POST("/users/:id/reset-password", h.AdminResetPassword)
 }
 
 // AdminListUsers godoc
@@ -204,6 +205,39 @@ func (h *Handler) AdminDeleteUser(c *gin.Context) {
 	}
 
 	pkg.OK(c, gin.H{"message": "user deleted"})
+}
+
+// AdminResetPassword godoc
+// @Summary      Send a password reset email to the target user
+// @Tags         Admin - Users
+// @Accept       json
+// @Produce      json
+// @Param        id   path     string  true  "User ID (UUID)"
+// @Success      200  {object}  map[string]any
+// @Failure      400  {object}  pkg.AppError
+// @Failure      401  {object}  pkg.AppError
+// @Failure      404  {object}  pkg.AppError
+// @Security     BearerAuth
+// @Router       /api/v1/admin/users/{id}/reset-password [post]
+func (h *Handler) AdminResetPassword(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		pkg.HandleError(c, pkg.ErrBadRequest("invalid user ID"))
+		return
+	}
+
+	if err := h.service.AdminTriggerPasswordReset(id); err != nil {
+		pkg.HandleError(c, err)
+		return
+	}
+
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionAdminPasswordResetInitiated, map[string]any{
+			"target_user_id": id,
+		})
+	}
+
+	pkg.OK(c, gin.H{"message": "password reset email sent"})
 }
 
 // Register godoc

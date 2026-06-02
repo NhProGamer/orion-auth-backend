@@ -9,6 +9,8 @@ const (
 	ActionUserDeleted     = "user.deleted"
 	ActionPasswordChanged = "user.password_changed"
 	ActionPasswordReset   = "user.password_reset"
+
+	ActionAdminPasswordResetInitiated = "admin.password_reset_initiated"
 	ActionEmailVerified   = "user.email_verified"
 )
 
