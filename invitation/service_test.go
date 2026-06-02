@@ -406,6 +406,72 @@ func TestDelete_NotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "not found")
 }
 
+// --- ValidateToken Tests ---
+
+func TestValidateToken_HappyPath(t *testing.T) {
+	existing := makeInvitation()
+	invRepo := &mockInvitationRepo{
+		findByTokenFn: func(_ string) (*model.Invitation, error) {
+			return existing, nil
+		},
+	}
+
+	svc := newTestService(invRepo, &mockUserRepo{}, &mockRbacRepo{}, nil)
+
+	inv, err := svc.ValidateToken("any-raw-token")
+	require.NoError(t, err)
+	require.NotNil(t, inv)
+	assert.Equal(t, existing.Email, inv.Email)
+}
+
+func TestValidateToken_Empty(t *testing.T) {
+	svc := newTestService(&mockInvitationRepo{}, &mockUserRepo{}, &mockRbacRepo{}, nil)
+
+	inv, err := svc.ValidateToken("")
+	require.NoError(t, err)
+	assert.Nil(t, inv)
+}
+
+func TestValidateToken_NotFound(t *testing.T) {
+	invRepo := &mockInvitationRepo{
+		findByTokenFn: func(_ string) (*model.Invitation, error) { return nil, nil },
+	}
+
+	svc := newTestService(invRepo, &mockUserRepo{}, &mockRbacRepo{}, nil)
+
+	inv, err := svc.ValidateToken("missing")
+	require.NoError(t, err)
+	assert.Nil(t, inv)
+}
+
+func TestValidateToken_Expired(t *testing.T) {
+	expired := makeInvitation()
+	expired.ExpiresAt = time.Now().Add(-1 * time.Hour)
+	invRepo := &mockInvitationRepo{
+		findByTokenFn: func(_ string) (*model.Invitation, error) { return expired, nil },
+	}
+
+	svc := newTestService(invRepo, &mockUserRepo{}, &mockRbacRepo{}, nil)
+
+	inv, err := svc.ValidateToken("expired")
+	require.NoError(t, err)
+	assert.Nil(t, inv)
+}
+
+func TestValidateToken_Used(t *testing.T) {
+	used := makeInvitation()
+	used.Used = true
+	invRepo := &mockInvitationRepo{
+		findByTokenFn: func(_ string) (*model.Invitation, error) { return used, nil },
+	}
+
+	svc := newTestService(invRepo, &mockUserRepo{}, &mockRbacRepo{}, nil)
+
+	inv, err := svc.ValidateToken("used")
+	require.NoError(t, err)
+	assert.Nil(t, inv)
+}
+
 // --- IsRegistrationEnabled Tests ---
 
 func TestIsRegistrationEnabled_Default(t *testing.T) {

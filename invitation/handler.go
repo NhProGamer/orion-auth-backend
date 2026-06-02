@@ -44,7 +44,40 @@ func (h *Handler) SetFederationLister(fl FederationLister) {
 
 func (h *Handler) RegisterPublicRoutes(public *gin.RouterGroup) {
 	public.POST("/auth/register/invite", h.RegisterWithInvite)
+	public.GET("/auth/invitations/lookup", h.LookupInvitation)
 	public.GET("/auth/settings", h.PublicSettings)
+}
+
+// LookupInvitation godoc
+// @Summary      Resolve an invitation token without consuming it
+// @Tags         Invitations
+// @Produce      json
+// @Param        token query string true "Raw invitation token"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} map[string]any
+// @Failure      404 {object} map[string]any
+// @Router       /api/v1/auth/invitations/lookup [get]
+func (h *Handler) LookupInvitation(c *gin.Context) {
+	token := c.Query("token")
+	if token == "" {
+		pkg.HandleError(c, pkg.ErrBadRequest("missing token"))
+		return
+	}
+
+	inv, err := h.service.ValidateToken(token)
+	if err != nil {
+		pkg.HandleError(c, err)
+		return
+	}
+	if inv == nil {
+		pkg.HandleError(c, pkg.ErrNotFound("invitation not found or expired"))
+		return
+	}
+
+	pkg.OK(c, gin.H{
+		"email":      inv.Email,
+		"expires_at": inv.ExpiresAt,
+	})
 }
 
 // PublicSettings godoc
