@@ -17,9 +17,12 @@ import (
 
 // SupportedJWEAlgs is the list of key-management algorithms this server
 // advertises in discovery for ID token / UserInfo encryption.
+//
+// RSA-OAEP-MGF1-SHA1 ("RSA-OAEP") is intentionally NOT included: SHA-1 is
+// retired across the IETF and OpenID specs prefer RSA-OAEP-256. We
+// continue to support all ECDH-ES variants and RSA-OAEP-256.
 var SupportedJWEAlgs = []string{
 	"RSA-OAEP-256",
-	"RSA-OAEP",
 	"ECDH-ES",
 	"ECDH-ES+A128KW",
 	"ECDH-ES+A256KW",

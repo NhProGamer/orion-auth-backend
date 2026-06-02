@@ -42,3 +42,15 @@ func TestSupportedJWEAlgsAndEncs_NonEmpty(t *testing.T) {
 		t.Errorf("A256GCM must be supported")
 	}
 }
+
+// TestSupportedJWEAlgs_RejectsLegacyRSAOAEP locks in Vuln 8's fix.
+// RSA-OAEP-MGF1-SHA1 is deprecated; the server must neither advertise
+// it via discovery nor accept it during DCR.
+func TestSupportedJWEAlgs_RejectsLegacyRSAOAEP(t *testing.T) {
+	if supportedJWEAlgs["RSA-OAEP"] {
+		t.Fatal("RSA-OAEP (MGF1-SHA1) must not be advertised; use RSA-OAEP-256 instead")
+	}
+	if err := validateEncryptionPair("id_token_encrypted_response", "RSA-OAEP", "A256GCM"); err == nil {
+		t.Fatal("DCR must reject RSA-OAEP alg")
+	}
+}

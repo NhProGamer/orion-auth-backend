@@ -86,9 +86,12 @@ type DCRResponse struct {
 
 // supportedJWEAlgs / supportedJWEEncs mirror the discovery advertisement.
 // Kept here so the DCR handler doesn't depend on the oidc package.
+//
+// RSA-OAEP-MGF1-SHA1 ("RSA-OAEP") is deliberately omitted: SHA-1 is
+// retired and OpenID specs prefer RSA-OAEP-256. Aligns with
+// oidc.SupportedJWEAlgs.
 var supportedJWEAlgs = map[string]bool{
 	"RSA-OAEP-256":   true,
-	"RSA-OAEP":       true,
 	"ECDH-ES":        true,
 	"ECDH-ES+A128KW": true,
 	"ECDH-ES+A256KW": true,
