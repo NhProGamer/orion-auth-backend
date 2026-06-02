@@ -1,7 +1,9 @@
 package user
 
 import (
+	"log/slog"
 	"net/http"
+	"net/url"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -15,10 +17,21 @@ type RegistrationChecker interface {
 	IsRegistrationEnabled() bool
 }
 
+// OAuthBootstrapper resumes an in-flight AuthorizationRequest after the user
+// finishes an out-of-band action (currently: email verification). Returns
+// the absolute URL the user must be 302'd to, with the OAuth code already
+// embedded — the SPA then hits its callback as if the user had just logged
+// in. Injected to avoid a user→oauth import cycle.
+type OAuthBootstrapper interface {
+	CompleteAfterEmailVerification(requestID, userID uuid.UUID, ip, ua string) (string, error)
+}
+
 type Handler struct {
-	service      *Service
-	regChecker   RegistrationChecker
-	auditService *audit.Service
+	service       *Service
+	regChecker    RegistrationChecker
+	auditService  *audit.Service
+	authUIBaseURL string
+	bootstrapper  OAuthBootstrapper
 }
 
 func NewHandler(service *Service) *Handler {
@@ -31,6 +44,14 @@ func (h *Handler) SetRegistrationChecker(checker RegistrationChecker) {
 
 func (h *Handler) SetAuditService(s *audit.Service) {
 	h.auditService = s
+}
+
+func (h *Handler) SetAuthUIBaseURL(url string) {
+	h.authUIBaseURL = url
+}
+
+func (h *Handler) SetOAuthBootstrapper(b OAuthBootstrapper) {
+	h.bootstrapper = b
 }
 
 // RegisterRoutes wires the user-facing routes.
@@ -50,6 +71,7 @@ func (h *Handler) RegisterRoutes(
 		public.POST("/auth/forgot-password", h.ForgotPassword)
 		public.POST("/auth/reset-password", h.ResetPassword)
 		public.POST("/auth/verify-email", h.VerifyEmail)
+		public.GET("/auth/verify-email", h.VerifyEmailLink)
 	}
 
 	if authenticated != nil {
@@ -276,6 +298,14 @@ func (h *Handler) Register(c *gin.Context) {
 		})
 	}
 
+	// Best-effort: kick off the verify-email flow without OAuth context.
+	// Failures are logged but do not block the response — the user can
+	// hit /auth/resend-verification later if SMTP is briefly down.
+	if err := h.service.SendVerificationEmail(user.ID, nil); err != nil {
+		slog.Warn("failed to send verification email after register",
+			"user_id", user.ID, "error", err)
+	}
+
 	c.JSON(http.StatusCreated, gin.H{
 		"user": user.PublicProfile(),
 	})
@@ -458,4 +488,71 @@ func (h *Handler) VerifyEmail(c *gin.Context) {
 	}
 
 	pkg.OK(c, gin.H{"message": "email verified successfully"})
+}
+
+// VerifyEmailLink godoc
+// @Summary      Consume a verification action token (one-click)
+// @Tags         Auth
+// @Produce      html
+// @Param        token query string true "Action token (JWT)"
+// @Success      302 {string} string "Redirect to client redirect_uri or AuthUI success page"
+// @Failure      302 {string} string "Redirect to AuthUI error page"
+// @Router       /api/v1/auth/verify-email [get]
+//
+// Single-click entrypoint targeted by the verification email link. Always
+// responds with a 302 — never a JSON body — so the browser flows
+// transparently into the destination:
+//   - Token carried an OAuth request_id + bootstrapper wired → auto-login
+//     and 302 to the original client's redirect_uri with a fresh code.
+//   - Otherwise → 302 to {authUI}/verify-email/success.
+//   - Token invalid/expired → 302 to {authUI}/verify-email?error=<code>.
+func (h *Handler) VerifyEmailLink(c *gin.Context) {
+	raw := c.Query("token")
+	if raw == "" {
+		h.redirectVerifyError(c, "missing_token")
+		return
+	}
+
+	u, requestID, err := h.service.ConsumeVerificationToken(raw)
+	if err != nil {
+		h.redirectVerifyError(c, "invalid_token")
+		return
+	}
+
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionEmailVerified, map[string]any{
+			"user_id": u.ID,
+		})
+	}
+
+	if requestID != nil && h.bootstrapper != nil {
+		target, err := h.bootstrapper.CompleteAfterEmailVerification(
+			*requestID, u.ID, c.ClientIP(), c.Request.UserAgent(),
+		)
+		if err != nil {
+			slog.Warn("oauth bootstrap after verify failed; falling back to success page",
+				"user_id", u.ID, "request_id", requestID, "error", err)
+		} else {
+			c.Redirect(http.StatusFound, target)
+			return
+		}
+	}
+
+	c.Redirect(http.StatusFound, h.verifySuccessURL())
+}
+
+func (h *Handler) verifySuccessURL() string {
+	base := h.authUIBaseURL
+	if base == "" {
+		base = "/ui"
+	}
+	return base + "/verify-email/success"
+}
+
+func (h *Handler) redirectVerifyError(c *gin.Context, code string) {
+	base := h.authUIBaseURL
+	if base == "" {
+		base = "/ui"
+	}
+	c.Redirect(http.StatusFound, base+"/verify-email?error="+url.QueryEscape(code))
 }

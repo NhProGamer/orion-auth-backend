@@ -1023,6 +1023,43 @@ func BuildAuthorizeRedirectURL(resp *AuthorizeConsentResponse) (string, error) {
 	return u.String(), nil
 }
 
+// CompleteAfterEmailVerification resumes an in-flight authorization request
+// once the user has finished the email-verification action. The request
+// must already carry a user_id (set by AuthorizeRegister at the time the
+// verify-email link was issued). The user is bound, consent is granted
+// implicitly (the register submission counts), a session is opened and the
+// destination URL is returned so the caller can 302 the browser to the
+// originating SPA.
+func (s *Service) CompleteAfterEmailVerification(requestID, userID uuid.UUID, ipAddress, userAgent string) (string, error) {
+	req, err := s.repo.FindAuthRequest(requestID)
+	if err != nil || req == nil {
+		return "", pkg.ErrInvalidRequest("authorization request not found")
+	}
+	if req.IsExpired() {
+		return "", pkg.ErrInvalidRequest("authorization request expired")
+	}
+	if req.UserID == nil || *req.UserID != userID {
+		return "", pkg.ErrInvalidRequest("authorization request does not match user")
+	}
+
+	now := time.Now()
+	req.Authenticated = true
+	req.AuthTime = &now
+	req.ConsentGiven = true
+	req.AuthMethods = append(req.AuthMethods, "email")
+
+	if err := s.repo.UpdateAuthRequest(req); err != nil {
+		return "", pkg.ErrServerError("failed to update authorization request")
+	}
+
+	resp, err := s.completeAuthorize(req, ipAddress, userAgent)
+	if err != nil {
+		return "", err
+	}
+
+	return BuildAuthorizeRedirectURL(resp)
+}
+
 // CompleteAuthorizeFirstParty generates the code when no consent is needed (first-party or pre-consented).
 func (s *Service) CompleteAuthorizeFirstParty(requestID uuid.UUID, ipAddress, userAgent string) (*AuthorizeConsentResponse, error) {
 	req, err := s.repo.FindAuthRequest(requestID)

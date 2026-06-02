@@ -113,6 +113,8 @@ func main() {
 	userService.SetEmailSender(emailSender)
 	sessionService := session.NewService(sessionRepo, cfg.Auth)
 	hmacEncKey := loadHMACEncryptionKey(cfg.Auth.HMACSecretEncryptionKey)
+	actionTokenKey := loadActionTokenSigningKey(cfg.Auth.ActionTokenSigningKey)
+	userService.SetActionTokenSigningKey(actionTokenKey)
 	clientService := client.NewService(clientRepo, hasher, hmacEncKey)
 	oauthService := oauth.NewService(oauthRepo, userService, sessionService, hasher, cfg.Auth)
 	oidcService := oidc.NewService(db, userService, cfg.Issuer, cfg.PairwiseSalt)
@@ -209,6 +211,8 @@ func main() {
 	// Handlers
 	userHandler := user.NewHandler(userService)
 	userHandler.SetRegistrationChecker(invService)
+	userHandler.SetAuthUIBaseURL(cfg.AuthUI.BaseURL)
+	userHandler.SetOAuthBootstrapper(oauthService)
 	sessionHandler := session.NewHandler(sessionService)
 	clientHandler := client.NewHandler(clientService)
 	oauthHandler := oauth.NewHandler(oauthService)

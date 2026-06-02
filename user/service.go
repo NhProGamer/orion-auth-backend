@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"orion-auth-backend/actiontoken"
 	"orion-auth-backend/config"
 	"orion-auth-backend/crypto"
 	"orion-auth-backend/email"
@@ -23,14 +24,15 @@ type RoleAssigner interface {
 }
 
 type Service struct {
-	repo              RepositoryInterface
-	hasher            *crypto.Argon2Hasher
-	cfg               config.AuthConfig
-	emailSender       email.Sender
-	roleAssigner      RoleAssigner
-	defaultRoleID     uuid.UUID
-	regForm           RegFormProvider
-	passwordValidator *password.Validator
+	repo                  RepositoryInterface
+	hasher                *crypto.Argon2Hasher
+	cfg                   config.AuthConfig
+	emailSender           email.Sender
+	roleAssigner          RoleAssigner
+	defaultRoleID         uuid.UUID
+	regForm               RegFormProvider
+	passwordValidator     *password.Validator
+	actionTokenSigningKey []byte
 }
 
 func NewService(repo RepositoryInterface, hasher *crypto.Argon2Hasher, cfg config.AuthConfig) *Service {
@@ -61,6 +63,12 @@ func (s *Service) SetRegFormProvider(p RegFormProvider) {
 // (kept for tests and bootstrap before the password package is wired).
 func (s *Service) SetPasswordValidator(v *password.Validator) {
 	s.passwordValidator = v
+}
+
+// SetActionTokenSigningKey wires the HMAC key used to sign verify-email
+// action tokens. Without it, SendVerificationEmail returns an error.
+func (s *Service) SetActionTokenSigningKey(key []byte) {
+	s.actionTokenSigningKey = key
 }
 
 // validatePassword applies the active password policy. Hints are values
@@ -640,7 +648,15 @@ func (s *Service) ChangePassword(id uuid.UUID, input ChangePasswordInput) error 
 
 // --- Email Verification ---
 
-func (s *Service) SendVerificationEmail(userID uuid.UUID) error {
+// SendVerificationEmail produces a signed action token (JWT HS256) bound
+// to the user and an optional OAuth AuthorizationRequest. The JTI is stored
+// in users.email_verify_token so we can revoke or single-use the link.
+//
+// When authRequestID is non-nil, the verify-email handler will resume the
+// OAuth flow after the user clicks the link (auto-login + redirect to the
+// client's redirect_uri). When nil, the handler renders a generic success
+// page — used by the standalone (non-OAuth) register path.
+func (s *Service) SendVerificationEmail(userID uuid.UUID, authRequestID *uuid.UUID) error {
 	u, err := s.GetByID(userID)
 	if err != nil {
 		return err
@@ -648,24 +664,39 @@ func (s *Service) SendVerificationEmail(userID uuid.UUID) error {
 	if u.EmailVerified {
 		return pkg.ErrBadRequest("email already verified")
 	}
-
-	token, err := crypto.GenerateRandomString(32)
-	if err != nil {
-		return pkg.ErrInternal("failed to generate verification token")
+	if len(s.actionTokenSigningKey) == 0 {
+		return pkg.ErrInternal("action token signing key not configured")
 	}
 
-	tokenHash := crypto.HashToken(token)
-	expiresAt := time.Now().Add(24 * time.Hour)
+	jti, err := uuid.NewV7()
+	if err != nil {
+		return pkg.ErrInternal("failed to generate verification jti")
+	}
+
+	now := time.Now()
+	expiresAt := now.Add(24 * time.Hour)
+
+	tokenStr, err := actiontoken.Sign(actiontoken.Claims{
+		Subject:   userID,
+		Action:    actiontoken.ActionVerifyEmail,
+		JTI:       jti.String(),
+		RequestID: authRequestID,
+		IssuedAt:  now,
+		ExpiresAt: expiresAt,
+	}, s.actionTokenSigningKey)
+	if err != nil {
+		return pkg.ErrInternal("failed to sign verification token")
+	}
 
 	if err := s.repo.UpdateFields(userID, map[string]any{
-		"email_verify_token":      tokenHash,
+		"email_verify_token":      jti.String(),
 		"email_verify_expires_at": expiresAt,
 	}); err != nil {
-		return pkg.ErrInternal("failed to store verification token")
+		return pkg.ErrInternal("failed to store verification jti")
 	}
 
 	if s.emailSender != nil {
-		if err := s.emailSender.SendVerificationEmail(u.Email, token); err != nil {
+		if err := s.emailSender.SendVerificationEmail(u.Email, tokenStr); err != nil {
 			slog.Error("failed to send verification email", "error", err)
 		}
 	} else {
@@ -675,26 +706,56 @@ func (s *Service) SendVerificationEmail(userID uuid.UUID) error {
 	return nil
 }
 
+// ConsumeVerificationToken validates and consumes a verification action
+// token: it parses the JWT, ensures the embedded JTI matches the one on
+// record, marks the user as verified, and clears the slot so the link is
+// single-use. Returns the user and the optional OAuth request id from the
+// token so the caller can decide whether to bootstrap a session.
+func (s *Service) ConsumeVerificationToken(raw string) (*model.User, *uuid.UUID, error) {
+	if len(s.actionTokenSigningKey) == 0 {
+		return nil, nil, pkg.ErrInternal("action token signing key not configured")
+	}
+	claims, err := actiontoken.Parse(raw, s.actionTokenSigningKey)
+	if err != nil {
+		return nil, nil, pkg.ErrBadRequest("invalid or expired verification token")
+	}
+	if claims.Action != actiontoken.ActionVerifyEmail {
+		return nil, nil, pkg.ErrBadRequest("invalid token action")
+	}
+
+	u, err := s.repo.FindByVerifyToken(claims.JTI)
+	if err != nil {
+		return nil, nil, pkg.ErrInternal("failed to verify email")
+	}
+	if u == nil || u.ID != claims.Subject {
+		return nil, nil, pkg.ErrBadRequest("invalid or expired verification token")
+	}
+
+	if err := s.repo.UpdateFields(u.ID, map[string]any{
+		"email_verified":          true,
+		"email_verify_token":      nil,
+		"email_verify_expires_at": nil,
+	}); err != nil {
+		return nil, nil, pkg.ErrInternal("failed to mark email verified")
+	}
+
+	return u, claims.RequestID, nil
+}
+
+// Deprecated: use ConsumeVerificationToken. Kept for backward compat with
+// the POST /auth/verify-email handler that may still be hit by older AuthUI
+// builds; behaves the same as before (raw-token DB lookup).
 type VerifyEmailInput struct {
 	Token string `json:"token" binding:"required"`
 }
 
 func (s *Service) VerifyEmail(input VerifyEmailInput) error {
-	tokenHash := crypto.HashToken(input.Token)
-
-	u, err := s.repo.FindByVerifyToken(tokenHash)
+	u, _, err := s.ConsumeVerificationToken(input.Token)
 	if err != nil {
-		return pkg.ErrInternal("failed to verify email")
+		return err
 	}
-	if u == nil {
-		return pkg.ErrBadRequest("invalid or expired verification token")
-	}
-
-	return s.repo.UpdateFields(u.ID, map[string]any{
-		"email_verified":          true,
-		"email_verify_token":      nil,
-		"email_verify_expires_at": nil,
-	})
+	_ = u
+	return nil
 }
 
 // --- Password Reset ---

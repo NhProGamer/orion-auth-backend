@@ -1,6 +1,7 @@
 package user
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -449,18 +450,26 @@ func TestChangePassword_NewPasswordTooShort(t *testing.T) {
 // SendVerificationEmail
 // ---------------------------------------------------------------------------
 
+func testActionTokenKey() []byte {
+	k := make([]byte, 32)
+	for i := range k {
+		k[i] = byte(i + 1)
+	}
+	return k
+}
+
 func TestSendVerificationEmail_Success(t *testing.T) {
 	hasher := testutil.FastHasher()
 	testUser := testutil.TestUser(hasher, "password123")
 	testUser.EmailVerified = false
 
 	var emailSent bool
-	var sentTo string
+	var sentTo, sentToken string
 	emailMock := &mockEmailSender{
 		sendVerificationEmailFn: func(to, token string) error {
 			emailSent = true
 			sentTo = to
-			assert.NotEmpty(t, token)
+			sentToken = token
 			return nil
 		},
 	}
@@ -475,15 +484,17 @@ func TestSendVerificationEmail_Success(t *testing.T) {
 	}
 	svc := NewService(repo, hasher, testutil.TestAuthConfig())
 	svc.SetEmailSender(emailMock)
+	svc.SetActionTokenSigningKey(testActionTokenKey())
 
-	err := svc.SendVerificationEmail(testUser.ID)
+	err := svc.SendVerificationEmail(testUser.ID, nil)
 
 	require.NoError(t, err)
 	assert.True(t, emailSent)
 	assert.Equal(t, testUser.Email, sentTo)
-	// Should have stored token hash and expiry
+	// The email carries a JWT — three base64 segments separated by dots.
+	assert.Equal(t, 2, strings.Count(sentToken, "."), "token should be a JWT")
 	require.NotNil(t, storedFields)
-	assert.NotNil(t, storedFields["email_verify_token"])
+	assert.NotEmpty(t, storedFields["email_verify_token"], "JTI must be stored")
 	assert.NotNil(t, storedFields["email_verify_expires_at"])
 }
 
@@ -499,55 +510,98 @@ func TestSendVerificationEmail_NoEmailSender(t *testing.T) {
 		},
 	}
 	svc := NewService(repo, hasher, testutil.TestAuthConfig())
-	// No email sender set
+	svc.SetActionTokenSigningKey(testActionTokenKey())
 
-	err := svc.SendVerificationEmail(testUser.ID)
+	err := svc.SendVerificationEmail(testUser.ID, nil)
 
-	// Should succeed without error even without email sender
 	require.NoError(t, err)
 }
 
-// ---------------------------------------------------------------------------
-// VerifyEmail
-// ---------------------------------------------------------------------------
-
-func TestVerifyEmail_Success(t *testing.T) {
+func TestSendVerificationEmail_NoSigningKey(t *testing.T) {
 	hasher := testutil.FastHasher()
 	testUser := testutil.TestUser(hasher, "password123")
+	testUser.EmailVerified = false
 
+	repo := &mockUserRepo{
+		findByIDFn: func(id uuid.UUID) (*model.User, error) { return testUser, nil },
+	}
+	svc := newTestService(repo)
+	// No signing key wired
+
+	err := svc.SendVerificationEmail(testUser.ID, nil)
+	require.Error(t, err)
+}
+
+// ---------------------------------------------------------------------------
+// ConsumeVerificationToken
+// ---------------------------------------------------------------------------
+
+func TestConsumeVerificationToken_RoundTrip(t *testing.T) {
+	hasher := testutil.FastHasher()
+	testUser := testutil.TestUser(hasher, "password123")
+	testUser.EmailVerified = false
+
+	var storedJTI string
 	var capturedFields map[string]any
 	repo := &mockUserRepo{
-		findByVerifyTokenFn: func(tokenHash string) (*model.User, error) {
-			return testUser, nil
-		},
-		updateFieldsFn: func(id uuid.UUID, fields map[string]any) error {
+		findByIDFn: func(_ uuid.UUID) (*model.User, error) { return testUser, nil },
+		updateFieldsFn: func(_ uuid.UUID, fields map[string]any) error {
+			if jti, ok := fields["email_verify_token"].(string); ok {
+				storedJTI = jti
+			}
 			capturedFields = fields
 			return nil
 		},
-	}
-	svc := NewService(repo, hasher, testutil.TestAuthConfig())
-
-	err := svc.VerifyEmail(VerifyEmailInput{Token: "some-valid-token"})
-
-	require.NoError(t, err)
-	require.NotNil(t, capturedFields)
-	assert.Equal(t, true, capturedFields["email_verified"])
-	assert.Nil(t, capturedFields["email_verify_token"])
-	assert.Nil(t, capturedFields["email_verify_expires_at"])
-}
-
-func TestVerifyEmail_InvalidToken(t *testing.T) {
-	repo := &mockUserRepo{
-		findByVerifyTokenFn: func(tokenHash string) (*model.User, error) {
-			return nil, nil // Not found
+		findByVerifyTokenFn: func(jti string) (*model.User, error) {
+			if jti == storedJTI {
+				return testUser, nil
+			}
+			return nil, nil
 		},
 	}
-	svc := newTestService(repo)
 
-	err := svc.VerifyEmail(VerifyEmailInput{Token: "invalid-token"})
+	svc := NewService(repo, hasher, testutil.TestAuthConfig())
+	svc.SetEmailSender(&mockEmailSender{})
+	svc.SetActionTokenSigningKey(testActionTokenKey())
 
+	rid := uuid.New()
+	require.NoError(t, svc.SendVerificationEmail(testUser.ID, &rid))
+
+	// Capture the JWT emitted by the sender.
+	var emittedToken string
+	svc2 := NewService(repo, hasher, testutil.TestAuthConfig())
+	svc2.SetActionTokenSigningKey(testActionTokenKey())
+	svc2.SetEmailSender(&mockEmailSender{
+		sendVerificationEmailFn: func(_, token string) error {
+			emittedToken = token
+			return nil
+		},
+	})
+	require.NoError(t, svc2.SendVerificationEmail(testUser.ID, &rid))
+
+	u, gotRID, err := svc2.ConsumeVerificationToken(emittedToken)
+	require.NoError(t, err)
+	require.NotNil(t, u)
+	require.NotNil(t, gotRID)
+	assert.Equal(t, rid, *gotRID)
+	assert.Equal(t, true, capturedFields["email_verified"])
+	assert.Nil(t, capturedFields["email_verify_token"])
+}
+
+func TestConsumeVerificationToken_InvalidToken(t *testing.T) {
+	svc := newTestService(&mockUserRepo{})
+	svc.SetActionTokenSigningKey(testActionTokenKey())
+
+	_, _, err := svc.ConsumeVerificationToken("not-a-jwt")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid or expired verification token")
+}
+
+func TestConsumeVerificationToken_NoSigningKey(t *testing.T) {
+	svc := newTestService(&mockUserRepo{})
+	// No signing key
+
+	_, _, err := svc.ConsumeVerificationToken("anything")
+	require.Error(t, err)
 }
 
 // ---------------------------------------------------------------------------
