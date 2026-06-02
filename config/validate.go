@@ -47,12 +47,12 @@ func (c *Config) Validate() error {
 	}
 
 	if strings.EqualFold(c.Database.SSLMode, "disable") {
-		msg := "database.sslmode=disable is forbidden in release mode; use require or verify-full"
-		if isRelease {
-			releaseErrs = append(releaseErrs, msg)
-		} else {
-			slog.Warn("config validation: " + msg)
-		}
+		// Soft warning only: many deployments run the DB inside the same
+		// docker-compose / kubernetes pod-network as the app, where TLS
+		// inside the bridge adds operational friction without a real
+		// threat-model benefit. Operators with the DB on a separate
+		// host see the warning and act on it.
+		slog.Warn("config validation: database.sslmode=disable; safe only when the DB is reachable exclusively over a private network (docker-compose / pod / VPC)")
 	}
 
 	if c.Issuer == "" || strings.HasPrefix(c.Issuer, "http://localhost") || strings.HasPrefix(c.Issuer, "http://127.0.0.1") {

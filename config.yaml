@@ -2,13 +2,16 @@
 # Production deployments MUST override the following via ORION_* env vars:
 #   - ORION_SERVER_MODE=release
 #   - ORION_DATABASE_PASSWORD=<strong password>
-#   - ORION_DATABASE_SSLMODE=require (or verify-full)
 #   - ORION_AUTH_HMAC_SECRET_ENCRYPTION_KEY=<base64 AES-256>
 #   - ORION_PAIRWISE_SALT=<32 random bytes hex>
 #   - ORION_ISSUER=https://your-public-domain
 #   - ORION_SMTP_TLS=true
+# Optional (soft warnings only — set when the DB or SMTP is reachable
+# from outside a private network):
+#   - ORION_DATABASE_SSLMODE=require (skip when the DB lives in the same
+#     docker-compose / kubernetes pod network)
 # The Config.Validate() boot check refuses to start in release mode if any
-# of these is still set to its development placeholder.
+# of the MUST-override values is still set to its development placeholder.
 
 server:
   host: "0.0.0.0"

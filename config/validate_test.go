@@ -58,11 +58,6 @@ func TestValidate_ReleaseModeRefusesUnsafeValues(t *testing.T) {
 			wantInMsg: "hmac_secret_encryption_key",
 		},
 		{
-			name:      "sslmode disable",
-			mutate:    func(c *Config) { c.Database.SSLMode = "disable" },
-			wantInMsg: "sslmode=disable",
-		},
-		{
 			name:      "issuer localhost",
 			mutate:    func(c *Config) { c.Issuer = "http://localhost:8080" },
 			wantInMsg: "issuer",
@@ -108,10 +103,32 @@ func TestValidate_DebugModeWarnsButReturnsNil(t *testing.T) {
 		t.Fatalf("expected nil in debug mode, got %v", err)
 	}
 	logs := buf.String()
+	// sslmode=disable is now a permanent soft warning (never blocks);
+	// the other two hard-blocks must still surface as debug warnings.
 	for _, want := range []string{"pairwise_salt", "hmac_secret_encryption_key", "sslmode=disable"} {
 		if !strings.Contains(logs, want) {
 			t.Errorf("expected slog output to mention %q; got %s", want, logs)
 		}
+	}
+}
+
+// TestValidate_SSLModeDisableNeverBlocks confirms the relaxation: even
+// in release mode, sslmode=disable is a warning only — deployments
+// where the DB lives on the same private network (docker-compose,
+// k8s pod network, VPC) shouldn't have to bend the rules.
+func TestValidate_SSLModeDisableNeverBlocks(t *testing.T) {
+	cfg := baseRelease()
+	cfg.Database.SSLMode = "disable"
+
+	buf := &bytes.Buffer{}
+	restore := swapLogger(t, slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer restore()
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("sslmode=disable must not block release boot, got %v", err)
+	}
+	if !strings.Contains(buf.String(), "sslmode=disable") {
+		t.Errorf("expected a soft warning naming sslmode=disable; got %s", buf.String())
 	}
 }
 
@@ -141,14 +158,13 @@ func TestValidate_AccumulatesMultipleErrors(t *testing.T) {
 	cfg := baseRelease()
 	cfg.PairwiseSalt = ""
 	cfg.Auth.HMACSecretEncryptionKey = ""
-	cfg.Database.SSLMode = "disable"
 
 	err := cfg.Validate()
 	if err == nil {
 		t.Fatalf("expected error")
 	}
 	msg := err.Error()
-	for _, want := range []string{"pairwise_salt", "hmac_secret_encryption_key", "sslmode=disable"} {
+	for _, want := range []string{"pairwise_salt", "hmac_secret_encryption_key"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("expected aggregated error to contain %q; got %s", want, msg)
 		}
