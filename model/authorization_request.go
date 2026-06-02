@@ -33,6 +33,7 @@ type AuthorizationRequest struct {
 	AuthTime            *time.Time     `gorm:"type:timestamptz" json:"-"`
 	ResponseMode        *string        `gorm:"type:varchar(20)" json:"-"`
 	AuthMethods         pq.StringArray `gorm:"type:text[];default:'{}'" json:"-"`
+	RememberMe          bool           `gorm:"default:false" json:"-"`
 	ExpiresAt           time.Time      `gorm:"not null" json:"expires_at"`
 }
 

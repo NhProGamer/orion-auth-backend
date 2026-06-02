@@ -615,9 +615,10 @@ func (s *Service) handlePromptNone(client *model.OAuthClient, params InitAuthori
 }
 
 type AuthorizeLoginInput struct {
-	RequestID uuid.UUID `json:"request_id" binding:"required"`
-	Email     string    `json:"email" binding:"required,email"`
-	Password  string    `json:"password" binding:"required"`
+	RequestID  uuid.UUID `json:"request_id" binding:"required"`
+	Email      string    `json:"email" binding:"required,email"`
+	Password   string    `json:"password" binding:"required"`
+	RememberMe bool      `json:"remember_me"`
 }
 
 type AuthorizeLoginResponse struct {
@@ -705,6 +706,7 @@ func (s *Service) AuthorizeLogin(input AuthorizeLoginInput, ipAddress, userAgent
 	}
 
 	req.UserID = &u.ID
+	req.RememberMe = input.RememberMe
 	req.AuthMethods = append(req.AuthMethods, "pwd")
 	now := time.Now()
 	if needsMFA {
@@ -1039,6 +1041,7 @@ func (s *Service) completeAuthorize(req *model.AuthorizationRequest, ipAddress, 
 		UserID:    *req.UserID,
 		IPAddress: ipAddress,
 		UserAgent: userAgent,
+		Extended:  req.RememberMe,
 	})
 	if err != nil {
 		return nil, pkg.ErrServerError("failed to create session")

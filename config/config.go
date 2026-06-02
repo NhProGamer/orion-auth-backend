@@ -61,6 +61,7 @@ type AuthConfig struct {
 	AccessTokenTTL           time.Duration `mapstructure:"access_token_ttl"`
 	RefreshTokenTTL          time.Duration `mapstructure:"refresh_token_ttl"`
 	SessionTTL               time.Duration `mapstructure:"session_ttl"`
+	SessionExtendedTTL       time.Duration `mapstructure:"session_extended_ttl"`
 	AuthCodeTTL              time.Duration `mapstructure:"auth_code_ttl"`
 	DeviceCodeTTL            time.Duration `mapstructure:"device_code_ttl"`
 	PasswordMinLen           int           `mapstructure:"password_min_length"`
@@ -175,4 +176,6 @@ func setAccountDefaults() {
 	// a user to admin (UUID seed from migration 011). Operators can widen
 	// the list via ORION_AUTH_M2M_PROTECTED_ROLE_IDS.
 	viper.SetDefault("auth.m2m_protected_role_ids", []string{"00000000-0000-0000-0000-000000000001"})
+	// Default "remember me" session TTL — 30d.
+	viper.SetDefault("auth.session_extended_ttl", "720h")
 }

@@ -17,6 +17,7 @@ func TestAuthConfig() config.AuthConfig {
 		AccessTokenTTL:  1 * time.Hour,
 		RefreshTokenTTL: 24 * time.Hour,
 		SessionTTL:      720 * time.Hour,
+		SessionExtendedTTL: 2160 * time.Hour,
 		AuthCodeTTL:     10 * time.Minute,
 		DeviceCodeTTL:   15 * time.Minute,
 		PasswordMinLen:  8,

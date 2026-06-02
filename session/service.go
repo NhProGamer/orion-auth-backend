@@ -12,18 +12,42 @@ import (
 )
 
 type Service struct {
-	repo RepositoryInterface
-	cfg  config.AuthConfig
+	repo        RepositoryInterface
+	cfg         config.AuthConfig
+	ttlResolver TTLResolver
 }
 
 func NewService(repo RepositoryInterface, cfg config.AuthConfig) *Service {
 	return &Service{repo: repo, cfg: cfg}
 }
 
+// TTLResolver is the optional hook through which the service resolves the
+// session TTL at creation time. When unset, the service falls back to
+// cfg.SessionTTL / cfg.SessionExtendedTTL. Use SetTTLResolver to wire an
+// admin-overridable resolver (see invitation.Service for the live wiring).
+type TTLResolver interface {
+	SessionTTL(extended bool) time.Duration
+}
+
+func (s *Service) SetTTLResolver(r TTLResolver) {
+	s.ttlResolver = r
+}
+
+func (s *Service) resolveTTL(extended bool) time.Duration {
+	if s.ttlResolver != nil {
+		return s.ttlResolver.SessionTTL(extended)
+	}
+	if extended {
+		return s.cfg.SessionExtendedTTL
+	}
+	return s.cfg.SessionTTL
+}
+
 type CreateInput struct {
 	UserID    uuid.UUID
 	IPAddress string
 	UserAgent string
+	Extended  bool
 }
 
 func (s *Service) Create(input CreateInput) (*model.Session, error) {
@@ -49,7 +73,7 @@ func (s *Service) Create(input CreateInput) (*model.Session, error) {
 		UserAgent:       ua,
 		LastActiveAt:    now,
 		AuthenticatedAt: now,
-		ExpiresAt:       now.Add(s.cfg.SessionTTL),
+		ExpiresAt:       now.Add(s.resolveTTL(input.Extended)),
 	}
 
 	if err := s.repo.Create(session); err != nil {

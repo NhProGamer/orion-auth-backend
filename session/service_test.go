@@ -114,6 +114,48 @@ func TestCreate_Success(t *testing.T) {
 	assert.False(t, created.ExpiresAt.IsZero())
 }
 
+func TestCreate_DefaultTTL(t *testing.T) {
+	var created *model.Session
+	repo := &mockSessionRepo{
+		createFn: func(s *model.Session) error {
+			created = s
+			return nil
+		},
+	}
+	svc := newTestService(repo)
+
+	before := time.Now()
+	userID, _ := uuid.NewV7()
+	_, err := svc.Create(CreateInput{UserID: userID})
+	require.NoError(t, err)
+
+	cfg := testutil.TestAuthConfig()
+	delta := created.ExpiresAt.Sub(before)
+	assert.GreaterOrEqual(t, delta, cfg.SessionTTL-time.Second)
+	assert.LessOrEqual(t, delta, cfg.SessionTTL+time.Second)
+}
+
+func TestCreate_ExtendedTTL(t *testing.T) {
+	var created *model.Session
+	repo := &mockSessionRepo{
+		createFn: func(s *model.Session) error {
+			created = s
+			return nil
+		},
+	}
+	svc := newTestService(repo)
+
+	before := time.Now()
+	userID, _ := uuid.NewV7()
+	_, err := svc.Create(CreateInput{UserID: userID, Extended: true})
+	require.NoError(t, err)
+
+	cfg := testutil.TestAuthConfig()
+	delta := created.ExpiresAt.Sub(before)
+	assert.GreaterOrEqual(t, delta, cfg.SessionExtendedTTL-time.Second)
+	assert.LessOrEqual(t, delta, cfg.SessionExtendedTTL+time.Second)
+}
+
 // --- ListActive Tests ---
 
 func TestListActive_Success(t *testing.T) {
