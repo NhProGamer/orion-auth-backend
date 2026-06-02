@@ -472,6 +472,36 @@ func TestValidateToken_Used(t *testing.T) {
 	assert.Nil(t, inv)
 }
 
+// --- Post-Register Redirect URL ---
+
+func TestGetPostRegisterRedirectURL_FromSetting(t *testing.T) {
+	invRepo := &mockInvitationRepo{
+		getSettingFn: func(key string) (string, error) {
+			if key == "default_post_register_redirect_url" {
+				return "https://dev.clown.school/", nil
+			}
+			return "", nil
+		},
+	}
+
+	svc := newTestService(invRepo, &mockUserRepo{}, &mockRbacRepo{}, nil)
+
+	assert.Equal(t, "https://dev.clown.school/", svc.GetPostRegisterRedirectURL())
+}
+
+func TestGetPostRegisterRedirectURL_Default(t *testing.T) {
+	svc := newTestService(&mockInvitationRepo{}, &mockUserRepo{}, &mockRbacRepo{}, nil)
+
+	assert.Equal(t, "", svc.GetPostRegisterRedirectURL())
+}
+
+func TestSetAllowedOrigins(t *testing.T) {
+	svc := newTestService(&mockInvitationRepo{}, &mockUserRepo{}, &mockRbacRepo{}, nil)
+	svc.SetAllowedOrigins([]string{"https://dev.clown.school"})
+
+	assert.Equal(t, []string{"https://dev.clown.school"}, svc.AllowedOrigins())
+}
+
 // --- IsRegistrationEnabled Tests ---
 
 func TestIsRegistrationEnabled_Default(t *testing.T) {

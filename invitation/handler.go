@@ -88,7 +88,8 @@ func (h *Handler) LookupInvitation(c *gin.Context) {
 // @Router       /api/v1/auth/settings [get]
 func (h *Handler) PublicSettings(c *gin.Context) {
 	resp := gin.H{
-		"registration_enabled": h.service.IsRegistrationEnabled(),
+		"registration_enabled":                h.service.IsRegistrationEnabled(),
+		"default_post_register_redirect_url": h.service.GetPostRegisterRedirectURL(),
 	}
 
 	if h.federationLister != nil {
@@ -246,11 +247,12 @@ func (h *Handler) GetSettings(c *gin.Context) {
 }
 
 type UpdateSettingsInput struct {
-	RegistrationEnabled     *bool   `json:"registration_enabled"`
-	InvitationsDefaultRole  *string `json:"invitations_default_role"`
-	DefaultAccessTokenTTL   *int    `json:"default_access_token_ttl"`
-	DefaultRefreshTokenTTL  *int    `json:"default_refresh_token_ttl"`
-	DefaultIDTokenTTL       *int    `json:"default_id_token_ttl"`
+	RegistrationEnabled            *bool   `json:"registration_enabled"`
+	InvitationsDefaultRole         *string `json:"invitations_default_role"`
+	DefaultAccessTokenTTL          *int    `json:"default_access_token_ttl"`
+	DefaultRefreshTokenTTL         *int    `json:"default_refresh_token_ttl"`
+	DefaultIDTokenTTL              *int    `json:"default_id_token_ttl"`
+	DefaultPostRegisterRedirectURL *string `json:"default_post_register_redirect_url"`
 }
 
 // UpdateSettings godoc
@@ -310,6 +312,17 @@ func (h *Handler) UpdateSettings(c *gin.Context) {
 	}
 	if input.DefaultIDTokenTTL != nil {
 		if err := apply("default_id_token_ttl", strconv.Itoa(*input.DefaultIDTokenTTL), *input.DefaultIDTokenTTL); err != nil {
+			pkg.HandleError(c, err)
+			return
+		}
+	}
+	if input.DefaultPostRegisterRedirectURL != nil {
+		url := *input.DefaultPostRegisterRedirectURL
+		if url != "" && !pkg.IsOriginAllowed(url, h.service.AllowedOrigins()...) {
+			pkg.HandleError(c, pkg.ErrBadRequest("post-register redirect URL origin is not allowlisted"))
+			return
+		}
+		if err := apply("default_post_register_redirect_url", url, url); err != nil {
 			pkg.HandleError(c, err)
 			return
 		}

@@ -15,11 +15,12 @@ import (
 )
 
 type Service struct {
-	repo        RepositoryInterface
-	userService *user.Service
-	rbacService *rbac.Service
-	emailSender email.Sender
-	issuer      string
+	repo           RepositoryInterface
+	userService    *user.Service
+	rbacService    *rbac.Service
+	emailSender    email.Sender
+	issuer         string
+	allowedOrigins []string
 }
 
 func NewService(repo RepositoryInterface, userService *user.Service, rbacService *rbac.Service, emailSender email.Sender, issuer string) *Service {
@@ -194,6 +195,28 @@ func (s *Service) GetAllSettings() (map[string]string, error) {
 		result[s.Key] = s.Value
 	}
 	return result, nil
+}
+
+// SetAllowedOrigins configures the same-origin allowlist used to validate
+// operator-supplied URLs (e.g. default_post_register_redirect_url). Wired
+// from cfg.CORS.AllowedOrigins at startup.
+func (s *Service) SetAllowedOrigins(origins []string) {
+	s.allowedOrigins = origins
+}
+
+// AllowedOrigins exposes the configured allowlist for the handler.
+func (s *Service) AllowedOrigins() []string {
+	return s.allowedOrigins
+}
+
+// GetPostRegisterRedirectURL returns the configured URL or empty string.
+// Surfaced verbatim in /api/v1/auth/settings for the AuthUI.
+func (s *Service) GetPostRegisterRedirectURL() string {
+	val, err := s.repo.GetSetting("default_post_register_redirect_url")
+	if err != nil {
+		return ""
+	}
+	return val
 }
 
 func (s *Service) UpdateSetting(key, value string) error {

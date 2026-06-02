@@ -125,6 +125,7 @@ func main() {
 	fedService.SetOAuthResumer(newFederationOAuthAdapter(oauthService))
 	invRepo := invitation.NewRepository(db)
 	invService := invitation.NewService(invRepo, userService, rbacService, emailSender, cfg.Issuer)
+	invService.SetAllowedOrigins(cfg.CORS.AllowedOrigins)
 	fedService.SetProvisioningDependencies(userService, invService, invService)
 	regFormService := regform.NewService(regFormRepo)
 	userService.SetRegFormProvider(regFormService)
