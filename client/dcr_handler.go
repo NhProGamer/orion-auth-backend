@@ -263,6 +263,10 @@ func (h *DCRHandler) UpdateRegistration(c *gin.Context) {
 		client.Name = req.ClientName
 	}
 	if len(req.RedirectURIs) > 0 {
+		if err := validateRedirectURIs(req.RedirectURIs); err != nil {
+			pkg.HandleError(c, err)
+			return
+		}
 		client.RedirectURIs = pq.StringArray(req.RedirectURIs)
 	}
 	if len(req.GrantTypes) > 0 {

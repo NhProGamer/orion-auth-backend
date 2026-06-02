@@ -99,6 +99,9 @@ type CreateResponse struct {
 }
 
 func (s *Service) Create(input CreateInput) (*CreateResponse, error) {
+	if err := validateRedirectURIs(input.RedirectURIs); err != nil {
+		return nil, err
+	}
 	if input.JWKSUri != nil && *input.JWKSUri != "" {
 		if err := netsafety.ValidatePublicHTTPSURL(*input.JWKSUri); err != nil {
 			return nil, pkg.ErrInvalidRequest("invalid jwks_uri: " + err.Error())
@@ -253,6 +256,11 @@ func (s *Service) GetByID(id uuid.UUID) (*model.OAuthClient, error) {
 }
 
 func (s *Service) Update(id uuid.UUID, input UpdateInput) (*model.OAuthClient, error) {
+	if input.RedirectURIs != nil {
+		if err := validateRedirectURIs(input.RedirectURIs); err != nil {
+			return nil, err
+		}
+	}
 	if input.JWKSUri != nil && *input.JWKSUri != "" {
 		if err := netsafety.ValidatePublicHTTPSURL(*input.JWKSUri); err != nil {
 			return nil, pkg.ErrInvalidRequest("invalid jwks_uri: " + err.Error())
@@ -418,4 +426,16 @@ func (s *Service) RotateHMACSecret(id uuid.UUID) (string, error) {
 	}
 	slog.Info("client hmac secret rotated", "client_id", id)
 	return b64, nil
+}
+
+// validateRedirectURIs rejects every URI whose scheme is not allowed for an
+// OAuth redirect_uri (https, http on loopback, or a native reverse-DNS
+// scheme). Aggregates errors so the operator sees every bad entry at once.
+func validateRedirectURIs(uris []string) error {
+	for _, u := range uris {
+		if err := netsafety.ValidateRedirectURIScheme(u); err != nil {
+			return pkg.ErrInvalidRequest("invalid redirect_uri " + u + ": " + err.Error())
+		}
+	}
+	return nil
 }
