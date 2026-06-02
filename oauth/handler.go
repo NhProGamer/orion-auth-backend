@@ -48,6 +48,7 @@ func (h *Handler) RegisterRoutes(router *gin.Engine, clientAuth, rateLimiter gin
 	// Authorization endpoints (no client auth middleware, client is identified by params)
 	router.GET("/authorize", rateLimiter, h.Authorize)
 	router.POST("/authorize/login", rateLimiter, h.AuthorizeLogin)
+	router.POST("/authorize/register", rateLimiter, h.AuthorizeRegister)
 	router.POST("/authorize/mfa", rateLimiter, h.AuthorizeMFA)
 	router.POST("/authorize/consent", rateLimiter, h.AuthorizeConsent)
 
@@ -266,6 +267,40 @@ func (h *Handler) AuthorizeLogin(c *gin.Context) {
 		setSessionStateCookie(c, codeResp)
 		c.JSON(http.StatusOK, codeResp)
 		return
+	}
+
+	pkg.OK(c, resp)
+}
+
+// AuthorizeRegister handles the signup step of the authorize flow.
+// @Summary Submit signup details for OAuth2 authorization (prompt=create)
+// @Tags OAuth2
+// @Accept json
+// @Produce json
+// @Param input body oauth.AuthorizeRegisterInput true "Signup details"
+// @Success 200 {object} map[string]any
+// @Failure 400 {object} map[string]any
+// @Failure 409 {object} map[string]any
+// @Router /authorize/register [post]
+func (h *Handler) AuthorizeRegister(c *gin.Context) {
+	var input AuthorizeRegisterInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		pkg.HandleError(c, pkg.ErrInvalidRequest("invalid request body: "+err.Error()))
+		return
+	}
+
+	resp, err := h.service.AuthorizeRegister(input, c.ClientIP(), c.GetHeader("User-Agent"))
+	if err != nil {
+		pkg.HandleError(c, err)
+		return
+	}
+
+	if h.auditService != nil {
+		h.auditService.LogFromContext(c, audit.ActionUserRegistered, map[string]any{
+			"user_id": resp.UserID,
+			"email":   input.Email,
+			"flow":    "oauth_prompt_create",
+		})
 	}
 
 	pkg.OK(c, resp)

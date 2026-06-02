@@ -621,6 +621,25 @@ type AuthorizeLoginInput struct {
 	RememberMe bool      `json:"remember_me"`
 }
 
+// AuthorizeRegisterInput is the body for POST /authorize/register, the
+// signup-side counterpart of AuthorizeLogin. Used when a SPA initiates the
+// authorize flow with prompt=create. On success the user record exists but
+// the session is NOT opened — the response asks the AuthUI to render the
+// "verify your email" screen. Auto-login happens via the email link.
+type AuthorizeRegisterInput struct {
+	RequestID   uuid.UUID      `json:"request_id" binding:"required"`
+	Email       string         `json:"email" binding:"required,email"`
+	Password    string         `json:"password" binding:"required"`
+	DisplayName *string        `json:"display_name"`
+	ExtraFields map[string]any `json:"extra_fields,omitempty"`
+}
+
+type AuthorizeRegisterResponse struct {
+	RequestID                 uuid.UUID `json:"request_id"`
+	UserID                    uuid.UUID `json:"user_id"`
+	RequiresEmailVerification bool      `json:"requires_email_verification"`
+}
+
 type AuthorizeLoginResponse struct {
 	RequestID       uuid.UUID `json:"request_id"`
 	Authenticated   bool      `json:"authenticated"`
@@ -735,6 +754,63 @@ func (s *Service) AuthorizeLogin(input AuthorizeLoginInput, ipAddress, userAgent
 		RequiresConsent: needsConsent,
 		RequiresMFA:     needsMFA,
 		Scopes:          req.Scopes,
+	}, nil
+}
+
+// AuthorizeRegister is the signup-side counterpart of AuthorizeLogin,
+// reached when a SPA initiated /authorize with prompt=create. It creates
+// the user inside the OAuth flow, bumps the authorization request's
+// expiration to match the verify-email window, and triggers the email.
+// The session is NOT opened here: the spec requires emitting id_token only
+// once we know the new identity is real (Auth0/Keycloak pattern). Bootstrap
+// happens when the email link is clicked.
+func (s *Service) AuthorizeRegister(input AuthorizeRegisterInput, ipAddress, userAgent string) (*AuthorizeRegisterResponse, error) {
+	req, err := s.repo.FindAuthRequest(input.RequestID)
+	if err != nil || req == nil {
+		return nil, pkg.ErrInvalidRequest("invalid or expired authorization request")
+	}
+	if req.IsExpired() {
+		return nil, pkg.ErrInvalidRequest("authorization request expired")
+	}
+	if req.Authenticated {
+		return nil, pkg.ErrInvalidRequest("already authenticated")
+	}
+
+	if _, err := s.repo.findClient(req.ClientID.String()); err != nil {
+		return nil, pkg.ErrServerError("failed to look up client")
+	}
+
+	newUser, err := s.userService.Register(user.RegisterInput{
+		Email:       input.Email,
+		Password:    input.Password,
+		DisplayName: input.DisplayName,
+		ExtraFields: input.ExtraFields,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Bind the user to the request and bump expiry so the request survives
+	// until the user clicks the verify-email link (24h).
+	req.UserID = &newUser.ID
+	req.ExpiresAt = time.Now().Add(24 * time.Hour)
+	if err := s.repo.UpdateAuthRequest(req); err != nil {
+		return nil, pkg.ErrServerError("failed to update authorization request")
+	}
+
+	// Send the verify-email link carrying the request id, so the click
+	// resumes this exact flow (PKCE / scopes / redirect_uri all preserved).
+	if err := s.userService.SendVerificationEmail(newUser.ID, &req.ID); err != nil {
+		// Don't fail the registration on email-send issues — the user
+		// can hit /auth/resend-verification.
+		slog.Warn("failed to send verification email after authorize-register",
+			"user_id", newUser.ID, "error", err)
+	}
+
+	return &AuthorizeRegisterResponse{
+		RequestID:                 req.ID,
+		UserID:                    newUser.ID,
+		RequiresEmailVerification: true,
 	}, nil
 }
 
