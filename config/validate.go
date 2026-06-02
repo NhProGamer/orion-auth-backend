@@ -46,6 +46,15 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	if c.Auth.ActionTokenSigningKey == "" {
+		msg := "auth.action_token_signing_key is empty; verify-email links cannot be issued"
+		if isRelease {
+			releaseErrs = append(releaseErrs, msg)
+		} else {
+			slog.Warn("config validation: " + msg + " — an ephemeral random key will be generated for this process only")
+		}
+	}
+
 	if strings.EqualFold(c.Database.SSLMode, "disable") {
 		// Soft warning only: many deployments run the DB inside the same
 		// docker-compose / kubernetes pod-network as the app, where TLS

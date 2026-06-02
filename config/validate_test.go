@@ -19,6 +19,7 @@ func baseRelease() Config {
 		},
 		Auth: AuthConfig{
 			HMACSecretEncryptionKey: "ZGV2LWtleS1ub3QtZW1wdHk=",
+			ActionTokenSigningKey:   "ZGV2LWtleS1ub3QtZW1wdHk=",
 		},
 		CORS: CORSConfig{
 			AllowedOrigins: []string{"https://app.example.com"},

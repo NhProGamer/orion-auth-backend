@@ -72,6 +72,11 @@ type AuthConfig struct {
 	// client_secret_jwt support is disabled with a startup warning.
 	HMACSecretEncryptionKey string `mapstructure:"hmac_secret_encryption_key"`
 
+	// ActionTokenSigningKey is a base64-encoded 32+ byte HMAC key used to
+	// sign short-lived out-of-band action tokens (verify-email links and
+	// future magic-link / reauth confirm flows). Required in release mode.
+	ActionTokenSigningKey string `mapstructure:"action_token_signing_key"`
+
 	// DCRInitialAccessToken, when non-empty, gates POST /register behind an
 	// operator-issued Bearer token (RFC 7591 §3). Empty leaves the
 	// endpoint open — RFC compliant but unsafe in most production

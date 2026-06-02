@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -603,6 +604,28 @@ func loadHMACEncryptionKey(encoded string) []byte {
 	key, err := crypto.DecodeHMACEncryptionKey(encoded)
 	if err != nil {
 		slog.Error("invalid auth.hmac_secret_encryption_key; client_secret_jwt support is disabled", "error", err)
+		return nil
+	}
+	return key
+}
+
+// loadActionTokenSigningKey decodes the base64 HMAC key used to sign
+// out-of-band action tokens (verify-email links). In dev when the operator
+// did not set one, a random ephemeral key is generated for this process —
+// good enough to test the flow but every restart invalidates outstanding
+// links. Release mode requires a configured key (enforced in config.Validate).
+func loadActionTokenSigningKey(encoded string) []byte {
+	if encoded == "" {
+		key := make([]byte, 32)
+		if _, err := rand.Read(key); err != nil {
+			slog.Error("failed to generate ephemeral action token key", "error", err)
+			return nil
+		}
+		return key
+	}
+	key, err := crypto.DecodeHMACEncryptionKey(encoded)
+	if err != nil {
+		slog.Error("invalid auth.action_token_signing_key; verify-email links will fail", "error", err)
 		return nil
 	}
 	return key
