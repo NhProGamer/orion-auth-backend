@@ -77,6 +77,13 @@ type AuthConfig struct {
 	// deployments. Override at runtime with
 	// ORION_AUTH_DCR_INITIAL_ACCESS_TOKEN.
 	DCRInitialAccessToken string `mapstructure:"dcr_initial_access_token"`
+
+	// M2MProtectedRoleIDs lists role UUIDs that the M2M API may NEVER
+	// assign to a user, regardless of which client_credentials token
+	// drives the request. Defaults to [admin] so a compromised M2M
+	// client cannot promote a user to admin. Override at runtime via
+	// ORION_AUTH_M2M_PROTECTED_ROLE_IDS (comma-separated UUIDs).
+	M2MProtectedRoleIDs []string `mapstructure:"m2m_protected_role_ids"`
 }
 
 type Argon2Config struct {
@@ -164,4 +171,8 @@ func setAccountDefaults() {
 	viper.SetDefault("account.email_change_token_ttl", "1h")
 	viper.SetDefault("account.deletion_grace_period", "168h") // 7d
 	viper.SetDefault("account.passkey_challenge_ttl", "5m")
+	// M2M role-assignment protection: by default no M2M client can promote
+	// a user to admin (UUID seed from migration 011). Operators can widen
+	// the list via ORION_AUTH_M2M_PROTECTED_ROLE_IDS.
+	viper.SetDefault("auth.m2m_protected_role_ids", []string{"00000000-0000-0000-0000-000000000001"})
 }

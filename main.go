@@ -233,6 +233,7 @@ func main() {
 		passkeyService,
 		fedService,
 	)
+	m2mUserService.SetProtectedRoles(cfg.Auth.M2MProtectedRoleIDs)
 	m2mHandler := m2m.NewHandler(m2mUserService)
 
 	// Policy gate for account_action policies (deny-on-self-service rules).

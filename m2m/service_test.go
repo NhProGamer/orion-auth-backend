@@ -441,3 +441,40 @@ func TestLinkedAccounts(t *testing.T) {
 		t.Error("UnlinkAccount not recorded")
 	}
 }
+
+// TestAssignRole_RefusesProtectedRole locks in Vuln 14's fix: even with
+// the m2m:users:manage_roles scope, the M2M API must refuse to assign
+// a role that the operator has marked protected (default: admin).
+func TestAssignRole_RefusesProtectedRole(t *testing.T) {
+	svc, users, _, _, _, _, _ := newSvc()
+	uid := uuid.New()
+	users.users[uid] = &model.User{BaseModel: model.BaseModel{ID: uid}}
+
+	adminRole := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	svc.SetProtectedRoles([]string{adminRole.String()})
+
+	err := svc.AssignRole(uid, adminRole)
+	if err == nil {
+		t.Fatal("expected protected-role refusal")
+	}
+}
+
+// TestAssignRole_AllowsNonProtectedRole verifies the protection only
+// affects the listed UUIDs — assigning any other role still goes
+// through normally.
+func TestAssignRole_AllowsNonProtectedRole(t *testing.T) {
+	svc, users, roles, _, _, _, _ := newSvc()
+	uid := uuid.New()
+	users.users[uid] = &model.User{BaseModel: model.BaseModel{ID: uid}}
+
+	adminRole := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	svc.SetProtectedRoles([]string{adminRole.String()})
+
+	customerRole := uuid.New()
+	if err := svc.AssignRole(uid, customerRole); err != nil {
+		t.Fatalf("unexpected refusal: %v", err)
+	}
+	if len(roles.assigned) != 1 {
+		t.Fatalf("expected role to be assigned, got %d", len(roles.assigned))
+	}
+}

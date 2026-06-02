@@ -16,12 +16,15 @@ import (
 // applies the side effects required by the M2M trust model — chiefly: when
 // a credential changes (password, MFA), all live sessions are revoked.
 type UserService struct {
-	users       UserStore
-	roles       RoleService
-	sessions    SessionService
-	mfa         MFAService
-	passkeys    PasskeyService
-	federation  FederationService
+	users      UserStore
+	roles      RoleService
+	sessions   SessionService
+	mfa        MFAService
+	passkeys   PasskeyService
+	federation FederationService
+	// protectedRoles enumerates role UUIDs the M2M API may never assign
+	// (Vuln 14). Defaults to the admin role per config.AuthConfig.
+	protectedRoles map[uuid.UUID]struct{}
 }
 
 func NewUserService(
@@ -40,6 +43,23 @@ func NewUserService(
 		passkeys:   passkeys,
 		federation: federation,
 	}
+}
+
+// SetProtectedRoles installs the M2M role-assignment denylist. Roles in
+// this set are refused by AssignRole regardless of caller, even with the
+// m2m:users:manage_roles scope. Idempotent; invalid UUIDs are skipped
+// with a warning.
+func (s *UserService) SetProtectedRoles(roleIDs []string) {
+	set := make(map[uuid.UUID]struct{}, len(roleIDs))
+	for _, raw := range roleIDs {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			slog.Warn("m2m: ignoring invalid protected role UUID", "raw", raw)
+			continue
+		}
+		set[id] = struct{}{}
+	}
+	s.protectedRoles = set
 }
 
 // --- CRUD ---
@@ -162,6 +182,10 @@ func (s *UserService) ListRoles(userID uuid.UUID) ([]model.Role, error) {
 }
 
 func (s *UserService) AssignRole(userID, roleID uuid.UUID) error {
+	if _, ok := s.protectedRoles[roleID]; ok {
+		slog.Warn("m2m: protected role assignment refused", "role_id", roleID, "target_user_id", userID)
+		return pkg.ErrForbidden("role is protected from m2m assignment")
+	}
 	if _, err := s.users.GetByID(userID); err != nil {
 		return err
 	}
