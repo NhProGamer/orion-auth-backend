@@ -19,27 +19,26 @@ const (
 	ActionVerifyEmail = "verify_email"
 )
 
-// Claims captures what the action token holds. ClientID and RedirectURI are
-// optional: when both are set, the consumer is expected to bootstrap a
-// session and redirect to the OAuth client; otherwise it falls back to a
-// generic success screen.
+// Claims captures what the action token holds. RequestID is optional:
+// when set, the consumer is expected to load the matching
+// AuthorizationRequest, bootstrap a session and redirect to the OAuth
+// client. Otherwise it falls back to a generic success screen — used by
+// the standalone (non-OAuth) register path.
 type Claims struct {
-	Subject     uuid.UUID
-	Action      string
-	JTI         string
-	ClientID    *uuid.UUID
-	RedirectURI *string
-	IssuedAt    time.Time
-	ExpiresAt   time.Time
+	Subject   uuid.UUID
+	Action    string
+	JTI       string
+	RequestID *uuid.UUID
+	IssuedAt  time.Time
+	ExpiresAt time.Time
 }
 
 // jwtClaims is the wire shape used by golang-jwt/jwt — pointer fields keep
 // optional OAuth context out of the encoded payload when absent.
 type jwtClaims struct {
 	jwt.RegisteredClaims
-	Action      string  `json:"act"`
-	ClientID    *string `json:"cid,omitempty"`
-	RedirectURI *string `json:"rdr,omitempty"`
+	Action    string  `json:"act"`
+	RequestID *string `json:"rid,omitempty"`
 }
 
 // Sign returns an HS256 JWT carrying the supplied claims. The key must be at
@@ -67,12 +66,9 @@ func Sign(c Claims, key []byte) (string, error) {
 		},
 		Action: c.Action,
 	}
-	if c.ClientID != nil {
-		s := c.ClientID.String()
-		jc.ClientID = &s
-	}
-	if c.RedirectURI != nil {
-		jc.RedirectURI = c.RedirectURI
+	if c.RequestID != nil {
+		s := c.RequestID.String()
+		jc.RequestID = &s
 	}
 
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, jc)
@@ -112,14 +108,13 @@ func Parse(raw string, key []byte) (*Claims, error) {
 		IssuedAt:  jc.IssuedAt.Time,
 		ExpiresAt: jc.ExpiresAt.Time,
 	}
-	if jc.ClientID != nil {
-		cid, err := uuid.Parse(*jc.ClientID)
+	if jc.RequestID != nil {
+		rid, err := uuid.Parse(*jc.RequestID)
 		if err != nil {
 			return nil, ErrInvalidToken
 		}
-		out.ClientID = &cid
+		out.RequestID = &rid
 	}
-	out.RedirectURI = jc.RedirectURI
 
 	return out, nil
 }

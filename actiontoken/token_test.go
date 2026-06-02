@@ -19,16 +19,14 @@ func makeKey() []byte {
 }
 
 func makeClaims() Claims {
-	cid := uuid.New()
-	rdr := "https://app.example.com/cb"
+	rid := uuid.New()
 	return Claims{
-		Subject:     uuid.New(),
-		Action:      ActionVerifyEmail,
-		JTI:         uuid.New().String(),
-		ClientID:    &cid,
-		RedirectURI: &rdr,
-		IssuedAt:    time.Now(),
-		ExpiresAt:   time.Now().Add(24 * time.Hour),
+		Subject:   uuid.New(),
+		Action:    ActionVerifyEmail,
+		JTI:       uuid.New().String(),
+		RequestID: &rid,
+		IssuedAt:  time.Now(),
+		ExpiresAt: time.Now().Add(24 * time.Hour),
 	}
 }
 
@@ -45,10 +43,8 @@ func TestSignParse_RoundTrip(t *testing.T) {
 	assert.Equal(t, c.Subject, got.Subject)
 	assert.Equal(t, c.Action, got.Action)
 	assert.Equal(t, c.JTI, got.JTI)
-	require.NotNil(t, got.ClientID)
-	assert.Equal(t, *c.ClientID, *got.ClientID)
-	require.NotNil(t, got.RedirectURI)
-	assert.Equal(t, *c.RedirectURI, *got.RedirectURI)
+	require.NotNil(t, got.RequestID)
+	assert.Equal(t, *c.RequestID, *got.RequestID)
 }
 
 func TestSignParse_NoOAuthContext(t *testing.T) {
@@ -66,8 +62,7 @@ func TestSignParse_NoOAuthContext(t *testing.T) {
 
 	got, err := Parse(tok, key)
 	require.NoError(t, err)
-	assert.Nil(t, got.ClientID)
-	assert.Nil(t, got.RedirectURI)
+	assert.Nil(t, got.RequestID)
 }
 
 func TestParse_Expired(t *testing.T) {
