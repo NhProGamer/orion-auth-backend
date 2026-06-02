@@ -383,8 +383,11 @@ func setupRouter(a setupRouterArgs) *gin.Engine {
 	router.Use(middleware.RequestID())
 	router.Use(middleware.CORS(cfg.CORS))
 
-	// Swagger UI (dev only)
+	// Swagger UI: dev-only. Mounted ONLY when mode == "debug". Any other
+	// value (release, test, an unknown override) leaves the route absent,
+	// so /swagger/* returns 404 in production. Vuln 11.
 	if cfg.Server.Mode == "debug" {
+		slog.Info("mounting Swagger UI at /swagger/* (debug mode)")
 		router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 	}
 
