@@ -205,7 +205,7 @@ func (h *Handler) redirectLinkResult(c *gin.Context, authReq *model.FederationAu
 	target := authUI + "/linked-accounts"
 	if authReq.ReturnTo != nil {
 		bases := append([]string{authUI}, h.service.AllowedReturnToOrigins()...)
-		if safeReturnTo(*authReq.ReturnTo, bases...) {
+		if pkg.IsOriginAllowed(*authReq.ReturnTo, bases...) {
 			target = *authReq.ReturnTo
 		}
 	}
@@ -233,7 +233,7 @@ func (h *Handler) continueAfterLogin(c *gin.Context, providerName string, u *mod
 	// /me/set-password at this point. Tracked as a follow-up.
 	if authReq.OAuthRequestID == nil || resumer == nil {
 		target := authUI + "/"
-		if authReq.ReturnTo != nil && safeReturnTo(*authReq.ReturnTo, authUI) {
+		if authReq.ReturnTo != nil && pkg.IsOriginAllowed(*authReq.ReturnTo, authUI) {
 			target = *authReq.ReturnTo
 		}
 		c.Redirect(http.StatusFound, target)
@@ -277,33 +277,6 @@ func (h *Handler) recordLoginFailure(c *gin.Context, providerName string, err er
 		"provider": providerName,
 		"error":    err.Error(),
 	})
-}
-
-// safeReturnTo enforces a minimal allowlist: the target's scheme+host
-// must match one of the allowed bases. Empty/unparsable bases are
-// skipped silently so callers can pass an optional AuthUI base plus
-// an arbitrary list of trusted SPA origins without pre-filtering.
-func safeReturnTo(target string, allowedBases ...string) bool {
-	if target == "" {
-		return false
-	}
-	t, err := url.Parse(target)
-	if err != nil {
-		return false
-	}
-	for _, raw := range allowedBases {
-		if raw == "" {
-			continue
-		}
-		base, err := url.Parse(raw)
-		if err != nil {
-			continue
-		}
-		if strings.EqualFold(t.Scheme, base.Scheme) && strings.EqualFold(t.Host, base.Host) {
-			return true
-		}
-	}
-	return false
 }
 
 // ConfirmLinkInput is the body of POST /api/v1/auth/federation/confirm-link.
@@ -382,7 +355,7 @@ func (h *Handler) computeContinuationURL(c *gin.Context, providerName string, u 
 
 	if authReq.OAuthRequestID == nil || resumer == nil {
 		target := authUI + "/"
-		if authReq.ReturnTo != nil && safeReturnTo(*authReq.ReturnTo, authUI) {
+		if authReq.ReturnTo != nil && pkg.IsOriginAllowed(*authReq.ReturnTo, authUI) {
 			target = *authReq.ReturnTo
 		}
 		return target

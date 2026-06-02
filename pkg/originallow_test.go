@@ -1,8 +1,8 @@
-package federation
+package pkg
 
 import "testing"
 
-func TestSafeReturnTo(t *testing.T) {
+func TestIsOriginAllowed(t *testing.T) {
 	cases := []struct {
 		name     string
 		target   string
@@ -55,9 +55,9 @@ func TestSafeReturnTo(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := safeReturnTo(tc.target, tc.bases...)
+			got := IsOriginAllowed(tc.target, tc.bases...)
 			if got != tc.expected {
-				t.Fatalf("safeReturnTo(%q, %v) = %v, want %v", tc.target, tc.bases, got, tc.expected)
+				t.Fatalf("IsOriginAllowed(%q, %v) = %v, want %v", tc.target, tc.bases, got, tc.expected)
 			}
 		})
 	}
