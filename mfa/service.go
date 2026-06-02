@@ -2,6 +2,7 @@ package mfa
 
 import (
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -11,6 +12,9 @@ import (
 	"orion-auth-backend/model"
 	"orion-auth-backend/pkg"
 )
+
+// totpPeriodSeconds is the canonical TOTP step duration (RFC 6238 §4).
+const totpPeriodSeconds = 30
 
 const (
 	totpIssuer      = "orion-auth-backend"
@@ -113,6 +117,13 @@ func (s *Service) Verify(userID uuid.UUID, code string) ([]string, error) {
 }
 
 // ValidateCode validates a TOTP code or backup code for a user.
+//
+// TOTP replay protection (Vuln 12): the pquerna library accepts any code
+// inside the current ±1 step window. RFC 6238 §5.2 requires that a server
+// SHOULD reject a code that has already been used in the same step. We
+// track method.LastUsedTOTPStep and refuse any code whose computed step
+// is less-than-or-equal to the stored one. The step is persisted on
+// success so subsequent calls in the same 30s window are rejected.
 func (s *Service) ValidateCode(userID uuid.UUID, code string) (bool, error) {
 	method, err := s.repo.FindVerifiedByUser(userID)
 	if err != nil || method == nil {
@@ -121,6 +132,18 @@ func (s *Service) ValidateCode(userID uuid.UUID, code string) (bool, error) {
 
 	// Try TOTP first
 	if totp.Validate(code, method.Secret) {
+		currentStep := time.Now().Unix() / totpPeriodSeconds
+		if currentStep <= method.LastUsedTOTPStep {
+			slog.Warn("TOTP replay rejected",
+				"user_id", userID, "current_step", currentStep, "last_used_step", method.LastUsedTOTPStep)
+			return false, pkg.ErrUnauthorized("TOTP code already used; wait for the next code")
+		}
+		method.LastUsedTOTPStep = currentStep
+		if err := s.repo.Update(method); err != nil {
+			slog.Error("failed to persist TOTP last-used step; refusing auth to avoid replay window",
+				"user_id", userID, "error", err)
+			return false, pkg.ErrInternal("authentication failed; please retry")
+		}
 		return true, nil
 	}
 

@@ -417,3 +417,39 @@ func TestRegenerateBackupCodes_InvalidCode(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid TOTP code")
 }
+
+// TestValidateCode_TOTPRejectsReplayInSameStep is the regression test
+// for Vuln 12. A TOTP code accepted within step N must not be accepted
+// a second time before the next step rolls over. We drive ValidateCode
+// twice with the same freshly-generated code; the first call succeeds,
+// the second must be refused with the "already used" error.
+func TestValidateCode_TOTPRejectsReplayInSameStep(t *testing.T) {
+	userID, _ := uuid.NewV7()
+	method := generateTestMethod(userID)
+
+	// Compute a fresh code from the secret for the CURRENT step so
+	// totp.Validate accepts it.
+	code, err := totp.GenerateCode(method.Secret, time.Now())
+	require.NoError(t, err)
+
+	repo := &mockMFARepo{
+		findVerifiedByUserFn: func(_ uuid.UUID) (*model.MFAMethod, error) {
+			return method, nil
+		},
+		updateFn: func(m *model.MFAMethod) error {
+			// Persist the last-used step on the shared method pointer
+			// so the second call sees the bumped value.
+			method.LastUsedTOTPStep = m.LastUsedTOTPStep
+			return nil
+		},
+	}
+	svc := newTestService(repo)
+
+	valid, err := svc.ValidateCode(userID, code)
+	require.NoError(t, err, "first use of a fresh code must succeed")
+	assert.True(t, valid)
+
+	valid2, err2 := svc.ValidateCode(userID, code)
+	require.Error(t, err2, "second use of the same code inside the step must be refused")
+	assert.False(t, valid2)
+}
