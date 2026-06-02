@@ -2,6 +2,7 @@ package account
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -62,9 +63,15 @@ func NewPolicyGate(users UserStore, roles RoleProvider, mfa MFAStatusChecker, pa
 }
 
 // Middleware returns a Gin handler that evaluates the account_action policy
-// for the named action and aborts with 403 if denied. Fail-open on internal
-// errors (logged, but action proceeds) so a policy misconfig doesn't lock
-// users out of their own account.
+// for the named action and aborts with 403 if denied.
+//
+// FAIL-OPEN policy (by design): account_action gates a user's own
+// /me/* operations (change email, manage passkeys, delete account…).
+// Refusing to let users manage their own account because OPA hiccupped
+// is a worse user-experience failure than briefly missing a custom deny
+// rule. Every fail-open path therefore logs at WARN level so the
+// operator can spot a misbehaving evaluator. Contrast with
+// policy.RequirePolicy on admin_api, which is fail-CLOSED.
 func (g *PolicyGate) Middleware(action string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if g.policies == nil {
@@ -74,12 +81,14 @@ func (g *PolicyGate) Middleware(action string) gin.HandlerFunc {
 
 		userID, ok := middleware.GetUserID(c)
 		if !ok {
+			slog.Warn("account_action policy gate: missing user_id in context", "action", action, "path", c.Request.URL.Path)
 			c.Next()
 			return
 		}
 
 		u, err := g.users.GetByID(userID)
 		if err != nil || u == nil {
+			slog.Warn("account_action policy gate: user lookup failed", "user_id", userID, "action", action, "error", err)
 			c.Next()
 			return
 		}
@@ -100,6 +109,8 @@ func (g *PolicyGate) Middleware(action string) gin.HandlerFunc {
 		in := inputs.BuildAccountActionInput(u, roles, perms, action, hasMFA, hasPasskey, ageDays, c.ClientIP(), c.GetHeader("User-Agent"))
 		result, err := g.policies.Evaluate(context.Background(), "account_action", in)
 		if err != nil || result == nil {
+			slog.Warn("account_action policy evaluation failed; failing open",
+				"user_id", userID, "action", action, "error", err)
 			c.Next()
 			return
 		}
