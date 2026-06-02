@@ -548,6 +548,26 @@ func TestSetAllowedOrigins(t *testing.T) {
 	assert.Equal(t, []string{"https://dev.clown.school"}, svc.AllowedOrigins())
 }
 
+// --- IsEmailVerificationRequired ---
+
+func TestIsEmailVerificationRequired_DefaultTrue(t *testing.T) {
+	svc := newTestService(&mockInvitationRepo{}, &mockUserRepo{}, &mockRbacRepo{}, nil)
+	assert.True(t, svc.IsEmailVerificationRequired())
+}
+
+func TestIsEmailVerificationRequired_DisabledExplicitly(t *testing.T) {
+	invRepo := &mockInvitationRepo{
+		getSettingFn: func(key string) (string, error) {
+			if key == "registration_email_verification_required" {
+				return "false", nil
+			}
+			return "", nil
+		},
+	}
+	svc := newTestService(invRepo, &mockUserRepo{}, &mockRbacRepo{}, nil)
+	assert.False(t, svc.IsEmailVerificationRequired())
+}
+
 // --- IsRegistrationEnabled Tests ---
 
 func TestIsRegistrationEnabled_Default(t *testing.T) {

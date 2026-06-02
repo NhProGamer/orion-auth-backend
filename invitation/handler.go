@@ -247,14 +247,15 @@ func (h *Handler) GetSettings(c *gin.Context) {
 }
 
 type UpdateSettingsInput struct {
-	RegistrationEnabled            *bool   `json:"registration_enabled"`
-	InvitationsDefaultRole         *string `json:"invitations_default_role"`
-	DefaultAccessTokenTTL          *int    `json:"default_access_token_ttl"`
-	DefaultRefreshTokenTTL         *int    `json:"default_refresh_token_ttl"`
-	DefaultIDTokenTTL              *int    `json:"default_id_token_ttl"`
-	DefaultPostRegisterRedirectURL *string `json:"default_post_register_redirect_url"`
-	DefaultSessionTTL              *int    `json:"default_session_ttl"`
-	DefaultSessionExtendedTTL      *int    `json:"default_session_extended_ttl"`
+	RegistrationEnabled                    *bool   `json:"registration_enabled"`
+	InvitationsDefaultRole                 *string `json:"invitations_default_role"`
+	DefaultAccessTokenTTL                  *int    `json:"default_access_token_ttl"`
+	DefaultRefreshTokenTTL                 *int    `json:"default_refresh_token_ttl"`
+	DefaultIDTokenTTL                      *int    `json:"default_id_token_ttl"`
+	DefaultPostRegisterRedirectURL         *string `json:"default_post_register_redirect_url"`
+	DefaultSessionTTL                      *int    `json:"default_session_ttl"`
+	DefaultSessionExtendedTTL              *int    `json:"default_session_extended_ttl"`
+	RegistrationEmailVerificationRequired  *bool   `json:"registration_email_verification_required"`
 }
 
 // UpdateSettings godoc
@@ -345,6 +346,16 @@ func (h *Handler) UpdateSettings(c *gin.Context) {
 			return
 		}
 		if err := apply("default_session_extended_ttl", strconv.Itoa(*input.DefaultSessionExtendedTTL), *input.DefaultSessionExtendedTTL); err != nil {
+			pkg.HandleError(c, err)
+			return
+		}
+	}
+	if input.RegistrationEmailVerificationRequired != nil {
+		val := "false"
+		if *input.RegistrationEmailVerificationRequired {
+			val = "true"
+		}
+		if err := apply("registration_email_verification_required", val, *input.RegistrationEmailVerificationRequired); err != nil {
 			pkg.HandleError(c, err)
 			return
 		}
