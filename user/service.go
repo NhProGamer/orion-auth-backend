@@ -23,6 +23,15 @@ type RoleAssigner interface {
 	AssignRole(userID, roleID uuid.UUID) error
 }
 
+// EmailVerificationGate is the read-side of the
+// registration_email_verification_required setting. When the gate reports
+// true (default) Authenticate refuses to sign in users with
+// EmailVerified=false. Injected from invitation.Service (which owns the
+// settings table) so user/ stays free of an invitation import.
+type EmailVerificationGate interface {
+	IsEmailVerificationRequired() bool
+}
+
 type Service struct {
 	repo                  RepositoryInterface
 	hasher                *crypto.Argon2Hasher
@@ -33,6 +42,7 @@ type Service struct {
 	regForm               RegFormProvider
 	passwordValidator     *password.Validator
 	actionTokenSigningKey []byte
+	emailVerifyGate       EmailVerificationGate
 }
 
 func NewService(repo RepositoryInterface, hasher *crypto.Argon2Hasher, cfg config.AuthConfig) *Service {
@@ -69,6 +79,20 @@ func (s *Service) SetPasswordValidator(v *password.Validator) {
 // action tokens. Without it, SendVerificationEmail returns an error.
 func (s *Service) SetActionTokenSigningKey(key []byte) {
 	s.actionTokenSigningKey = key
+}
+
+// SetEmailVerificationGate wires the admin-toggleable check used by
+// Authenticate. When unset, the secure-by-default behaviour is to require
+// email verification.
+func (s *Service) SetEmailVerificationGate(g EmailVerificationGate) {
+	s.emailVerifyGate = g
+}
+
+func (s *Service) requiresEmailVerification() bool {
+	if s.emailVerifyGate == nil {
+		return true
+	}
+	return s.emailVerifyGate.IsEmailVerificationRequired()
 }
 
 // validatePassword applies the active password policy. Hints are values
@@ -209,6 +233,13 @@ func (s *Service) Authenticate(input LoginInput) (*model.User, error) {
 	if err != nil || !match {
 		s.incrementFailedAttempts(user)
 		return nil, pkg.ErrUnauthorized("invalid email or password")
+	}
+
+	// Email verification gate: check AFTER the password match so an
+	// attacker probing existence cannot tell verified from unverified
+	// accounts apart without also knowing the password.
+	if !user.EmailVerified && s.requiresEmailVerification() {
+		return nil, pkg.ErrEmailNotVerified("verify your email to sign in")
 	}
 
 	// Reset failed attempts on successful login

@@ -263,6 +263,44 @@ func TestAuthenticate_Success(t *testing.T) {
 	assert.Equal(t, 0, updatedFields["failed_login_attempts"])
 }
 
+type stubVerifyGate struct{ required bool }
+
+func (s stubVerifyGate) IsEmailVerificationRequired() bool { return s.required }
+
+func TestAuthenticate_EmailNotVerified_GateOn(t *testing.T) {
+	hasher := testutil.FastHasher()
+	testUser := testutil.TestUser(hasher, "password123")
+	testUser.EmailVerified = false
+
+	repo := &mockUserRepo{
+		findByEmailFn:  func(_ string) (*model.User, error) { return testUser, nil },
+		updateFieldsFn: func(_ uuid.UUID, _ map[string]any) error { return nil },
+	}
+	svc := NewService(repo, hasher, testutil.TestAuthConfig())
+	// Default gate: required (nil resolver → secure-by-default true)
+
+	_, err := svc.Authenticate(LoginInput{Email: "test@example.com", Password: "password123"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "verify your email")
+}
+
+func TestAuthenticate_EmailNotVerified_GateOff(t *testing.T) {
+	hasher := testutil.FastHasher()
+	testUser := testutil.TestUser(hasher, "password123")
+	testUser.EmailVerified = false
+
+	repo := &mockUserRepo{
+		findByEmailFn:  func(_ string) (*model.User, error) { return testUser, nil },
+		updateFieldsFn: func(_ uuid.UUID, _ map[string]any) error { return nil },
+	}
+	svc := NewService(repo, hasher, testutil.TestAuthConfig())
+	svc.SetEmailVerificationGate(stubVerifyGate{required: false})
+
+	u, err := svc.Authenticate(LoginInput{Email: "test@example.com", Password: "password123"})
+	require.NoError(t, err)
+	assert.Equal(t, testUser.ID, u.ID)
+}
+
 func TestAuthenticate_UserNotFound(t *testing.T) {
 	repo := &mockUserRepo{
 		findByEmailFn: func(email string) (*model.User, error) { return nil, nil },

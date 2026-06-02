@@ -130,3 +130,7 @@ func ErrTooManyRequests(msg string) *AppError {
 func ErrAccountLocked(msg string) *AppError {
 	return &AppError{Message: msg, Code: "account_locked", StatusCode: http.StatusForbidden}
 }
+
+func ErrEmailNotVerified(msg string) *AppError {
+	return &AppError{Message: msg, Code: "email_not_verified", StatusCode: http.StatusForbidden}
+}

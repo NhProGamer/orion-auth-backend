@@ -59,15 +59,19 @@ func TestClient() *model.OAuthClient {
 }
 
 // TestUser returns a user with a pre-hashed password for testing.
+// EmailVerified is true so Authenticate passes the verify gate without
+// each test having to opt in. Tests that exercise the gate explicitly
+// set EmailVerified = false after the call.
 func TestUser(hasher *crypto.Argon2Hasher, password string) *model.User {
 	id, _ := uuid.NewV7()
 	hash, _ := hasher.Hash(password)
 	name := "Test User"
 	return &model.User{
-		BaseModel:    model.BaseModel{ID: id, CreatedAt: time.Now(), UpdatedAt: time.Now()},
-		Email:        "test@example.com",
-		PasswordHash: &hash,
-		DisplayName:  &name,
-		Active:       true,
+		BaseModel:     model.BaseModel{ID: id, CreatedAt: time.Now(), UpdatedAt: time.Now()},
+		Email:         "test@example.com",
+		PasswordHash:  &hash,
+		DisplayName:   &name,
+		Active:        true,
+		EmailVerified: true,
 	}
 }

@@ -131,6 +131,7 @@ func main() {
 	invService.SetAllowedOrigins(cfg.CORS.AllowedOrigins)
 	invService.SetSessionTTLDefaults(cfg.Auth.SessionTTL, cfg.Auth.SessionExtendedTTL)
 	sessionService.SetTTLResolver(invService)
+	userService.SetEmailVerificationGate(invService)
 	fedService.SetProvisioningDependencies(userService, invService, invService)
 	regFormService := regform.NewService(regFormRepo)
 	userService.SetRegFormProvider(regFormService)

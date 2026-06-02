@@ -188,6 +188,16 @@ func (s *Service) IsRegistrationEnabled() bool {
 	return val == "true"
 }
 
+// IsEmailVerificationRequired returns true unless the admin explicitly turned
+// the gate off. Secure-by-default: missing/unreadable setting means require.
+func (s *Service) IsEmailVerificationRequired() bool {
+	val, err := s.repo.GetSetting("registration_email_verification_required")
+	if err != nil || val == "" {
+		return true
+	}
+	return val == "true"
+}
+
 func (s *Service) GetAllSettings() (map[string]string, error) {
 	settings, err := s.repo.GetAllSettings()
 	if err != nil {
