@@ -1,6 +1,8 @@
 package model
 
 import (
+	"time"
+
 	"github.com/lib/pq"
 )
 
@@ -34,9 +36,10 @@ type OAuthClient struct {
 	IDTokenEncryptedResponseEnc  *string        `gorm:"type:varchar(50)" json:"id_token_encrypted_response_enc,omitempty"`
 	UserinfoEncryptedResponseAlg *string        `gorm:"type:varchar(50)" json:"userinfo_encrypted_response_alg,omitempty"`
 	UserinfoEncryptedResponseEnc *string        `gorm:"type:varchar(50)" json:"userinfo_encrypted_response_enc,omitempty"`
-	SecretHMACKey                []byte         `gorm:"type:bytea" json:"-"`
-	RegistrationAccessTokenHash  *string        `gorm:"type:varchar(64)" json:"-"`
-	Active                       bool           `gorm:"default:true" json:"active"`
+	SecretHMACKey                    []byte     `gorm:"type:bytea" json:"-"`
+	RegistrationAccessTokenHash      *string    `gorm:"type:varchar(64)" json:"-"`
+	RegistrationAccessTokenExpiresAt *time.Time `gorm:"type:timestamptz" json:"-"`
+	Active                           bool       `gorm:"default:true" json:"active"`
 }
 
 func (OAuthClient) TableName() string {

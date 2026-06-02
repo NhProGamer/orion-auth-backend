@@ -16,6 +16,10 @@ import (
 	"orion-auth-backend/pkg/netsafety"
 )
 
+// ratLifetime is the validity window of a registration_access_token. After
+// this duration the RAT must be rotated via PUT /register/:client_id.
+const ratLifetime = 30 * 24 * time.Hour
+
 // DCRHandler handles Dynamic Client Registration (RFC 7591 + RFC 7592).
 //
 // When initialAccessTokenHash is non-empty, POST /register requires a
@@ -200,10 +204,15 @@ func (h *DCRHandler) Register(c *gin.Context) {
 		return
 	}
 
-	// Generate registration_access_token
+	// Generate registration_access_token with a 30-day expiry. Per RFC
+	// 7592 the RAT controls future read/update/delete of the client
+	// registration; storing it without expiration meant a leaked token
+	// stayed valid forever (Vuln 9). Rotated on every PUT.
 	rawRAT, ratHash, err := crypto.GenerateOpaqueToken()
 	if err == nil && ratHash != "" {
+		exp := time.Now().Add(ratLifetime)
 		result.Client.RegistrationAccessTokenHash = &ratHash
+		result.Client.RegistrationAccessTokenExpiresAt = &exp
 		_ = h.service.repo.Update(result.Client)
 	}
 
@@ -337,6 +346,17 @@ func (h *DCRHandler) UpdateRegistration(c *gin.Context) {
 		client.JWKSUri = &req.JWKSUri
 	}
 
+	// Rotate the RAT on every successful PUT so a stolen RAT can be
+	// invalidated by the legitimate operator simply re-saving the
+	// registration. Old RAT is overwritten in the DB; new RAT is
+	// returned in the response.
+	newRawRAT, newRATHash, ratErr := crypto.GenerateOpaqueToken()
+	if ratErr == nil && newRATHash != "" {
+		exp := time.Now().Add(ratLifetime)
+		client.RegistrationAccessTokenHash = &newRATHash
+		client.RegistrationAccessTokenExpiresAt = &exp
+	}
+
 	if err := h.service.repo.Update(client); err != nil {
 		pkg.HandleError(c, pkg.ErrInternal("failed to update client"))
 		return
@@ -353,6 +373,7 @@ func (h *DCRHandler) UpdateRegistration(c *gin.Context) {
 		TokenEndpointAuthMethod: client.TokenAuthMethod,
 		RequirePKCE:             client.RequirePKCE,
 		RequestURIs:             client.RequestURIs,
+		RegistrationAccessToken: newRawRAT,
 	}
 	if client.IDTokenEncryptedResponseAlg != nil {
 		resp.IDTokenEncryptedResponseAlg = *client.IDTokenEncryptedResponseAlg
@@ -408,9 +429,23 @@ func (h *DCRHandler) authenticateRAT(c *gin.Context) (*model.OAuthClient, error)
 		return nil, pkg.ErrNotFound("client not found")
 	}
 
-	if client.RegistrationAccessTokenHash == nil || *client.RegistrationAccessTokenHash != tokenHash {
+	// Constant-time compare so an attacker can't probe the stored hash
+	// byte by byte via timing (Vuln 9). Treat a nil stored hash as a
+	// non-match without short-circuiting.
+	if client.RegistrationAccessTokenHash == nil {
 		pkg.HandleError(c, pkg.ErrUnauthorized("invalid registration_access_token"))
 		return nil, pkg.ErrUnauthorized("invalid token")
+	}
+	if subtle.ConstantTimeCompare([]byte(*client.RegistrationAccessTokenHash), []byte(tokenHash)) != 1 {
+		pkg.HandleError(c, pkg.ErrUnauthorized("invalid registration_access_token"))
+		return nil, pkg.ErrUnauthorized("invalid token")
+	}
+
+	// RAT expiration check (Vuln 9). Refuse stale tokens — operators
+	// must rotate via PUT /register/:client_id before the window closes.
+	if client.RegistrationAccessTokenExpiresAt == nil || client.RegistrationAccessTokenExpiresAt.Before(time.Now()) {
+		pkg.HandleError(c, pkg.ErrUnauthorized("registration_access_token expired; rotate via PUT /register"))
+		return nil, pkg.ErrUnauthorized("expired token")
 	}
 
 	return client, nil
