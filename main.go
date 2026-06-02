@@ -62,6 +62,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	switch cfg.Server.Mode {
+	case "release":
+		slog.Info("starting in RELEASE mode (Validate() invariants enforced)")
+	case "debug":
+		slog.Warn("starting in DEBUG mode — DO NOT use this configuration in production",
+			"swagger_exposed", true, "validate_warnings_only", true)
+	case "test":
+		slog.Info("starting in TEST mode")
+	default:
+		slog.Warn("unknown server.mode; treating as debug", "mode", cfg.Server.Mode)
+	}
+
 	// Database
 	db, err := database.Connect(&cfg.Database)
 	if err != nil {

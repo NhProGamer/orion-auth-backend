@@ -1,7 +1,19 @@
+# Development defaults — DO NOT deploy this file as-is to production.
+# Production deployments MUST override the following via ORION_* env vars:
+#   - ORION_SERVER_MODE=release
+#   - ORION_DATABASE_PASSWORD=<strong password>
+#   - ORION_DATABASE_SSLMODE=require (or verify-full)
+#   - ORION_AUTH_HMAC_SECRET_ENCRYPTION_KEY=<base64 AES-256>
+#   - ORION_PAIRWISE_SALT=<32 random bytes hex>
+#   - ORION_ISSUER=https://your-public-domain
+#   - ORION_SMTP_TLS=true
+# The Config.Validate() boot check refuses to start in release mode if any
+# of these is still set to its development placeholder.
+
 server:
   host: "0.0.0.0"
   port: 8080
-  mode: "debug" # debug, release, test
+  mode: "debug" # debug | release | test (debug = dev default; set ORION_SERVER_MODE=release in prod)
 
 database:
   host: "localhost"
