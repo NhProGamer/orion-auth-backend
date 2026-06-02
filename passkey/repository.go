@@ -69,6 +69,16 @@ func (r *Repository) UpdateSignCount(id uuid.UUID, signCount uint32, lastUsedUni
 		}).Error
 }
 
+// SetCloneWarning flags a passkey as suspected-cloned (go-webauthn returns
+// CloneWarning when the authenticator's signCount goes backwards or
+// stalls). The flag is consulted by HasUserVerifiedPasskey so a cloned
+// passkey no longer counts toward MFA enrolment.
+func (r *Repository) SetCloneWarning(id uuid.UUID, value bool) error {
+	return r.db.Model(&model.Passkey{}).
+		Where("id = ?", id).
+		Update("clone_warning", value).Error
+}
+
 func (r *Repository) Delete(id, userID uuid.UUID) error {
 	res := r.db.Where("id = ? AND user_id = ?", id, userID).Delete(&model.Passkey{})
 	if res.Error != nil {

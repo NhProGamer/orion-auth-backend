@@ -14,6 +14,7 @@ type RepositoryInterface interface {
 	ListByUser(userID uuid.UUID) ([]model.Passkey, error)
 	UpdateName(id uuid.UUID, userID uuid.UUID, name string) error
 	UpdateSignCount(id uuid.UUID, signCount uint32, lastUsedAt int64) error
+	SetCloneWarning(id uuid.UUID, value bool) error
 	Delete(id uuid.UUID, userID uuid.UUID) error
 
 	// Challenges

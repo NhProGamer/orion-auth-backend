@@ -210,6 +210,17 @@ func (s *Service) FinishLogin(input FinishLoginInput) (*model.User, *model.Passk
 	}
 
 	if matchedPasskey != nil {
+		// CloneWarning from go-webauthn means the authenticator's
+		// signCount went backwards or stalled — a strong indicator the
+		// credential has been cloned. Flag it and refuse the login
+		// rather than silently writing the lower count back over the
+		// legitimate one (Vuln 7).
+		if credential.Authenticator.CloneWarning {
+			_ = s.repo.SetCloneWarning(matchedPasskey.ID, true)
+			slog.Warn("passkey clone warning detected (login)",
+				"user_id", matchedPasskey.UserID, "passkey_id", matchedPasskey.ID)
+			return nil, nil, pkg.ErrUnauthorized("passkey verification failed; please re-enroll your passkey")
+		}
 		_ = s.repo.UpdateSignCount(matchedPasskey.ID, credential.Authenticator.SignCount, time.Now().Unix())
 	}
 	return matchedUser, matchedPasskey, nil
@@ -243,6 +254,15 @@ func (s *Service) ValidateReauthAssertion(userID, challengeID uuid.UUID, respons
 
 	for i := range passkeys {
 		if bytes.Equal(passkeys[i].CredentialID, credential.ID) {
+			// CloneWarning during reauth is even more suspicious than
+			// during login: refuse step-up so an attacker can't escalate
+			// using a cloned authenticator (Vuln 7).
+			if credential.Authenticator.CloneWarning {
+				_ = s.repo.SetCloneWarning(passkeys[i].ID, true)
+				slog.Warn("passkey clone warning detected (reauth)",
+					"user_id", userID, "passkey_id", passkeys[i].ID)
+				return false, pkg.ErrUnauthorized("passkey verification failed; please re-enroll your passkey")
+			}
 			_ = s.repo.UpdateSignCount(passkeys[i].ID, credential.Authenticator.SignCount, time.Now().Unix())
 			break
 		}
@@ -276,13 +296,17 @@ func (s *Service) BeginReauth(userID uuid.UUID) (*BeginLoginResponse, error) {
 }
 
 // HasUserVerifiedPasskey reports whether the user has at least one passkey
-// registered as user-verified — that's the bar to count passkeys as MFA.
+// registered as user-verified AND not flagged as cloned. A passkey with
+// CloneWarning=true is treated as untrusted MFA material (Vuln 7).
 func (s *Service) HasUserVerifiedPasskey(userID uuid.UUID) (bool, error) {
 	passkeys, err := s.repo.ListByUser(userID)
 	if err != nil {
 		return false, err
 	}
 	for _, p := range passkeys {
+		if p.CloneWarning {
+			continue
+		}
 		flags := webauthn.NewCredentialFlags(protocol.AuthenticatorFlags(p.Flags))
 		if flags.UserVerified {
 			return true, nil
