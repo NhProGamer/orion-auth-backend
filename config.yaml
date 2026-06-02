@@ -71,6 +71,10 @@ smtp:
   password: ""
   from: "noreply@orionauth.local"
   from_name: "orion-auth-backend"
+  # DEV ONLY: TLS disabled because this targets a local MailHog instance.
+  # Production deployments MUST set ORION_SMTP_TLS=true; Config.Validate
+  # emits a startup warning when TLS=false is paired with a non-loopback
+  # host (see config/validate.go).
   tls: false
 
 webauthn:
