@@ -124,13 +124,20 @@ func (s *Service) ValidateCode(userID uuid.UUID, code string) (bool, error) {
 		return true, nil
 	}
 
-	// Try backup codes
+	// Try backup codes. The matching code is invalidated by removing it
+	// from the in-memory slice and persisting the update. If the persist
+	// fails we MUST refuse the auth — otherwise the next call would see
+	// the old DB row and accept the code again (Vuln 6: replay window
+	// opened by a transient DB error).
 	codeHash := crypto.HashToken(code)
 	for i, bc := range method.BackupCodes {
 		if bc == codeHash {
-			// Remove used backup code
 			method.BackupCodes = append(method.BackupCodes[:i], method.BackupCodes[i+1:]...)
-			_ = s.repo.Update(method)
+			if err := s.repo.Update(method); err != nil {
+				slog.Error("failed to invalidate backup code; refusing auth to prevent replay",
+					"user_id", userID, "error", err)
+				return false, pkg.ErrInternal("authentication failed; please retry")
+			}
 			slog.Info("backup code used", "user_id", userID)
 			return true, nil
 		}

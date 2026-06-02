@@ -266,6 +266,35 @@ func TestValidateCode_InvalidCode(t *testing.T) {
 	assert.False(t, valid)
 }
 
+// TestValidateCode_BackupCode_RefusesOnDBError is the regression test
+// for Vuln 6. If the repository can't persist the invalidation of a
+// consumed backup code, ValidateCode must refuse the authentication —
+// otherwise the next call would re-read the unmodified row and accept
+// the same code again. The previous implementation discarded the
+// Update error and returned (true, nil), opening a replay window.
+func TestValidateCode_BackupCode_RefusesOnDBError(t *testing.T) {
+	userID, _ := uuid.NewV7()
+	method := generateTestMethod(userID)
+
+	backupCode := "test-backup-code"
+	backupHash := crypto.HashToken(backupCode)
+	method.BackupCodes = pq.StringArray{backupHash, "other-hash"}
+
+	repo := &mockMFARepo{
+		findVerifiedByUserFn: func(_ uuid.UUID) (*model.MFAMethod, error) {
+			return method, nil
+		},
+		updateFn: func(_ *model.MFAMethod) error {
+			return assert.AnError // simulate a transient DB failure
+		},
+	}
+	svc := newTestService(repo)
+
+	valid, err := svc.ValidateCode(userID, backupCode)
+	require.Error(t, err, "Update failure must surface as an auth refusal")
+	assert.False(t, valid, "Backup code must not be accepted when invalidation fails")
+}
+
 func TestValidateCode_NoMFA(t *testing.T) {
 	userID, _ := uuid.NewV7()
 	repo := &mockMFARepo{}
