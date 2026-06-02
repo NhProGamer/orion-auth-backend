@@ -2,6 +2,7 @@ package invitation
 
 import (
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,12 +16,14 @@ import (
 )
 
 type Service struct {
-	repo           RepositoryInterface
-	userService    *user.Service
-	rbacService    *rbac.Service
-	emailSender    email.Sender
-	issuer         string
-	allowedOrigins []string
+	repo                 RepositoryInterface
+	userService          *user.Service
+	rbacService          *rbac.Service
+	emailSender          email.Sender
+	issuer               string
+	allowedOrigins       []string
+	defaultSessionTTL    time.Duration
+	extendedSessionTTL   time.Duration
 }
 
 func NewService(repo RepositoryInterface, userService *user.Service, rbacService *rbac.Service, emailSender email.Sender, issuer string) *Service {
@@ -207,6 +210,33 @@ func (s *Service) SetAllowedOrigins(origins []string) {
 // AllowedOrigins exposes the configured allowlist for the handler.
 func (s *Service) AllowedOrigins() []string {
 	return s.allowedOrigins
+}
+
+// SetSessionTTLDefaults seeds the per-runtime fallback used by SessionTTL
+// when the admin has not overridden the value via /admin/settings.
+func (s *Service) SetSessionTTLDefaults(defaultTTL, extendedTTL time.Duration) {
+	s.defaultSessionTTL = defaultTTL
+	s.extendedSessionTTL = extendedTTL
+}
+
+// SessionTTL implements session.TTLResolver: read the admin-overridable
+// setting if present and > 0, otherwise fall back to the config default.
+func (s *Service) SessionTTL(extended bool) time.Duration {
+	key := "default_session_ttl"
+	fallback := s.defaultSessionTTL
+	if extended {
+		key = "default_session_extended_ttl"
+		fallback = s.extendedSessionTTL
+	}
+	val, err := s.repo.GetSetting(key)
+	if err != nil || val == "" {
+		return fallback
+	}
+	seconds, err := strconv.Atoi(val)
+	if err != nil || seconds <= 0 {
+		return fallback
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 // GetPostRegisterRedirectURL returns the configured URL or empty string.

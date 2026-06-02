@@ -126,6 +126,8 @@ func main() {
 	invRepo := invitation.NewRepository(db)
 	invService := invitation.NewService(invRepo, userService, rbacService, emailSender, cfg.Issuer)
 	invService.SetAllowedOrigins(cfg.CORS.AllowedOrigins)
+	invService.SetSessionTTLDefaults(cfg.Auth.SessionTTL, cfg.Auth.SessionExtendedTTL)
+	sessionService.SetTTLResolver(invService)
 	fedService.SetProvisioningDependencies(userService, invService, invService)
 	regFormService := regform.NewService(regFormRepo)
 	userService.SetRegFormProvider(regFormService)

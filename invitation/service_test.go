@@ -472,6 +472,52 @@ func TestValidateToken_Used(t *testing.T) {
 	assert.Nil(t, inv)
 }
 
+// --- Session TTL Resolver ---
+
+func TestSessionTTL_FallbackToDefaults(t *testing.T) {
+	svc := newTestService(&mockInvitationRepo{}, &mockUserRepo{}, &mockRbacRepo{}, nil)
+	svc.SetSessionTTLDefaults(24*time.Hour, 720*time.Hour)
+
+	assert.Equal(t, 24*time.Hour, svc.SessionTTL(false))
+	assert.Equal(t, 720*time.Hour, svc.SessionTTL(true))
+}
+
+func TestSessionTTL_AdminOverride(t *testing.T) {
+	invRepo := &mockInvitationRepo{
+		getSettingFn: func(key string) (string, error) {
+			switch key {
+			case "default_session_ttl":
+				return "3600", nil
+			case "default_session_extended_ttl":
+				return "604800", nil
+			}
+			return "", nil
+		},
+	}
+
+	svc := newTestService(invRepo, &mockUserRepo{}, &mockRbacRepo{}, nil)
+	svc.SetSessionTTLDefaults(24*time.Hour, 720*time.Hour)
+
+	assert.Equal(t, time.Hour, svc.SessionTTL(false))
+	assert.Equal(t, 7*24*time.Hour, svc.SessionTTL(true))
+}
+
+func TestSessionTTL_InvalidOverrideFallsBack(t *testing.T) {
+	invRepo := &mockInvitationRepo{
+		getSettingFn: func(key string) (string, error) {
+			if key == "default_session_ttl" {
+				return "not-a-number", nil
+			}
+			return "", nil
+		},
+	}
+
+	svc := newTestService(invRepo, &mockUserRepo{}, &mockRbacRepo{}, nil)
+	svc.SetSessionTTLDefaults(24*time.Hour, 720*time.Hour)
+
+	assert.Equal(t, 24*time.Hour, svc.SessionTTL(false))
+}
+
 // --- Post-Register Redirect URL ---
 
 func TestGetPostRegisterRedirectURL_FromSetting(t *testing.T) {

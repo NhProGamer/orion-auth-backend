@@ -253,6 +253,8 @@ type UpdateSettingsInput struct {
 	DefaultRefreshTokenTTL         *int    `json:"default_refresh_token_ttl"`
 	DefaultIDTokenTTL              *int    `json:"default_id_token_ttl"`
 	DefaultPostRegisterRedirectURL *string `json:"default_post_register_redirect_url"`
+	DefaultSessionTTL              *int    `json:"default_session_ttl"`
+	DefaultSessionExtendedTTL      *int    `json:"default_session_extended_ttl"`
 }
 
 // UpdateSettings godoc
@@ -323,6 +325,26 @@ func (h *Handler) UpdateSettings(c *gin.Context) {
 			return
 		}
 		if err := apply("default_post_register_redirect_url", url, url); err != nil {
+			pkg.HandleError(c, err)
+			return
+		}
+	}
+	if input.DefaultSessionTTL != nil {
+		if *input.DefaultSessionTTL <= 0 {
+			pkg.HandleError(c, pkg.ErrBadRequest("default_session_ttl must be > 0"))
+			return
+		}
+		if err := apply("default_session_ttl", strconv.Itoa(*input.DefaultSessionTTL), *input.DefaultSessionTTL); err != nil {
+			pkg.HandleError(c, err)
+			return
+		}
+	}
+	if input.DefaultSessionExtendedTTL != nil {
+		if *input.DefaultSessionExtendedTTL <= 0 {
+			pkg.HandleError(c, pkg.ErrBadRequest("default_session_extended_ttl must be > 0"))
+			return
+		}
+		if err := apply("default_session_extended_ttl", strconv.Itoa(*input.DefaultSessionExtendedTTL), *input.DefaultSessionExtendedTTL); err != nil {
 			pkg.HandleError(c, err)
 			return
 		}
