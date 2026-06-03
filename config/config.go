@@ -147,6 +147,7 @@ func Load() (*Config, error) {
 	// container deployments that ship without a populated config.yaml.
 	for _, key := range []string{
 		"auth.hmac_secret_encryption_key",
+		"auth.action_token_signing_key",
 		"auth.dcr_initial_access_token",
 		"database.password",
 		"smtp.password",
