@@ -156,9 +156,16 @@ func main() {
 	fedService.SetAuthUIBaseURL(cfg.AuthUI.BaseURL)
 	fedService.SetAllowedReturnToOrigins(cfg.CORS.AllowedOrigins)
 	fedService.SetOAuthResumer(newFederationOAuthAdapter(oauthService))
-	invService := invitation.NewService(invRepo, userService, rbacService, emailSender, cfg.Issuer)
-	invService.SetAllowedOrigins(cfg.CORS.AllowedOrigins)
-	invService.SetSessionTTLDefaults(cfg.Auth.SessionTTL, cfg.Auth.SessionExtendedTTL)
+	invService := invitation.NewService(invitation.Options{
+		Repo:               invRepo,
+		UserService:        userService,
+		RbacService:        rbacService,
+		EmailSender:        emailSender,
+		Issuer:             cfg.Issuer,
+		AllowedOrigins:     cfg.CORS.AllowedOrigins,
+		DefaultSessionTTL:  cfg.Auth.SessionTTL,
+		ExtendedSessionTTL: cfg.Auth.SessionExtendedTTL,
+	})
 	sessionService.SetTTLResolver(invService)
 	// Truly circular: invService depends on userService (above), userService
 	// needs invService as its EmailVerificationGate. Setter stays.

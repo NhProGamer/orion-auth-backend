@@ -26,13 +26,33 @@ type Service struct {
 	extendedSessionTTL time.Duration
 }
 
-func NewService(repo RepositoryInterface, userService *user.Service, rbacService *rbac.Service, emailSender email.Sender, issuer string) *Service {
+// Options is the constructor surface for invitation.Service. All
+// fields can be supplied at NewService time — no post-construction
+// setters needed.
+type Options struct {
+	// Required
+	Repo        RepositoryInterface
+	UserService *user.Service
+	RbacService *rbac.Service
+	EmailSender email.Sender
+	Issuer      string
+
+	// Optional
+	AllowedOrigins     []string      // CORS allowlist for operator-supplied redirect URLs
+	DefaultSessionTTL  time.Duration // fallback when admin has not overridden
+	ExtendedSessionTTL time.Duration // fallback for remember_me sessions
+}
+
+func NewService(o Options) *Service {
 	return &Service{
-		repo:        repo,
-		userService: userService,
-		rbacService: rbacService,
-		emailSender: emailSender,
-		issuer:      issuer,
+		repo:               o.Repo,
+		userService:        o.UserService,
+		rbacService:        o.RbacService,
+		emailSender:        o.EmailSender,
+		issuer:             o.Issuer,
+		allowedOrigins:     o.AllowedOrigins,
+		defaultSessionTTL:  o.DefaultSessionTTL,
+		extendedSessionTTL: o.ExtendedSessionTTL,
 	}
 }
 
@@ -210,23 +230,9 @@ func (s *Service) GetAllSettings() (map[string]string, error) {
 	return result, nil
 }
 
-// SetAllowedOrigins configures the same-origin allowlist used to validate
-// operator-supplied URLs (e.g. default_post_register_redirect_url). Wired
-// from cfg.CORS.AllowedOrigins at startup.
-func (s *Service) SetAllowedOrigins(origins []string) {
-	s.allowedOrigins = origins
-}
-
 // AllowedOrigins exposes the configured allowlist for the handler.
 func (s *Service) AllowedOrigins() []string {
 	return s.allowedOrigins
-}
-
-// SetSessionTTLDefaults seeds the per-runtime fallback used by SessionTTL
-// when the admin has not overridden the value via /admin/settings.
-func (s *Service) SetSessionTTLDefaults(defaultTTL, extendedTTL time.Duration) {
-	s.defaultSessionTTL = defaultTTL
-	s.extendedSessionTTL = extendedTTL
 }
 
 // SessionTTL implements session.TTLResolver: read the admin-overridable

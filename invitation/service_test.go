@@ -302,17 +302,35 @@ func (m *mockEmailSender) SendAccountDeletionEmail(_, _ string) error    { retur
 
 // --- Helpers ---
 
-func newTestService(invRepo *mockInvitationRepo, userRepo *mockUserRepo, rbacRepo *mockRbacRepo, emailSender *mockEmailSender) *Service {
+type optModifier func(*Options)
+
+func withSessionTTLDefaults(def, ext time.Duration) optModifier {
+	return func(o *Options) {
+		o.DefaultSessionTTL = def
+		o.ExtendedSessionTTL = ext
+	}
+}
+
+func withAllowedOrigins(origins []string) optModifier {
+	return func(o *Options) { o.AllowedOrigins = origins }
+}
+
+func newTestService(invRepo *mockInvitationRepo, userRepo *mockUserRepo, rbacRepo *mockRbacRepo, emailSender *mockEmailSender, mods ...optModifier) *Service {
 	userSvc := user.NewService(user.Options{Repo: userRepo, Hasher: testutil.FastHasher(), Cfg: testutil.TestAuthConfig()})
 	rbacSvc := rbac.NewService(rbacRepo)
-	var sender *mockEmailSender
+	opts := Options{
+		Repo:        invRepo,
+		UserService: userSvc,
+		RbacService: rbacSvc,
+		Issuer:      "https://auth.example.com",
+	}
 	if emailSender != nil {
-		sender = emailSender
+		opts.EmailSender = emailSender
 	}
-	if sender != nil {
-		return NewService(invRepo, userSvc, rbacSvc, sender, "https://auth.example.com")
+	for _, m := range mods {
+		m(&opts)
 	}
-	return NewService(invRepo, userSvc, rbacSvc, nil, "https://auth.example.com")
+	return NewService(opts)
 }
 
 func makeInvitation() *model.Invitation {
@@ -475,8 +493,8 @@ func TestValidateToken_Used(t *testing.T) {
 // --- Session TTL Resolver ---
 
 func TestSessionTTL_FallbackToDefaults(t *testing.T) {
-	svc := newTestService(&mockInvitationRepo{}, &mockUserRepo{}, &mockRbacRepo{}, nil)
-	svc.SetSessionTTLDefaults(24*time.Hour, 720*time.Hour)
+	svc := newTestService(&mockInvitationRepo{}, &mockUserRepo{}, &mockRbacRepo{}, nil,
+		withSessionTTLDefaults(24*time.Hour, 720*time.Hour))
 
 	assert.Equal(t, 24*time.Hour, svc.SessionTTL(false))
 	assert.Equal(t, 720*time.Hour, svc.SessionTTL(true))
@@ -495,8 +513,8 @@ func TestSessionTTL_AdminOverride(t *testing.T) {
 		},
 	}
 
-	svc := newTestService(invRepo, &mockUserRepo{}, &mockRbacRepo{}, nil)
-	svc.SetSessionTTLDefaults(24*time.Hour, 720*time.Hour)
+	svc := newTestService(invRepo, &mockUserRepo{}, &mockRbacRepo{}, nil,
+		withSessionTTLDefaults(24*time.Hour, 720*time.Hour))
 
 	assert.Equal(t, time.Hour, svc.SessionTTL(false))
 	assert.Equal(t, 7*24*time.Hour, svc.SessionTTL(true))
@@ -512,8 +530,8 @@ func TestSessionTTL_InvalidOverrideFallsBack(t *testing.T) {
 		},
 	}
 
-	svc := newTestService(invRepo, &mockUserRepo{}, &mockRbacRepo{}, nil)
-	svc.SetSessionTTLDefaults(24*time.Hour, 720*time.Hour)
+	svc := newTestService(invRepo, &mockUserRepo{}, &mockRbacRepo{}, nil,
+		withSessionTTLDefaults(24*time.Hour, 720*time.Hour))
 
 	assert.Equal(t, 24*time.Hour, svc.SessionTTL(false))
 }
@@ -541,9 +559,9 @@ func TestGetPostRegisterRedirectURL_Default(t *testing.T) {
 	assert.Equal(t, "", svc.GetPostRegisterRedirectURL())
 }
 
-func TestSetAllowedOrigins(t *testing.T) {
-	svc := newTestService(&mockInvitationRepo{}, &mockUserRepo{}, &mockRbacRepo{}, nil)
-	svc.SetAllowedOrigins([]string{"https://dev.clown.school"})
+func TestAllowedOrigins_FromOptions(t *testing.T) {
+	svc := newTestService(&mockInvitationRepo{}, &mockUserRepo{}, &mockRbacRepo{}, nil,
+		withAllowedOrigins([]string{"https://dev.clown.school"}))
 
 	assert.Equal(t, []string{"https://dev.clown.school"}, svc.AllowedOrigins())
 }
