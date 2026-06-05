@@ -37,7 +37,7 @@ type ClientFinder interface {
 }
 
 type Service struct {
-	db             *gorm.DB
+	keyRepo        SigningKeyRepository
 	userService    *user.Service
 	rbacService    *rbac.Service
 	sessionRevoker SessionRevoker
@@ -65,7 +65,7 @@ func (s *Service) SetClientFinder(cf ClientFinder) {
 
 func NewService(db *gorm.DB, userService *user.Service, issuer string, pairwiseSalt string) *Service {
 	return &Service{
-		db:           db,
+		keyRepo:      NewSigningKeyRepository(db),
 		userService:  userService,
 		issuer:       issuer,
 		pairwiseSalt: pairwiseSalt,
@@ -74,15 +74,13 @@ func NewService(db *gorm.DB, userService *user.Service, issuer string, pairwiseS
 
 // EnsureSigningKey loads or creates the active signing key.
 func (s *Service) EnsureSigningKey() error {
-	var key model.SigningKey
-	err := s.db.Where("active = TRUE").Order("created_at DESC").First(&key).Error
-
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		slog.Info("no active signing key found, generating new one")
-		return s.RotateKey()
-	}
+	key, err := s.keyRepo.FindActive()
 	if err != nil {
 		return err
+	}
+	if key == nil {
+		slog.Info("no active signing key found, generating new one")
+		return s.RotateKey()
 	}
 
 	privKey, err := appCrypto.ParseRSAPrivateKey(key.PrivateKeyPEM)
@@ -91,7 +89,7 @@ func (s *Service) EnsureSigningKey() error {
 	}
 
 	s.mu.Lock()
-	s.activeKey = &key
+	s.activeKey = key
 	s.privateKey = privKey
 	s.mu.Unlock()
 
@@ -123,10 +121,9 @@ func (s *Service) RotateKey() error {
 
 	// Deactivate old keys (keep them for verification with expiry)
 	gracePeriod := time.Now().Add(24 * time.Hour)
-	s.db.Model(&model.SigningKey{}).Where("active = TRUE").Updates(map[string]any{
-		"active":     false,
-		"expires_at": gracePeriod,
-	})
+	if err := s.keyRepo.DeactivateActive(gracePeriod); err != nil {
+		return err
+	}
 
 	key := model.SigningKey{
 		ID:            id,
@@ -136,7 +133,7 @@ func (s *Service) RotateKey() error {
 		Active:        true,
 	}
 
-	if err := s.db.Create(&key).Error; err != nil {
+	if err := s.keyRepo.Create(&key); err != nil {
 		return err
 	}
 
@@ -156,10 +153,11 @@ func (s *Service) RotateKey() error {
 }
 
 func (s *Service) loadAllKeys() {
-	var keys []model.SigningKey
-	s.db.Where("active = TRUE OR (expires_at IS NOT NULL AND expires_at > ?)", time.Now()).
-		Order("created_at DESC").Find(&keys)
-
+	keys, err := s.keyRepo.FindAllValid(time.Now())
+	if err != nil {
+		slog.Error("failed to load valid signing keys", "error", err)
+		return
+	}
 	s.mu.Lock()
 	s.allKeys = keys
 	s.mu.Unlock()
