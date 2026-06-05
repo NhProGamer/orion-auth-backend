@@ -13,7 +13,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-webauthn/webauthn/webauthn"
-	"github.com/google/uuid"
 	"github.com/lib/pq"
 	"gorm.io/gorm"
 
@@ -252,7 +251,7 @@ func main() {
 	// Wire the default 'user' role for self-registration AFTER seeding so the
 	// admin user (created via seedAdminUser) doesn't pick up the user role on top
 	// of the admin role. New registrations get the user role automatically.
-	userService.SetDefaultRole(uuid.MustParse(defaultUserRoleID), rbacService)
+	userService.SetDefaultRole(model.DefaultUserRoleID, rbacService)
 
 	// Handlers
 	userHandler := user.NewHandler(userService)
@@ -681,12 +680,6 @@ func loadActionTokenSigningKey(encoded string) []byte {
 	return key
 }
 
-const (
-	adminRoleID       = "00000000-0000-0000-0000-000000000001"
-	adminClientID     = "00000000-0000-0000-0000-000000000002"
-	defaultUserRoleID = "00000000-0000-0000-0000-000000000004"
-)
-
 func seedDefaults(db *gorm.DB, userService *user.Service, rbacService *rbac.Service, issuer string) {
 	seedAdminUser(db, userService, rbacService)
 	seedAdminClient(db, issuer)
@@ -726,8 +719,7 @@ func seedAdminUser(db *gorm.DB, userService *user.Service, rbacService *rbac.Ser
 		return
 	}
 
-	roleID, _ := uuid.Parse(adminRoleID)
-	if err := rbacService.AssignRole(admin.ID, roleID); err != nil {
+	if err := rbacService.AssignRole(admin.ID, model.AdminRoleID); err != nil {
 		slog.Error("failed to assign admin role", "error", err)
 		return
 	}
@@ -764,7 +756,7 @@ func seedAdminUser(db *gorm.DB, userService *user.Service, rbacService *rbac.Ser
 }
 
 func seedAdminClient(db *gorm.DB, issuer string) {
-	clientID := uuid.MustParse(adminClientID)
+	clientID := model.AdminClientID
 	postLogoutURI := issuer + "/admin/"
 
 	var existing model.OAuthClient
@@ -812,7 +804,7 @@ func seedAdminClient(db *gorm.DB, issuer string) {
 
 	slog.Warn("========================================")
 	slog.Warn("DEFAULT ADMIN UI CLIENT CREATED")
-	slog.Warn("Client ID: " + adminClientID)
+	slog.Warn("Client ID: " + model.AdminClientIDString)
 	slog.Warn("Public client (no secret, PKCE required)")
 	slog.Warn("========================================")
 }
