@@ -134,4 +134,8 @@ const (
 	ActionAccountDeleted                = "account.deleted"
 	ActionAccountReauthIssued           = "account.reauth_issued"
 	ActionAccountReauthFailed           = "account.reauth_failed"
+
+	// Email template admin overrides
+	ActionEmailTemplateUpdated = "email_template.updated"
+	ActionEmailTemplateReset   = "email_template.reset"
 )
