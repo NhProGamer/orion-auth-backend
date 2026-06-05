@@ -298,7 +298,7 @@ func main() {
 		newRoleProviderAdapter(rbacService),
 		mfaService,
 		passkeyService,
-		newAccountPolicyEvaluatorAdapter(policyService),
+		policy.NewAccountAdapter(policyService),
 	)
 
 	// Connect audit logging to handlers
@@ -488,7 +488,7 @@ func setupRouter(a setupRouterArgs) *gin.Engine {
 	// OAuth2 endpoints (root level, rate limited)
 	oauthRL := middleware.NewRateLimiter(10, 3)
 	jwksCache := middleware.NewJWKSCache()
-	clientAuthMiddleware := middleware.ClientAuth(db, hasher, cfg.Issuer+"/token", jwksCache, a.hmacEncKey, newPolicyDeciderAdapter(policyService))
+	clientAuthMiddleware := middleware.ClientAuth(db, hasher, cfg.Issuer+"/token", jwksCache, a.hmacEncKey, policy.NewDeciderAdapter(policyService))
 	a.oauthHandler.SetJWKSCache(jwksCache)
 	a.oauthHandler.RegisterRoutes(router, clientAuthMiddleware, oauthRL.Middleware(), cfg.Issuer)
 
@@ -817,25 +817,6 @@ func seedAdminClient(db *gorm.DB, issuer string) {
 	slog.Warn("========================================")
 }
 
-// policyDeciderAdapter adapts policy.Service to the middleware.PolicyEvaluator
-// interface (returns deny + reason rather than the full policy.EvalResult). It
-// keeps the middleware package free of any direct dependency on policy.
-type policyDeciderAdapter struct {
-	svc *policy.Service
-}
-
-func newPolicyDeciderAdapter(svc *policy.Service) *policyDeciderAdapter {
-	return &policyDeciderAdapter{svc: svc}
-}
-
-func (a *policyDeciderAdapter) Evaluate(ctx context.Context, policyType string, input map[string]any) (bool, string, error) {
-	r, err := a.svc.Evaluate(ctx, policyType, input)
-	if err != nil || r == nil {
-		return false, "", err
-	}
-	return r.Deny, r.DenyReason, nil
-}
-
 // roleProviderAdapter adapts rbac.Service to oauth.RoleProvider, exposing
 // just role names (not full Role objects) so the policy input stays string-flat.
 type roleProviderAdapter struct {
@@ -860,23 +841,6 @@ func (a *roleProviderAdapter) GetUserRoleNames(userID uuid.UUID) ([]string, erro
 
 func (a *roleProviderAdapter) GetUserPermissions(userID uuid.UUID) ([]string, error) {
 	return a.svc.GetUserPermissions(userID)
-}
-
-// accountPolicyEvaluatorAdapter adapts policy.Service to account.PolicyEvaluator.
-type accountPolicyEvaluatorAdapter struct {
-	svc *policy.Service
-}
-
-func newAccountPolicyEvaluatorAdapter(svc *policy.Service) *accountPolicyEvaluatorAdapter {
-	return &accountPolicyEvaluatorAdapter{svc: svc}
-}
-
-func (a *accountPolicyEvaluatorAdapter) Evaluate(ctx context.Context, policyType string, input map[string]any) (*account.PolicyResult, error) {
-	r, err := a.svc.Evaluate(ctx, policyType, input)
-	if err != nil || r == nil {
-		return nil, err
-	}
-	return &account.PolicyResult{Deny: r.Deny, DenyReason: r.DenyReason}, nil
 }
 
 // federationListerAdapter adapts federation.Service to invitation.FederationLister.
