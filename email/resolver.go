@@ -181,3 +181,18 @@ func ParseCheck(name, body string) error {
 	_, err := template.New(name).Parse(body)
 	return err
 }
+
+// parsePreview / execPreview drive the /preview endpoint. They bypass
+// the resolver's cache because the input is an unsaved draft that
+// should not pollute the cache shared by live sends.
+func parsePreview(name, body string) (*template.Template, error) {
+	return template.New(name).Parse(body)
+}
+
+func execPreview(tpl *template.Template, data EmailData) (string, error) {
+	var buf bytes.Buffer
+	if err := tpl.Execute(&buf, data); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}

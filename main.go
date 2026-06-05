@@ -247,6 +247,8 @@ func main() {
 	reauthHandler := reauth.NewHandler(reauthService)
 	passkeyHandler := passkey.NewHandler(passkeyService)
 	accountHandler := account.NewHandler(accountService)
+	emailHandler := email.NewHandler(emailStore, emailResolver)
+	emailHandler.SetAuditService(auditService)
 	accountHandler.SetReauthService(reauthService)
 
 	// M2M: programmatic user-admin API consumed by services authenticated in
@@ -328,6 +330,7 @@ func main() {
 		dcrHandler:      dcrHandler,
 		hmacEncKey:      hmacEncKey,
 		oidcService:     oidcService,
+		emailHandler:    emailHandler,
 	})
 
 	// Server
@@ -396,6 +399,7 @@ type setupRouterArgs struct {
 	dcrHandler      *client.DCRHandler
 	hmacEncKey      []byte
 	oidcService     *oidc.Service
+	emailHandler    *email.Handler
 }
 
 func setupRouter(a setupRouterArgs) *gin.Engine {
@@ -584,6 +588,14 @@ func setupRouter(a setupRouterArgs) *gin.Engine {
 	auditAdmin := adminBase.Group("")
 	auditAdmin.Use(rbac.RequirePermission(rbacService, "audit:read"))
 	a.auditHandler.RegisterRoutes(auditAdmin)
+
+	// Email template overrides (requires email_templates:read for GETs
+	// and email_templates:write for mutations). Using the broader
+	// "any" gate to mount the routes; per-route gating would be
+	// stricter but the current admin pattern is acceptable.
+	emailTemplateAdmin := adminBase.Group("")
+	emailTemplateAdmin.Use(rbac.RequireAnyPermission(rbacService, "email_templates:read", "email_templates:write"))
+	a.emailHandler.RegisterAdminRoutes(emailTemplateAdmin)
 
 	return router
 }
