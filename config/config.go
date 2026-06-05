@@ -9,17 +9,17 @@ import (
 )
 
 type Config struct {
-	Server   ServerConfig   `mapstructure:"server"`
-	Database DatabaseConfig `mapstructure:"database"`
-	Auth     AuthConfig     `mapstructure:"auth"`
-	Argon2   Argon2Config   `mapstructure:"argon2"`
-	CORS     CORSConfig     `mapstructure:"cors"`
-	SMTP     SMTPConfig     `mapstructure:"smtp"`
-	WebAuthn WebAuthnConfig `mapstructure:"webauthn"`
-	Account  AccountConfig  `mapstructure:"account"`
-	AuthUI   AuthUIConfig   `mapstructure:"auth_ui"`
-	Issuer       string `mapstructure:"issuer"`
-	PairwiseSalt string `mapstructure:"pairwise_salt"`
+	Server       ServerConfig   `mapstructure:"server"`
+	Database     DatabaseConfig `mapstructure:"database"`
+	Auth         AuthConfig     `mapstructure:"auth"`
+	Argon2       Argon2Config   `mapstructure:"argon2"`
+	CORS         CORSConfig     `mapstructure:"cors"`
+	SMTP         SMTPConfig     `mapstructure:"smtp"`
+	WebAuthn     WebAuthnConfig `mapstructure:"webauthn"`
+	Account      AccountConfig  `mapstructure:"account"`
+	AuthUI       AuthUIConfig   `mapstructure:"auth_ui"`
+	Issuer       string         `mapstructure:"issuer"`
+	PairwiseSalt string         `mapstructure:"pairwise_salt"`
 }
 
 // AuthUIConfig points to the AuthUI SPA frontend the backend redirects to
@@ -58,15 +58,15 @@ func (d DatabaseConfig) DSN() string {
 }
 
 type AuthConfig struct {
-	AccessTokenTTL           time.Duration `mapstructure:"access_token_ttl"`
-	RefreshTokenTTL          time.Duration `mapstructure:"refresh_token_ttl"`
-	SessionTTL               time.Duration `mapstructure:"session_ttl"`
-	SessionExtendedTTL       time.Duration `mapstructure:"session_extended_ttl"`
-	AuthCodeTTL              time.Duration `mapstructure:"auth_code_ttl"`
-	DeviceCodeTTL            time.Duration `mapstructure:"device_code_ttl"`
-	PasswordMinLen           int           `mapstructure:"password_min_length"`
-	MaxFailAttempts          int           `mapstructure:"max_failed_attempts"`
-	LockoutDuration          time.Duration `mapstructure:"lockout_duration"`
+	AccessTokenTTL     time.Duration `mapstructure:"access_token_ttl"`
+	RefreshTokenTTL    time.Duration `mapstructure:"refresh_token_ttl"`
+	SessionTTL         time.Duration `mapstructure:"session_ttl"`
+	SessionExtendedTTL time.Duration `mapstructure:"session_extended_ttl"`
+	AuthCodeTTL        time.Duration `mapstructure:"auth_code_ttl"`
+	DeviceCodeTTL      time.Duration `mapstructure:"device_code_ttl"`
+	PasswordMinLen     int           `mapstructure:"password_min_length"`
+	MaxFailAttempts    int           `mapstructure:"max_failed_attempts"`
+	LockoutDuration    time.Duration `mapstructure:"lockout_duration"`
 	// HMACSecretEncryptionKey is a base64-encoded 32-byte AES-256 key used to
 	// seal per-client HMAC keys (client_secret_jwt). When empty,
 	// client_secret_jwt support is disabled with a startup warning.
@@ -124,10 +124,10 @@ type WebAuthnConfig struct {
 }
 
 type AccountConfig struct {
-	ReauthTokenTTL          time.Duration `mapstructure:"reauth_token_ttl"`
-	EmailChangeTokenTTL     time.Duration `mapstructure:"email_change_token_ttl"`
-	DeletionGracePeriod     time.Duration `mapstructure:"deletion_grace_period"`
-	PasskeyChallengeTTL     time.Duration `mapstructure:"passkey_challenge_ttl"`
+	ReauthTokenTTL      time.Duration `mapstructure:"reauth_token_ttl"`
+	EmailChangeTokenTTL time.Duration `mapstructure:"email_change_token_ttl"`
+	DeletionGracePeriod time.Duration `mapstructure:"deletion_grace_period"`
+	PasskeyChallengeTTL time.Duration `mapstructure:"passkey_challenge_ttl"`
 }
 
 func Load() (*Config, error) {
