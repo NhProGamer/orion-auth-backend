@@ -85,6 +85,14 @@ func (s *SMTPSender) SendAccountDeletionEmail(to, cancelToken string) error {
 	return s.send(to, "Account deletion scheduled", buf.String())
 }
 
+// Deliver sends an already-rendered HTML body to a recipient. Used by
+// the outbox worker; the high-level Send* methods on this type render
+// a template and then call this. Exposed so the worker can deliver
+// without re-rendering.
+func (s *SMTPSender) Deliver(to, subject, htmlBody string) error {
+	return s.send(to, subject, htmlBody)
+}
+
 func (s *SMTPSender) send(to, subject, htmlBody string) error {
 	m := mail.NewMsg()
 	if err := m.FromFormat(s.cfg.FromName, s.cfg.From); err != nil {
