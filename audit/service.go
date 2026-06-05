@@ -3,7 +3,6 @@ package audit
 import (
 	"encoding/json"
 	"log/slog"
-	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -12,11 +11,20 @@ import (
 )
 
 type Service struct {
-	db *gorm.DB
+	repo Repository
 }
 
+// NewService is the production constructor used by main.go. It wires
+// the default GORM-backed repository so existing call sites continue
+// to work unchanged.
 func NewService(db *gorm.DB) *Service {
-	return &Service{db: db}
+	return &Service{repo: NewRepository(db)}
+}
+
+// NewServiceWithRepository is the testing constructor: callers
+// inject a fake Repository to exercise Log/Query without a DB.
+func NewServiceWithRepository(repo Repository) *Service {
+	return &Service{repo: repo}
 }
 
 type LogEntry struct {
@@ -28,7 +36,8 @@ type LogEntry struct {
 	Metadata  map[string]any
 }
 
-// Log records an audit event.
+// Log records an audit event. Failures are logged but never propagated:
+// an audit-write outage must not block a request.
 func (s *Service) Log(entry LogEntry) {
 	id, _ := uuid.NewV7()
 
@@ -58,50 +67,11 @@ func (s *Service) Log(entry LogEntry) {
 		Metadata:  metaJSON,
 	}
 
-	if err := s.db.Create(&log).Error; err != nil {
+	if err := s.repo.Create(&log); err != nil {
 		slog.Error("failed to write audit log", "action", entry.Action, "error", err)
 	}
 }
 
-type QueryInput struct {
-	ID           *uuid.UUID
-	UserID       *uuid.UUID
-	Action       string
-	ActionPrefix string
-	From         *time.Time
-	To           *time.Time
-	Page         int
-	PerPage      int
-}
-
 func (s *Service) Query(input QueryInput) ([]model.AuditLog, int64, error) {
-	var logs []model.AuditLog
-	var total int64
-
-	query := s.db.Model(&model.AuditLog{})
-
-	if input.ID != nil {
-		query = query.Where("id = ?", *input.ID)
-	}
-	if input.UserID != nil {
-		query = query.Where("user_id = ?", *input.UserID)
-	}
-	if input.Action != "" {
-		query = query.Where("action = ?", input.Action)
-	}
-	if input.ActionPrefix != "" {
-		query = query.Where("action LIKE ?", input.ActionPrefix+"%")
-	}
-	if input.From != nil {
-		query = query.Where("created_at >= ?", *input.From)
-	}
-	if input.To != nil {
-		query = query.Where("created_at <= ?", *input.To)
-	}
-
-	query.Session(&gorm.Session{}).Count(&total)
-
-	offset := (input.Page - 1) * input.PerPage
-	err := query.Order("created_at DESC").Offset(offset).Limit(input.PerPage).Find(&logs).Error
-	return logs, total, err
+	return s.repo.Query(input)
 }
