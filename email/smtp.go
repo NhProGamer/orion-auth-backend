@@ -1,19 +1,17 @@
 package email
 
 import (
-	"bytes"
 	"fmt"
-	"html/template"
 	"log/slog"
 
 	"github.com/wneessen/go-mail"
 
 	"orion-auth-backend/config"
-	"orion-auth-backend/email/templates"
 )
 
-var tmpl = template.Must(template.ParseFS(templates.FS, "*.gohtml"))
-
+// EmailData is the payload exposed to templates as the dot value.
+// New fields require a matching entry in resolver.variables and an
+// AdminUI bump so admins can insert the new placeholder.
 type EmailData struct {
 	Issuer   string
 	Token    string
@@ -21,74 +19,55 @@ type EmailData struct {
 }
 
 type SMTPSender struct {
-	cfg    config.SMTPConfig
-	issuer string
+	cfg      config.SMTPConfig
+	issuer   string
+	resolver *Resolver
 }
 
-func NewSMTPSender(cfg config.SMTPConfig, issuer string) *SMTPSender {
-	return &SMTPSender{cfg: cfg, issuer: issuer}
+func NewSMTPSender(cfg config.SMTPConfig, issuer string, resolver *Resolver) *SMTPSender {
+	return &SMTPSender{cfg: cfg, issuer: issuer, resolver: resolver}
+}
+
+func (s *SMTPSender) renderAndSend(to, name string, data EmailData) error {
+	subject, body, err := s.resolver.Render(name, data)
+	if err != nil {
+		return fmt.Errorf("render %s: %w", name, err)
+	}
+	return s.send(to, subject, body)
 }
 
 func (s *SMTPSender) SendVerificationEmail(to, token string) error {
-	var buf bytes.Buffer
-	if err := tmpl.ExecuteTemplate(&buf, "verification.gohtml", EmailData{Issuer: s.issuer, Token: token}); err != nil {
-		return fmt.Errorf("failed to render email template: %w", err)
-	}
-	return s.send(to, "Verify your email address", buf.String())
+	return s.renderAndSend(to, "verification", EmailData{Issuer: s.issuer, Token: token})
 }
 
 func (s *SMTPSender) SendPasswordResetEmail(to, token string) error {
-	var buf bytes.Buffer
-	if err := tmpl.ExecuteTemplate(&buf, "password_reset.gohtml", EmailData{Issuer: s.issuer, Token: token}); err != nil {
-		return fmt.Errorf("failed to render email template: %w", err)
-	}
-	return s.send(to, "Reset your password", buf.String())
+	return s.renderAndSend(to, "password_reset", EmailData{Issuer: s.issuer, Token: token})
 }
 
 func (s *SMTPSender) SendInvitationEmail(to, token string) error {
-	var buf bytes.Buffer
-	if err := tmpl.ExecuteTemplate(&buf, "invitation.gohtml", EmailData{Issuer: s.issuer, Token: token}); err != nil {
-		return fmt.Errorf("failed to render email template: %w", err)
-	}
-	return s.send(to, "You've been invited", buf.String())
+	return s.renderAndSend(to, "invitation", EmailData{Issuer: s.issuer, Token: token})
 }
 
 func (s *SMTPSender) SendEmailChangeConfirmation(to, token string) error {
-	var buf bytes.Buffer
-	if err := tmpl.ExecuteTemplate(&buf, "account_email_change.gohtml", EmailData{Issuer: s.issuer, Token: token}); err != nil {
-		return fmt.Errorf("failed to render email template: %w", err)
-	}
-	return s.send(to, "Confirm your new email address", buf.String())
+	return s.renderAndSend(to, "account_email_change", EmailData{Issuer: s.issuer, Token: token})
 }
 
 func (s *SMTPSender) SendEmailChangedNotice(oldEmail, newEmail string) error {
-	var buf bytes.Buffer
-	if err := tmpl.ExecuteTemplate(&buf, "account_email_changed.gohtml", EmailData{Issuer: s.issuer, NewEmail: newEmail}); err != nil {
-		return fmt.Errorf("failed to render email template: %w", err)
-	}
-	return s.send(oldEmail, "Your email address was changed", buf.String())
+	return s.renderAndSend(oldEmail, "account_email_changed", EmailData{Issuer: s.issuer, NewEmail: newEmail})
 }
 
 func (s *SMTPSender) SendPasswordChangedNotice(to string) error {
-	var buf bytes.Buffer
-	if err := tmpl.ExecuteTemplate(&buf, "account_password_changed.gohtml", EmailData{Issuer: s.issuer}); err != nil {
-		return fmt.Errorf("failed to render email template: %w", err)
-	}
-	return s.send(to, "Your password was changed", buf.String())
+	return s.renderAndSend(to, "account_password_changed", EmailData{Issuer: s.issuer})
 }
 
 func (s *SMTPSender) SendAccountDeletionEmail(to, cancelToken string) error {
-	var buf bytes.Buffer
-	if err := tmpl.ExecuteTemplate(&buf, "account_deletion.gohtml", EmailData{Issuer: s.issuer, Token: cancelToken}); err != nil {
-		return fmt.Errorf("failed to render email template: %w", err)
-	}
-	return s.send(to, "Account deletion scheduled", buf.String())
+	return s.renderAndSend(to, "account_deletion", EmailData{Issuer: s.issuer, Token: cancelToken})
 }
 
 // Deliver sends an already-rendered HTML body to a recipient. Used by
 // the outbox worker; the high-level Send* methods on this type render
-// a template and then call this. Exposed so the worker can deliver
-// without re-rendering.
+// via the resolver and then call this. Exposed so the worker can
+// deliver without re-rendering.
 func (s *SMTPSender) Deliver(to, subject, htmlBody string) error {
 	return s.send(to, subject, htmlBody)
 }

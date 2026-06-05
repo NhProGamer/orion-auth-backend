@@ -98,9 +98,13 @@ func main() {
 	// A blip in the SMTP path no longer drops verification or
 	// password-reset emails — they sit in the outbox until delivery
 	// succeeds or MaxAttempts is reached.
-	smtpDeliverer := email.NewSMTPSender(cfg.SMTP, cfg.Issuer)
+	// The resolver fronts both senders: it prefers an admin-edited
+	// override (DB) and falls back to the embedded .gohtml default.
+	emailStore := email.NewStore(db)
+	emailResolver := email.NewResolver(emailStore)
+	smtpDeliverer := email.NewSMTPSender(cfg.SMTP, cfg.Issuer, emailResolver)
 	outboxRepo := email.NewOutboxRepository(db)
-	emailSender := email.NewOutboxSender(outboxRepo, cfg.Issuer)
+	emailSender := email.NewOutboxSender(outboxRepo, cfg.Issuer, emailResolver)
 	emailWorker := email.NewOutboxWorker(outboxRepo, smtpDeliverer)
 	workerCtx, stopWorker := context.WithCancel(context.Background())
 	defer stopWorker()

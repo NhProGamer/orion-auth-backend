@@ -107,7 +107,7 @@ func (r *fakeOutboxRepo) ProcessBatch(limit int, backoff BackoffFn, deliver func
 
 func TestOutboxSender_EnqueuesRenderedRow(t *testing.T) {
 	repo := newFakeOutboxRepo()
-	s := NewOutboxSender(repo, "https://auth.example.test")
+	s := NewOutboxSender(repo, "https://auth.example.test", NewResolver(nil))
 
 	if err := s.SendVerificationEmail("alice@example.test", "vtok"); err != nil {
 		t.Fatalf("SendVerificationEmail: %v", err)
@@ -139,7 +139,7 @@ func TestOutboxSender_AllMethodsEnqueue(t *testing.T) {
 	// repo and produce a row. Catches a future template name typo or
 	// missing template at compile-time-ish.
 	repo := newFakeOutboxRepo()
-	s := NewOutboxSender(repo, "https://auth.example.test")
+	s := NewOutboxSender(repo, "https://auth.example.test", NewResolver(nil))
 
 	check := func(label string, err error) {
 		t.Helper()
@@ -177,7 +177,7 @@ func (d *stubDeliverer) Deliver(to, subject, body string) error {
 
 func TestWorker_MarksSentOnSuccess(t *testing.T) {
 	repo := newFakeOutboxRepo()
-	_ = NewOutboxSender(repo, "x").SendVerificationEmail("a@test", "t")
+	_ = NewOutboxSender(repo, "x", NewResolver(nil)).SendVerificationEmail("a@test", "t")
 
 	w := NewOutboxWorker(repo, &stubDeliverer{})
 	w.tick(testCtx())
@@ -195,7 +195,7 @@ func TestWorker_MarksSentOnSuccess(t *testing.T) {
 
 func TestWorker_BackoffOnTransientFailure(t *testing.T) {
 	repo := newFakeOutboxRepo()
-	_ = NewOutboxSender(repo, "x").SendPasswordResetEmail("a@test", "t")
+	_ = NewOutboxSender(repo, "x", NewResolver(nil)).SendPasswordResetEmail("a@test", "t")
 
 	w := NewOutboxWorker(repo, &stubDeliverer{failFor: 100})
 	w.tick(testCtx())
@@ -238,7 +238,7 @@ func TestWorker_MarksFailedAtMaxAttempts(t *testing.T) {
 
 func TestWorker_SkipsNotYetDueRows(t *testing.T) {
 	repo := newFakeOutboxRepo()
-	_ = NewOutboxSender(repo, "x").SendVerificationEmail("a@test", "t")
+	_ = NewOutboxSender(repo, "x", NewResolver(nil)).SendVerificationEmail("a@test", "t")
 	// Push the row 5 minutes into the future.
 	repo.rows[0].NextRetryAt = repo.now().Add(5 * time.Minute)
 
