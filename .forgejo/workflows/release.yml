@@ -14,6 +14,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # BuildKit-enabled builder so the Dockerfile's
+      # RUN --mount=type=cache directives + cache-to=registry work.
+      - uses: docker/setup-buildx-action@v3
+
       - uses: docker/login-action@v3
         with:
           registry: git.nhsoul.fr
@@ -26,6 +30,13 @@ jobs:
           push: true
           provenance: false
           sbom: false
+          # Registry-backed BuildKit cache. mode=max exports all
+          # intermediate layers (not just the final ones), so a future
+          # build that only changes a .go file still skips
+          # `go mod download`, the swag install, and unchanged-package
+          # compilations.
+          cache-from: type=registry,ref=git.nhsoul.fr/nhpro/orion-auth-backend:buildcache
+          cache-to: type=registry,ref=git.nhsoul.fr/nhpro/orion-auth-backend:buildcache,mode=max
           tags: |
             git.nhsoul.fr/nhpro/orion-auth-backend:${{ github.event.release.tag_name || inputs.tag || 'latest' }}
             git.nhsoul.fr/nhpro/orion-auth-backend:latest
