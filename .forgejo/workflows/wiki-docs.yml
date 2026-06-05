@@ -4,6 +4,11 @@ on:
   push:
     branches: [master]
 
+env:
+  # Keep in sync with .forgejo/workflows/test.yml so both jobs share
+  # the same swag binary cache entry.
+  SWAG_VERSION: v1.16.6
+
 jobs:
   update-wiki:
     runs-on: docker
@@ -18,10 +23,29 @@ jobs:
           git clone https://oauth2:${{ secrets.WIKI_TOKEN }}@git.nhsoul.fr/nhpro/orion-auth-backend.git .
           git checkout ${{ github.sha }}
 
+      - name: Cache Go modules + build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            /go/pkg/mod
+            /root/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Cache swag binary
+        id: swag-cache
+        uses: actions/cache@v4
+        with:
+          path: /go/bin/swag
+          key: swag-${{ env.SWAG_VERSION }}
+
+      - name: Install swag (cache miss only)
+        if: steps.swag-cache.outputs.cache-hit != 'true'
+        run: go install github.com/swaggo/swag/cmd/swag@${{ env.SWAG_VERSION }}
+
       - name: Generate swagger docs
-        run: |
-          go install github.com/swaggo/swag/cmd/swag@latest
-          swag init -g main.go -o docs/
+        run: swag init -g main.go -o docs/
 
       - name: Convert and push to wiki
         run: |
