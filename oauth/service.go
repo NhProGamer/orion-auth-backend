@@ -125,59 +125,50 @@ type Service struct {
 	roleProvider      RoleProvider
 }
 
-func NewService(
-	repo RepositoryInterface,
-	userService *user.Service,
-	sessionService *session.Service,
-	hasher *crypto.Argon2Hasher,
-	cfg config.AuthConfig,
-) *Service {
+// Options is the constructor surface for oauth.Service.
+//
+// All 8 previous setters collapse into typed fields: a forgotten dep
+// is a compile-time visible empty field, not a runtime nil panic. None
+// of these dependencies are truly circular — main.go reorders
+// construction so every dep exists before oauth.NewService runs.
+type Options struct {
+	// Required
+	Repo           RepositoryInterface
+	UserService    *user.Service
+	SessionService *session.Service
+	Hasher         *crypto.Argon2Hasher
+	Cfg            config.AuthConfig
+	Issuer         string
+
+	// Optional integrations — leaving them nil disables the
+	// corresponding code path with the documented fallback (see
+	// loadRoles for an example: a nil RoleProvider yields empty role
+	// arrays in policy inputs instead of failing the request).
+	IDTokenGenerator     IDTokenGenerator
+	IDTokenValidator     IDTokenValidator
+	AccessTokenJWTSigner AccessTokenJWTSigner // nil → opaque tokens even when resource opts JWT
+	MFAValidator         MFAValidator
+	PolicyEvaluator      PolicyEvaluator
+	ResourceValidator    ResourceValidator
+	RoleProvider         RoleProvider
+}
+
+func NewService(o Options) *Service {
 	return &Service{
-		repo:           repo,
-		userService:    userService,
-		sessionService: sessionService,
-		hasher:         hasher,
-		cfg:            cfg,
+		repo:              o.Repo,
+		userService:       o.UserService,
+		sessionService:    o.SessionService,
+		hasher:            o.Hasher,
+		cfg:               o.Cfg,
+		issuer:            o.Issuer,
+		idTokenGen:        o.IDTokenGenerator,
+		idTokenValidator:  o.IDTokenValidator,
+		jwtSigner:         o.AccessTokenJWTSigner,
+		mfaValidator:      o.MFAValidator,
+		policyEvaluator:   o.PolicyEvaluator,
+		resourceValidator: o.ResourceValidator,
+		roleProvider:      o.RoleProvider,
 	}
-}
-
-// SetIDTokenGenerator sets the OIDC ID token generator (called after init to break circular dep).
-func (s *Service) SetIDTokenGenerator(gen IDTokenGenerator) {
-	s.idTokenGen = gen
-}
-
-// SetAccessTokenJWTSigner wires the optional signer used when a resource
-// has token_format='jwt'. When nil, even JWT-opted resources fall back to
-// opaque tokens with a runtime warning at issuance time.
-func (s *Service) SetAccessTokenJWTSigner(signer AccessTokenJWTSigner) {
-	s.jwtSigner = signer
-}
-
-// SetMFAValidator sets the MFA validator (called after init to break circular dep).
-func (s *Service) SetMFAValidator(v MFAValidator) {
-	s.mfaValidator = v
-}
-
-// SetPolicyEvaluator sets the policy evaluator (called after init to break circular dep).
-func (s *Service) SetPolicyEvaluator(p PolicyEvaluator) {
-	s.policyEvaluator = p
-}
-
-// SetResourceValidator sets the resource validator (called after init to break circular dep).
-func (s *Service) SetResourceValidator(v ResourceValidator) {
-	s.resourceValidator = v
-}
-
-// SetIDTokenValidator sets the ID token validator (called after init to break circular dep).
-func (s *Service) SetIDTokenValidator(v IDTokenValidator) {
-	s.idTokenValidator = v
-}
-
-// SetRoleProvider wires the source of roles + permissions used to enrich
-// policy inputs. Optional — when absent, input.user.roles and .permissions
-// remain empty arrays.
-func (s *Service) SetRoleProvider(p RoleProvider) {
-	s.roleProvider = p
 }
 
 // loadRoles fetches role + permission names for the given user, returning empty
@@ -194,11 +185,6 @@ func (s *Service) loadRoles(userID uuid.UUID) (roles, permissions []string) {
 		permissions = p
 	}
 	return roles, permissions
-}
-
-// SetIssuer sets the issuer URL for authorization response iss parameter (RFC 9207).
-func (s *Service) SetIssuer(issuer string) {
-	s.issuer = issuer
 }
 
 // TokenResponse is the standard OAuth2 token response.

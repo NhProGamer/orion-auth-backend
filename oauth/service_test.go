@@ -369,14 +369,45 @@ func (m *mockPolicyEvaluator) Evaluate(_ context.Context, policyType string, inp
 
 const testPassword = "TestP@ss123!"
 
-func newTestService(oauthRepo *mockOAuthRepo, userRepo *mockUserRepo, sessionRepo *mockSessionRepo) *Service {
+// optModifier and the withX helpers let tests construct a
+// oauth.Service in one call without re-declaring the full Options
+// literal. Same pattern as user/invitation/federation tests.
+type optModifier func(*Options)
+
+func withIDTokenGenerator(g IDTokenGenerator) optModifier {
+	return func(o *Options) { o.IDTokenGenerator = g }
+}
+func withMFAValidator(v MFAValidator) optModifier {
+	return func(o *Options) { o.MFAValidator = v }
+}
+func withPolicyEvaluator(p PolicyEvaluator) optModifier {
+	return func(o *Options) { o.PolicyEvaluator = p }
+}
+func withAccessTokenJWTSigner(s AccessTokenJWTSigner) optModifier {
+	return func(o *Options) { o.AccessTokenJWTSigner = s }
+}
+func withResourceValidator(v ResourceValidator) optModifier {
+	return func(o *Options) { o.ResourceValidator = v }
+}
+
+func newTestService(oauthRepo *mockOAuthRepo, userRepo *mockUserRepo, sessionRepo *mockSessionRepo, mods ...optModifier) *Service {
 	hasher := testutil.FastHasher()
 	cfg := testutil.TestAuthConfig()
 
 	userSvc := user.NewService(user.Options{Repo: userRepo, Hasher: hasher, Cfg: cfg})
 	sessionSvc := session.NewService(sessionRepo, cfg)
 
-	return NewService(oauthRepo, userSvc, sessionSvc, hasher, cfg)
+	o := Options{
+		Repo:           oauthRepo,
+		UserService:    userSvc,
+		SessionService: sessionSvc,
+		Hasher:         hasher,
+		Cfg:            cfg,
+	}
+	for _, m := range mods {
+		m(&o)
+	}
+	return NewService(o)
 }
 
 func newTestClient() *model.OAuthClient {
@@ -902,15 +933,16 @@ func TestAuthorizeLogin_PolicyDeniesLogin(t *testing.T) {
 		},
 	}
 
-	svc := newTestService(oauthRepo, userRepo, &mockSessionRepo{})
-	svc.SetPolicyEvaluator(&mockPolicyEvaluator{
-		evaluateFn: func(policyType string, input map[string]any) (*PolicyResult, error) {
-			if policyType == "login" {
-				return &PolicyResult{Deny: true, DenyReason: "blocked by policy"}, nil
-			}
-			return &PolicyResult{Allow: true}, nil
-		},
-	})
+	svc := newTestService(oauthRepo, userRepo, &mockSessionRepo{},
+		withPolicyEvaluator(&mockPolicyEvaluator{
+			evaluateFn: func(policyType string, input map[string]any) (*PolicyResult, error) {
+				if policyType == "login" {
+					return &PolicyResult{Deny: true, DenyReason: "blocked by policy"}, nil
+				}
+				return &PolicyResult{Allow: true}, nil
+			},
+		}),
+	)
 
 	reqID, _ := uuid.NewV7()
 	_, err := svc.AuthorizeLogin(AuthorizeLoginInput{
@@ -946,12 +978,13 @@ func TestAuthorizeLogin_RequiresMFA(t *testing.T) {
 		},
 	}
 
-	svc := newTestService(oauthRepo, userRepo, &mockSessionRepo{})
-	svc.SetMFAValidator(&mockMFAValidator{
-		hasMFAFn: func(userID uuid.UUID) (bool, error) {
-			return true, nil
-		},
-	})
+	svc := newTestService(oauthRepo, userRepo, &mockSessionRepo{},
+		withMFAValidator(&mockMFAValidator{
+			hasMFAFn: func(userID uuid.UUID) (bool, error) {
+				return true, nil
+			},
+		}),
+	)
 
 	reqID, _ := uuid.NewV7()
 	resp, err := svc.AuthorizeLogin(AuthorizeLoginInput{
@@ -1032,8 +1065,8 @@ func TestExchangeAuthorizationCode_Success(t *testing.T) {
 		},
 	}
 
-	svc := newTestService(oauthRepo, userRepo, &mockSessionRepo{})
-	svc.SetIDTokenGenerator(&mockIDTokenGen{})
+	svc := newTestService(oauthRepo, userRepo, &mockSessionRepo{},
+		withIDTokenGenerator(&mockIDTokenGen{}))
 
 	resp, err := svc.ExchangeAuthorizationCode(client, rawCode, "https://example.com/callback", "my-verifier")
 	if err != nil {
@@ -2062,12 +2095,13 @@ func TestAuthorizeMFA_Success(t *testing.T) {
 			return client, nil
 		},
 	}
-	svc := newTestService(oauthRepo, &mockUserRepo{}, &mockSessionRepo{})
-	svc.SetMFAValidator(&mockMFAValidator{
-		validateCodeFn: func(uid uuid.UUID, code string) (bool, error) {
-			return code == "123456", nil
-		},
-	})
+	svc := newTestService(oauthRepo, &mockUserRepo{}, &mockSessionRepo{},
+		withMFAValidator(&mockMFAValidator{
+			validateCodeFn: func(uid uuid.UUID, code string) (bool, error) {
+				return code == "123456", nil
+			},
+		}),
+	)
 
 	resp, err := svc.AuthorizeMFA(AuthorizeMFAInput{
 		RequestID: reqID,
@@ -2098,12 +2132,13 @@ func TestAuthorizeMFA_InvalidCode(t *testing.T) {
 			}, nil
 		},
 	}
-	svc := newTestService(oauthRepo, &mockUserRepo{}, &mockSessionRepo{})
-	svc.SetMFAValidator(&mockMFAValidator{
-		validateCodeFn: func(uid uuid.UUID, code string) (bool, error) {
-			return false, nil
-		},
-	})
+	svc := newTestService(oauthRepo, &mockUserRepo{}, &mockSessionRepo{},
+		withMFAValidator(&mockMFAValidator{
+			validateCodeFn: func(uid uuid.UUID, code string) (bool, error) {
+				return false, nil
+			},
+		}),
+	)
 
 	_, err := svc.AuthorizeMFA(AuthorizeMFAInput{
 		RequestID: reqID,

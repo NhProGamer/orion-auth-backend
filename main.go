@@ -146,11 +146,47 @@ func main() {
 	})
 	sessionService := session.NewService(sessionRepo, cfg.Auth)
 	clientService := client.NewService(clientRepo, hasher, hmacEncKey)
-	oauthService := oauth.NewService(oauthRepo, userService, sessionService, hasher, cfg.Auth)
-	oidcService := oidc.NewService(db, userService, cfg.Issuer, cfg.PairwiseSalt)
 	mfaService := mfa.NewService(mfaRepo, hasher)
 	rbacService := rbac.NewService(rbacRepo)
 	auditService := audit.NewService(db)
+	resourceRepo := resource.NewRepository(db)
+	resourceService := resource.NewService(resourceRepo)
+
+	// OIDC + Policy are built before oauth so their adapters can be
+	// passed into oauth.Options (no post-construction setters).
+	oidcService := oidc.NewService(db, userService, cfg.Issuer, cfg.PairwiseSalt)
+	oidcService.SetRBACService(rbacService)
+	oidcService.SetSessionRevoker(sessionService)
+	oidcService.SetClientFinder(clientRepo)
+	if err := oidcService.EnsureSigningKey(); err != nil {
+		slog.Error("failed to initialize signing key", "error", err)
+		os.Exit(1)
+	}
+
+	policyRepo := policy.NewRepository(db)
+	policyEngine := policy.NewEngine()
+	policyService := policy.NewService(policyRepo, policyEngine)
+	policyService.SetAuditService(auditService)
+	if err := policyService.LoadAll(); err != nil {
+		slog.Error("failed to load policies", "error", err)
+		os.Exit(1)
+	}
+
+	oauthService := oauth.NewService(oauth.Options{
+		Repo:                 oauthRepo,
+		UserService:          userService,
+		SessionService:       sessionService,
+		Hasher:               hasher,
+		Cfg:                  cfg.Auth,
+		Issuer:               cfg.Issuer,
+		IDTokenGenerator:     oidc.NewIDTokenAdapter(oidcService),
+		IDTokenValidator:     oidcService,
+		AccessTokenJWTSigner: oidc.NewAccessTokenJWTSignerAdapter(oidcService),
+		MFAValidator:         mfaService,
+		PolicyEvaluator:      policy.NewOAuthAdapter(policyService),
+		ResourceValidator:    resourceService,
+		RoleProvider:         newRoleProviderAdapter(rbacService),
+	})
 	// invService is constructed BEFORE fedService so the federation
 	// provisioning trio (Users/Registration/Invitations) can be passed
 	// via Options at construction time rather than via a setter.
@@ -209,20 +245,6 @@ func main() {
 		cfg.Account.DeletionGracePeriod,
 	)
 
-	// Policy engine
-	policyRepo := policy.NewRepository(db)
-	policyEngine := policy.NewEngine()
-	policyService := policy.NewService(policyRepo, policyEngine)
-	policyService.SetAuditService(auditService)
-	if err := policyService.LoadAll(); err != nil {
-		slog.Error("failed to load policies", "error", err)
-		os.Exit(1)
-	}
-
-	// API Resources
-	resourceRepo := resource.NewRepository(db)
-	resourceService := resource.NewService(resourceRepo)
-
 	// Seed defaults on first launch
 	seedDefaults(db, userService, rbacService, cfg.Issuer)
 
@@ -230,25 +252,6 @@ func main() {
 	// admin user (created via seedAdminUser) doesn't pick up the user role on top
 	// of the admin role. New registrations get the user role automatically.
 	userService.SetDefaultRole(uuid.MustParse(defaultUserRoleID), rbacService)
-
-	// Initialize signing keys
-	if err := oidcService.EnsureSigningKey(); err != nil {
-		slog.Error("failed to initialize signing key", "error", err)
-		os.Exit(1)
-	}
-
-	// Connect cross-service dependencies
-	oauthService.SetIDTokenGenerator(oidc.NewIDTokenAdapter(oidcService))
-	oauthService.SetAccessTokenJWTSigner(oidc.NewAccessTokenJWTSignerAdapter(oidcService))
-	oauthService.SetMFAValidator(mfaService)
-	oauthService.SetPolicyEvaluator(policy.NewOAuthAdapter(policyService))
-	oauthService.SetRoleProvider(newRoleProviderAdapter(rbacService))
-	oauthService.SetResourceValidator(resourceService)
-	oauthService.SetIssuer(cfg.Issuer)
-	oidcService.SetRBACService(rbacService)
-	oidcService.SetSessionRevoker(sessionService)
-	oidcService.SetClientFinder(clientRepo)
-	oauthService.SetIDTokenValidator(oidcService)
 
 	// Handlers
 	userHandler := user.NewHandler(userService)

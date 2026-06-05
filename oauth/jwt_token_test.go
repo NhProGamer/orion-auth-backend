@@ -46,9 +46,8 @@ func (s *stubJWTSigner) ValidateAccessTokenJWT(token string) (map[string]any, er
 
 func TestIntrospect_JWTAccessToken_HappyPath(t *testing.T) {
 	repo := &mockOAuthRepo{}
-	svc := newTestService(repo, &mockUserRepo{}, &mockSessionRepo{})
 	signer := newStubJWTSigner()
-	svc.SetAccessTokenJWTSigner(signer)
+	svc := newTestService(repo, &mockUserRepo{}, &mockSessionRepo{}, withAccessTokenJWTSigner(signer))
 
 	clientID := uuid.New()
 	tok, _, err := signer.GenerateAccessTokenJWT(AccessTokenJWTClaims{
@@ -84,9 +83,8 @@ func TestIntrospect_JWTAccessToken_DenylistFlipsActive(t *testing.T) {
 	repo := &mockOAuthRepo{
 		isJTIRevokedFn: func(jti string) (bool, error) { return revoked[jti], nil },
 	}
-	svc := newTestService(repo, &mockUserRepo{}, &mockSessionRepo{})
 	signer := newStubJWTSigner()
-	svc.SetAccessTokenJWTSigner(signer)
+	svc := newTestService(repo, &mockUserRepo{}, &mockSessionRepo{}, withAccessTokenJWTSigner(signer))
 
 	clientID := uuid.New()
 	tok, jti, _ := signer.GenerateAccessTokenJWT(AccessTokenJWTClaims{
@@ -112,9 +110,8 @@ func TestRevoke_JWTAccessToken_AddsToDenylist(t *testing.T) {
 			return nil
 		},
 	}
-	svc := newTestService(repo, &mockUserRepo{}, &mockSessionRepo{})
 	signer := newStubJWTSigner()
-	svc.SetAccessTokenJWTSigner(signer)
+	svc := newTestService(repo, &mockUserRepo{}, &mockSessionRepo{}, withAccessTokenJWTSigner(signer))
 
 	clientID := uuid.New()
 	tok, jti, _ := signer.GenerateAccessTokenJWT(AccessTokenJWTClaims{
@@ -138,9 +135,8 @@ func TestRevoke_JWTAccessToken_CrossClientIsSilentSuccess(t *testing.T) {
 			return nil
 		},
 	}
-	svc := newTestService(repo, &mockUserRepo{}, &mockSessionRepo{})
 	signer := newStubJWTSigner()
-	svc.SetAccessTokenJWTSigner(signer)
+	svc := newTestService(repo, &mockUserRepo{}, &mockSessionRepo{}, withAccessTokenJWTSigner(signer))
 
 	tokenOwner := uuid.New()
 	tok, _, _ := signer.GenerateAccessTokenJWT(AccessTokenJWTClaims{
