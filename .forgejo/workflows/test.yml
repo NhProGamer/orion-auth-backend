@@ -7,8 +7,8 @@ on:
     branches: [master]
 
 env:
-  # Pin swag so we don't re-resolve "latest" on every run and so the
-  # cache key (below) is stable.
+  # Pin swag so 'latest' bumping (currently to v2.0.0-rc) cannot
+  # silently break the build.
   SWAG_VERSION: v1.16.6
 
 jobs:
@@ -18,48 +18,20 @@ jobs:
       image: golang:1.25-alpine
     steps:
       - name: Install system dependencies
-        # nodejs is required by actions/cache@v4 (and any other JS
-        # action); golang:1.25-alpine doesn't ship it. Add it BEFORE
-        # the first JS action runs, otherwise the runner fails with
-        # 'exec: "node": executable file not found in $PATH'.
-        run: apk add --no-cache git build-base nodejs
+        run: apk add --no-cache git build-base
 
       - name: Checkout
         run: |
           git clone https://oauth2:${{ github.token }}@git.nhsoul.fr/${{ github.repository }}.git .
           git checkout ${{ github.sha }}
 
-      # Cache the Go module download cache + build cache. Keyed on go.sum
-      # so a dependency bump invalidates; restore-keys lets a partial
-      # match (same OS, different go.sum) reuse most of the cache.
-      - name: Cache Go modules + build cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            /go/pkg/mod
-            /root/.cache/go-build
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
-
-      # Cache the swag binary keyed on its pinned version. Cheap, but
-      # saves ~30s per run.
-      - name: Cache swag binary
-        id: swag-cache
-        uses: actions/cache@v4
-        with:
-          path: /go/bin/swag
-          key: swag-${{ env.SWAG_VERSION }}
-
-      - name: Install swag (cache miss only)
-        if: steps.swag-cache.outputs.cache-hit != 'true'
-        run: go install github.com/swaggo/swag/cmd/swag@${{ env.SWAG_VERSION }}
-
       - name: Download Go modules
         run: go mod download
 
       - name: Generate swagger docs
-        run: swag init -g main.go -o docs/
+        run: |
+          go install github.com/swaggo/swag/cmd/swag@${{ env.SWAG_VERSION }}
+          swag init -g main.go -o docs/
 
       - name: Vet
         run: go vet ./...
