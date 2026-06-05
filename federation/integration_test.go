@@ -132,9 +132,7 @@ func TestE2E_NewUserAutoProvisioned(t *testing.T) {
 	users := newMockUsers()
 	repo := newMockRepo()
 	state := newMockStateRepo()
-	svc := NewService(repo, "https://auth.example.com", newKey(t))
-	svc.SetStateRepository(state)
-	svc.SetProvisioningDependencies(users, fakeReg{enabled: true}, &fakeInvitations{})
+	svc := newTestService(t, repo, withState(state), withProvisioning(users, fakeReg{enabled: true}, &fakeInvitations{}))
 
 	in := basicCreateInput()
 	iss := fp.server.URL
@@ -190,9 +188,7 @@ func TestE2E_ExistingLinkLogsIn(t *testing.T) {
 
 	repo := newMockRepo()
 	state := newMockStateRepo()
-	svc := NewService(repo, "https://auth.example.com", newKey(t))
-	svc.SetStateRepository(state)
-	svc.SetProvisioningDependencies(users, fakeReg{enabled: true}, &fakeInvitations{})
+	svc := newTestService(t, repo, withState(state), withProvisioning(users, fakeReg{enabled: true}, &fakeInvitations{}))
 
 	in := basicCreateInput()
 	iss := fp.server.URL
@@ -239,9 +235,7 @@ func TestE2E_EmailMatchStagesPendingLink(t *testing.T) {
 
 	repo := newMockRepo()
 	state := newMockStateRepo()
-	svc := NewService(repo, "https://auth.example.com", newKey(t))
-	svc.SetStateRepository(state)
-	svc.SetProvisioningDependencies(users, fakeReg{enabled: true}, &fakeInvitations{})
+	svc := newTestService(t, repo, withState(state), withProvisioning(users, fakeReg{enabled: true}, &fakeInvitations{}))
 
 	in := basicCreateInput()
 	iss := fp.server.URL
@@ -281,9 +275,7 @@ func TestE2E_NonceMismatchRejected(t *testing.T) {
 	users := newMockUsers()
 	repo := newMockRepo()
 	state := newMockStateRepo()
-	svc := NewService(repo, "https://auth.example.com", newKey(t))
-	svc.SetStateRepository(state)
-	svc.SetProvisioningDependencies(users, fakeReg{enabled: true}, &fakeInvitations{})
+	svc := newTestService(t, repo, withState(state), withProvisioning(users, fakeReg{enabled: true}, &fakeInvitations{}))
 
 	in := basicCreateInput()
 	iss := fp.server.URL
@@ -318,9 +310,7 @@ func TestE2E_ReusedStateRejected(t *testing.T) {
 	users := newMockUsers()
 	repo := newMockRepo()
 	state := newMockStateRepo()
-	svc := NewService(repo, "https://auth.example.com", newKey(t))
-	svc.SetStateRepository(state)
-	svc.SetProvisioningDependencies(users, fakeReg{enabled: true}, &fakeInvitations{})
+	svc := newTestService(t, repo, withState(state), withProvisioning(users, fakeReg{enabled: true}, &fakeInvitations{}))
 
 	in := basicCreateInput()
 	iss := fp.server.URL

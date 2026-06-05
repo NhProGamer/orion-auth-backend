@@ -102,6 +102,36 @@ func newKey(t *testing.T) []byte {
 	return k
 }
 
+// optModifier and the withX helpers below let tests construct a
+// federation.Service in one call without re-declaring the full
+// Options literal. Mirrors the pattern in user/invitation tests.
+type optModifier func(*Options)
+
+func withState(s StateRepositoryInterface) optModifier {
+	return func(o *Options) { o.StateRepository = s }
+}
+
+func withProvisioning(u UserProvisioner, r RegistrationGate, i InvitationValidator) optModifier {
+	return func(o *Options) {
+		o.Users = u
+		o.Registration = r
+		o.Invitations = i
+	}
+}
+
+func newTestService(t *testing.T, repo RepositoryInterface, mods ...optModifier) *Service {
+	t.Helper()
+	opts := Options{
+		Repo:              repo,
+		Issuer:            "https://auth.example.com",
+		HMACEncryptionKey: newKey(t),
+	}
+	for _, m := range mods {
+		m(&opts)
+	}
+	return NewService(opts)
+}
+
 func basicCreateInput() CreateProviderInput {
 	iss := "https://accounts.example.com"
 	return CreateProviderInput{
@@ -117,7 +147,7 @@ func basicCreateInput() CreateProviderInput {
 func TestCreateProvider_EncryptsSecret(t *testing.T) {
 	key := newKey(t)
 	repo := newMockRepo()
-	svc := NewService(repo, "https://auth.example.com", key)
+	svc := NewService(Options{Repo: repo, Issuer: "https://auth.example.com", HMACEncryptionKey: key})
 
 	p, err := svc.CreateProvider(basicCreateInput())
 	require.NoError(t, err)
@@ -133,7 +163,7 @@ func TestCreateProvider_EncryptsSecret(t *testing.T) {
 
 func TestCreateProvider_DefaultMapperApplied(t *testing.T) {
 	repo := newMockRepo()
-	svc := NewService(repo, "https://auth.example.com", newKey(t))
+	svc := NewService(Options{Repo: repo, Issuer: "https://auth.example.com", HMACEncryptionKey: newKey(t)})
 
 	p, err := svc.CreateProvider(basicCreateInput())
 	require.NoError(t, err)
@@ -149,7 +179,7 @@ func TestCreateProvider_DefaultMapperApplied(t *testing.T) {
 
 func TestCreateProvider_CustomMapperOverrides(t *testing.T) {
 	repo := newMockRepo()
-	svc := NewService(repo, "https://auth.example.com", newKey(t))
+	svc := NewService(Options{Repo: repo, Issuer: "https://auth.example.com", HMACEncryptionKey: newKey(t)})
 
 	in := basicCreateInput()
 	in.AttributeMapper = json.RawMessage(`{"email":"email_address","name":"full_name"}`)
@@ -165,7 +195,7 @@ func TestCreateProvider_CustomMapperOverrides(t *testing.T) {
 
 func TestCreateProvider_RejectsUnknownMapperKey(t *testing.T) {
 	repo := newMockRepo()
-	svc := NewService(repo, "https://auth.example.com", newKey(t))
+	svc := NewService(Options{Repo: repo, Issuer: "https://auth.example.com", HMACEncryptionKey: newKey(t)})
 
 	in := basicCreateInput()
 	in.AttributeMapper = json.RawMessage(`{"username":"preferred_username"}`)
@@ -176,7 +206,7 @@ func TestCreateProvider_RejectsUnknownMapperKey(t *testing.T) {
 
 func TestCreateProvider_RequiresEncryptionKey(t *testing.T) {
 	repo := newMockRepo()
-	svc := NewService(repo, "https://auth.example.com", nil)
+	svc := NewService(Options{Repo: repo, Issuer: "https://auth.example.com"})
 
 	_, err := svc.CreateProvider(basicCreateInput())
 	require.Error(t, err, "must reject creation when no AES key is configured")
@@ -185,7 +215,7 @@ func TestCreateProvider_RequiresEncryptionKey(t *testing.T) {
 func TestUpdateProvider_ReSealsSecretAndClearsPlaintext(t *testing.T) {
 	key := newKey(t)
 	repo := newMockRepo()
-	svc := NewService(repo, "https://auth.example.com", key)
+	svc := NewService(Options{Repo: repo, Issuer: "https://auth.example.com", HMACEncryptionKey: key})
 
 	p, err := svc.CreateProvider(basicCreateInput())
 	require.NoError(t, err)
@@ -208,7 +238,7 @@ func TestUpdateProvider_ReSealsSecretAndClearsPlaintext(t *testing.T) {
 func TestUpdateProvider_PreservesSecretWhenOmitted(t *testing.T) {
 	key := newKey(t)
 	repo := newMockRepo()
-	svc := NewService(repo, "https://auth.example.com", key)
+	svc := NewService(Options{Repo: repo, Issuer: "https://auth.example.com", HMACEncryptionKey: key})
 
 	p, err := svc.CreateProvider(basicCreateInput())
 	require.NoError(t, err)
@@ -225,7 +255,7 @@ func TestUpdateProvider_PreservesSecretWhenOmitted(t *testing.T) {
 
 func TestRevealSecret_PrefersEncryptedFallsBackToPlaintext(t *testing.T) {
 	key := newKey(t)
-	svc := NewService(newMockRepo(), "https://auth.example.com", key)
+	svc := NewService(Options{Repo: newMockRepo(), Issuer: "https://auth.example.com", HMACEncryptionKey: key})
 
 	// Encrypted only.
 	sealed, err := crypto.EncryptHMACSecret([]byte("from-encrypted"), key)

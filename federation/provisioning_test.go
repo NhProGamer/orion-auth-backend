@@ -111,9 +111,7 @@ func newService(t *testing.T, users UserProvisioner, reg RegistrationGate, inv I
 	t.Helper()
 	repo := newMockRepo()
 	state := newMockStateRepo()
-	svc := NewService(repo, "https://auth.example.com", newKey(t))
-	svc.SetStateRepository(state)
-	svc.SetProvisioningDependencies(users, reg, inv)
+	svc := newTestService(t, repo, withState(state), withProvisioning(users, reg, inv))
 	return svc, repo, state
 }
 

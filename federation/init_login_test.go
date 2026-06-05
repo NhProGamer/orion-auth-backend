@@ -66,8 +66,7 @@ func TestInitSocialLogin_GeneratesStatePKCEAndNonce(t *testing.T) {
 
 	repo := newMockRepo()
 	state := newMockStateRepo()
-	svc := NewService(repo, "https://auth.example.com", newKey(t))
-	svc.SetStateRepository(state)
+	svc := newTestService(t, repo, withState(state))
 
 	in := basicCreateInput()
 	iss := srv.URL
@@ -109,7 +108,7 @@ func TestInitSocialLogin_RequiresStateRepo(t *testing.T) {
 	defer srv.Close()
 
 	repo := newMockRepo()
-	svc := NewService(repo, "https://auth.example.com", newKey(t))
+	svc := NewService(Options{Repo: repo, Issuer: "https://auth.example.com", HMACEncryptionKey: newKey(t)})
 	// Intentionally do not call SetStateRepository.
 
 	in := basicCreateInput()
@@ -123,8 +122,7 @@ func TestInitSocialLogin_RequiresStateRepo(t *testing.T) {
 }
 
 func TestInitSocialLogin_UnknownProviderRejected(t *testing.T) {
-	svc := NewService(newMockRepo(), "https://auth.example.com", newKey(t))
-	svc.SetStateRepository(newMockStateRepo())
+	svc := newTestService(t, newMockRepo(), withState(newMockStateRepo()))
 	_, err := svc.InitSocialLogin(context.Background(), "does-not-exist", InitOptions{})
 	require.Error(t, err)
 }
@@ -135,8 +133,7 @@ func TestInitSocialLogin_PersistsContinuationContext(t *testing.T) {
 
 	repo := newMockRepo()
 	state := newMockStateRepo()
-	svc := NewService(repo, "https://auth.example.com", newKey(t))
-	svc.SetStateRepository(state)
+	svc := newTestService(t, repo, withState(state))
 
 	in := basicCreateInput()
 	iss := srv.URL

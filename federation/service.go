@@ -75,53 +75,63 @@ type Service struct {
 	hmacEncryptionKey      []byte
 }
 
-// NewService constructs the federation service. hmacEncryptionKey is the
-// shared AES-256 key used to seal provider client_secrets at rest (same key
-// used for OAuth client HMAC secrets). When nil, providers cannot be created
-// or updated with a client_secret — operators must rotate via UpdateProvider
-// once the key is configured. stateRepo and builder may be nil for legacy
-// constructions; the real-OAuth code paths verify their presence at use.
-func NewService(repo RepositoryInterface, issuer string, hmacEncryptionKey []byte) *Service {
+// Options is the constructor surface for federation.Service.
+//
+// All non-circular dependencies land here. The provisioning trio
+// (UserProvisioner / RegistrationGate / InvitationValidator) and
+// OAuthResumer used to need post-construction setters because they
+// referenced user/invitation/oauth services that depend on federation
+// in turn — but only OAuthResumer is truly circular. Provisioning
+// deps can now be passed at NewService time once main.go reorders.
+//
+// hmacEncryptionKey is the shared AES-256 key used to seal provider
+// client_secrets at rest (same key used for OAuth client HMAC
+// secrets). When nil, providers cannot be created or updated with a
+// client_secret — operators must rotate via UpdateProvider once the
+// key is configured.
+type Options struct {
+	// Required
+	Repo              RepositoryInterface
+	Issuer            string
+	HMACEncryptionKey []byte
+
+	// Optional — left zero-valued where wiring isn't ready yet
+	// (e.g. legacy test fixtures that don't exercise OAuth callbacks).
+	StateRepository        StateRepositoryInterface
+	Builder                *Builder // tests inject a stub; main.go leaves nil → NewBuilder()
+	Users                  UserProvisioner
+	Registration           RegistrationGate
+	Invitations            InvitationValidator
+	AuthUIBaseURL          string
+	AllowedReturnToOrigins []string
+}
+
+func NewService(o Options) *Service {
+	builder := o.Builder
+	if builder == nil {
+		builder = NewBuilder()
+	}
 	return &Service{
-		repo:              repo,
-		issuer:            issuer,
-		hmacEncryptionKey: hmacEncryptionKey,
-		builder:           NewBuilder(),
+		repo:                   o.Repo,
+		issuer:                 o.Issuer,
+		hmacEncryptionKey:      o.HMACEncryptionKey,
+		stateRepo:              o.StateRepository,
+		builder:                builder,
+		users:                  o.Users,
+		registration:           o.Registration,
+		invitations:            o.Invitations,
+		authUIBase:             strings.TrimRight(o.AuthUIBaseURL, "/"),
+		allowedReturnToOrigins: o.AllowedReturnToOrigins,
 	}
 }
 
-// SetStateRepository wires the ephemeral state store. Required for the real
-// authorize/callback OAuth dance (Phase 4+).
-func (s *Service) SetStateRepository(repo StateRepositoryInterface) {
-	s.stateRepo = repo
-}
-
-// SetBuilder lets tests inject a stub Builder.
-func (s *Service) SetBuilder(b *Builder) {
-	s.builder = b
-}
-
-// SetProvisioningDependencies wires the user provisioning, registration
-// gate, and invitation validator. Required for ProcessCallback to actually
-// log a user in (otherwise it returns the validated claims only).
-func (s *Service) SetProvisioningDependencies(users UserProvisioner, reg RegistrationGate, invs InvitationValidator) {
-	s.users = users
-	s.registration = reg
-	s.invitations = invs
-}
-
-// SetOAuthResumer wires the OrionAuth authorize-flow continuation. Required
-// for federation callbacks to resume an /authorize in progress instead of
-// just dropping the user on a generic post-login page.
+// SetOAuthResumer wires the OrionAuth authorize-flow continuation.
+// Kept as a setter because oauth.Service has federation.Service as a
+// transitive dependency (true circular). Required for federation
+// callbacks to resume an /authorize in progress instead of dropping
+// the user on a generic post-login page.
 func (s *Service) SetOAuthResumer(r OAuthResumer) {
 	s.oauthResumer = r
-}
-
-// SetAuthUIBaseURL configures the SPA origin the federation handler
-// redirects to for interactive flows (link confirmation, onboarding,
-// consent, MFA). Falls back to the issuer URL when empty.
-func (s *Service) SetAuthUIBaseURL(u string) {
-	s.authUIBase = strings.TrimRight(u, "/")
 }
 
 // AuthUIBaseURL returns the configured AuthUI origin (or the issuer
@@ -132,14 +142,6 @@ func (s *Service) AuthUIBaseURL() string {
 		return s.authUIBase
 	}
 	return strings.TrimRight(s.issuer, "/") + "/ui"
-}
-
-// SetAllowedReturnToOrigins declares the extra origins (scheme+host)
-// that the federation link callback may redirect back to in addition
-// to the AuthUI base. Typically wired from CORSConfig.AllowedOrigins
-// so any SPA cleared to call the API can also receive the link result.
-func (s *Service) SetAllowedReturnToOrigins(origins []string) {
-	s.allowedReturnToOrigins = origins
 }
 
 // AllowedReturnToOrigins returns the configured extra origins. Exposed

@@ -151,11 +151,9 @@ func main() {
 	mfaService := mfa.NewService(mfaRepo, hasher)
 	rbacService := rbac.NewService(rbacRepo)
 	auditService := audit.NewService(db)
-	fedService := federation.NewService(fedRepo, cfg.Issuer, hmacEncKey)
-	fedService.SetStateRepository(federation.NewStateRepository(db))
-	fedService.SetAuthUIBaseURL(cfg.AuthUI.BaseURL)
-	fedService.SetAllowedReturnToOrigins(cfg.CORS.AllowedOrigins)
-	fedService.SetOAuthResumer(newFederationOAuthAdapter(oauthService))
+	// invService is constructed BEFORE fedService so the federation
+	// provisioning trio (Users/Registration/Invitations) can be passed
+	// via Options at construction time rather than via a setter.
 	invService := invitation.NewService(invitation.Options{
 		Repo:               invRepo,
 		UserService:        userService,
@@ -170,7 +168,20 @@ func main() {
 	// Truly circular: invService depends on userService (above), userService
 	// needs invService as its EmailVerificationGate. Setter stays.
 	userService.SetEmailVerificationGate(invService)
-	fedService.SetProvisioningDependencies(userService, invService, invService)
+	fedService := federation.NewService(federation.Options{
+		Repo:                   fedRepo,
+		Issuer:                 cfg.Issuer,
+		HMACEncryptionKey:      hmacEncKey,
+		StateRepository:        federation.NewStateRepository(db),
+		AuthUIBaseURL:          cfg.AuthUI.BaseURL,
+		AllowedReturnToOrigins: cfg.CORS.AllowedOrigins,
+		Users:                  userService,
+		Registration:           invService,
+		Invitations:            invService,
+	})
+	// True circular: oauth.Service transitively depends on
+	// federation.Service. Wired after both exist.
+	fedService.SetOAuthResumer(newFederationOAuthAdapter(oauthService))
 
 	// WebAuthn / Passkeys
 	wa, err := webauthn.New(&webauthn.Config{

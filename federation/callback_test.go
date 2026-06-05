@@ -53,15 +53,13 @@ func TestApplyAttributeMapper_MissingClaimsLeaveZeroValues(t *testing.T) {
 }
 
 func TestProcessCallback_RejectsMissingState(t *testing.T) {
-	svc := NewService(newMockRepo(), "https://auth.example.com", newKey(t))
-	svc.SetStateRepository(newMockStateRepo())
+	svc := newTestService(t, newMockRepo(), withState(newMockStateRepo()))
 	_, err := svc.ProcessCallback(context.Background(), "any", "some-code", "unknown-state")
 	require.Error(t, err)
 }
 
 func TestProcessCallback_RejectsMissingCodeOrState(t *testing.T) {
-	svc := NewService(newMockRepo(), "https://auth.example.com", newKey(t))
-	svc.SetStateRepository(newMockStateRepo())
+	svc := newTestService(t, newMockRepo(), withState(newMockStateRepo()))
 	_, err := svc.ProcessCallback(context.Background(), "any", "", "")
 	require.Error(t, err)
 }
@@ -69,8 +67,7 @@ func TestProcessCallback_RejectsMissingCodeOrState(t *testing.T) {
 func TestProcessCallback_RejectsCrossProviderState(t *testing.T) {
 	repo := newMockRepo()
 	state := newMockStateRepo()
-	svc := NewService(repo, "https://auth.example.com", newKey(t))
-	svc.SetStateRepository(state)
+	svc := newTestService(t, repo, withState(state))
 
 	id, _ := uuid.NewV7()
 	other, _ := uuid.NewV7()
