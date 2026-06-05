@@ -8,9 +8,9 @@ import (
 
 // LogFromContext is a convenience method for handler-level audit logging.
 // It extracts IP, UserAgent, and UserID from the gin.Context automatically.
-func (s *Service) LogFromContext(c *gin.Context, action string, metadata map[string]any) {
+func (s *Service) LogFromContext(c *gin.Context, action Action, metadata map[string]any) {
 	entry := LogEntry{
-		Action:    action,
+		Action:    string(action),
 		IPAddress: c.ClientIP(),
 		UserAgent: c.GetHeader("User-Agent"),
 		Metadata:  metadata,

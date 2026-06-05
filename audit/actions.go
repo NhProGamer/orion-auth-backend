@@ -1,5 +1,14 @@
 package audit
 
+// Action is the typed string used as the discriminator for an audit
+// event. Function signatures take Action (not bare string) so a
+// typo'd literal stops at the compiler. The untyped string constants
+// below auto-convert when passed to an Action-typed parameter.
+type Action string
+
+// String makes Action printable / formattable like the underlying string.
+func (a Action) String() string { return string(a) }
+
 // User actions
 const (
 	ActionUserRegistered  = "user.registered"
