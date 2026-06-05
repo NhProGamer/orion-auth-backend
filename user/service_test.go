@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"orion-auth-backend/email"
 	"orion-auth-backend/model"
 	"orion-auth-backend/testutil"
 )
@@ -147,10 +148,30 @@ func (m *mockEmailSender) SendAccountDeletionEmail(_, _ string) error    { retur
 // Helpers
 // ---------------------------------------------------------------------------
 
-func newTestService(repo *mockUserRepo) *Service {
-	hasher := testutil.FastHasher()
-	cfg := testutil.TestAuthConfig()
-	return NewService(repo, hasher, cfg)
+// optModifier tweaks the Options that newTestService passes to
+// NewService. Lets each test declare just the deps it cares about
+// (email sender, action-token key, …) without dragging a full
+// Options literal into every body.
+type optModifier func(*Options)
+
+func withEmailSender(s email.Sender) optModifier {
+	return func(o *Options) { o.EmailSender = s }
+}
+
+func withActionTokenKey() optModifier {
+	return func(o *Options) { o.ActionTokenSigningKey = testActionTokenKey() }
+}
+
+func newTestService(repo *mockUserRepo, mods ...optModifier) *Service {
+	o := Options{
+		Repo:   repo,
+		Hasher: testutil.FastHasher(),
+		Cfg:    testutil.TestAuthConfig(),
+	}
+	for _, m := range mods {
+		m(&o)
+	}
+	return NewService(o)
 }
 
 // ---------------------------------------------------------------------------
@@ -163,7 +184,7 @@ func TestRegister_Success(t *testing.T) {
 		findByEmailFn: func(email string) (*model.User, error) { return nil, nil },
 		createFn:      func(user *model.User) error { return nil },
 	}
-	svc := NewService(repo, hasher, testutil.TestAuthConfig())
+	svc := NewService(Options{Repo: repo, Hasher: hasher, Cfg: testutil.TestAuthConfig()})
 
 	user, err := svc.Register(RegisterInput{
 		Email:    "Alice@Example.COM",
@@ -248,7 +269,7 @@ func TestAuthenticate_Success(t *testing.T) {
 			return nil
 		},
 	}
-	svc := NewService(repo, hasher, testutil.TestAuthConfig())
+	svc := NewService(Options{Repo: repo, Hasher: hasher, Cfg: testutil.TestAuthConfig()})
 
 	user, err := svc.Authenticate(LoginInput{
 		Email:    "test@example.com",
@@ -276,7 +297,7 @@ func TestAuthenticate_EmailNotVerified_GateOn(t *testing.T) {
 		findByEmailFn:  func(_ string) (*model.User, error) { return testUser, nil },
 		updateFieldsFn: func(_ uuid.UUID, _ map[string]any) error { return nil },
 	}
-	svc := NewService(repo, hasher, testutil.TestAuthConfig())
+	svc := NewService(Options{Repo: repo, Hasher: hasher, Cfg: testutil.TestAuthConfig()})
 	// Default gate: required (nil resolver → secure-by-default true)
 
 	_, err := svc.Authenticate(LoginInput{Email: "test@example.com", Password: "password123"})
@@ -293,7 +314,7 @@ func TestAuthenticate_EmailNotVerified_GateOff(t *testing.T) {
 		findByEmailFn:  func(_ string) (*model.User, error) { return testUser, nil },
 		updateFieldsFn: func(_ uuid.UUID, _ map[string]any) error { return nil },
 	}
-	svc := NewService(repo, hasher, testutil.TestAuthConfig())
+	svc := NewService(Options{Repo: repo, Hasher: hasher, Cfg: testutil.TestAuthConfig()})
 	svc.SetEmailVerificationGate(stubVerifyGate{required: false})
 
 	u, err := svc.Authenticate(LoginInput{Email: "test@example.com", Password: "password123"})
@@ -324,7 +345,7 @@ func TestAuthenticate_AccountDeactivated(t *testing.T) {
 	repo := &mockUserRepo{
 		findByEmailFn: func(email string) (*model.User, error) { return testUser, nil },
 	}
-	svc := NewService(repo, hasher, testutil.TestAuthConfig())
+	svc := NewService(Options{Repo: repo, Hasher: hasher, Cfg: testutil.TestAuthConfig()})
 
 	_, err := svc.Authenticate(LoginInput{
 		Email:    "test@example.com",
@@ -344,7 +365,7 @@ func TestAuthenticate_AccountLocked(t *testing.T) {
 	repo := &mockUserRepo{
 		findByEmailFn: func(email string) (*model.User, error) { return testUser, nil },
 	}
-	svc := NewService(repo, hasher, testutil.TestAuthConfig())
+	svc := NewService(Options{Repo: repo, Hasher: hasher, Cfg: testutil.TestAuthConfig()})
 
 	_, err := svc.Authenticate(LoginInput{
 		Email:    "test@example.com",
@@ -368,7 +389,7 @@ func TestAuthenticate_WrongPassword_IncrementsFailedAttempts(t *testing.T) {
 			return nil
 		},
 	}
-	svc := NewService(repo, hasher, testutil.TestAuthConfig())
+	svc := NewService(Options{Repo: repo, Hasher: hasher, Cfg: testutil.TestAuthConfig()})
 
 	_, err := svc.Authenticate(LoginInput{
 		Email:    "test@example.com",
@@ -397,7 +418,7 @@ func TestAuthenticate_WrongPassword_LocksAfterMaxAttempts(t *testing.T) {
 			return nil
 		},
 	}
-	svc := NewService(repo, hasher, testutil.TestAuthConfig())
+	svc := NewService(Options{Repo: repo, Hasher: hasher, Cfg: testutil.TestAuthConfig()})
 
 	_, err := svc.Authenticate(LoginInput{
 		Email:    "test@example.com",
@@ -431,7 +452,7 @@ func TestChangePassword_Success(t *testing.T) {
 			return nil
 		},
 	}
-	svc := NewService(repo, hasher, testutil.TestAuthConfig())
+	svc := NewService(Options{Repo: repo, Hasher: hasher, Cfg: testutil.TestAuthConfig()})
 
 	err := svc.ChangePassword(testUser.ID, ChangePasswordInput{
 		CurrentPassword: "oldpassword",
@@ -455,7 +476,7 @@ func TestChangePassword_WrongCurrentPassword(t *testing.T) {
 	repo := &mockUserRepo{
 		findByIDFn: func(id uuid.UUID) (*model.User, error) { return testUser, nil },
 	}
-	svc := NewService(repo, hasher, testutil.TestAuthConfig())
+	svc := NewService(Options{Repo: repo, Hasher: hasher, Cfg: testutil.TestAuthConfig()})
 
 	err := svc.ChangePassword(testUser.ID, ChangePasswordInput{
 		CurrentPassword: "wrongpassword",
@@ -473,7 +494,7 @@ func TestChangePassword_NewPasswordTooShort(t *testing.T) {
 	repo := &mockUserRepo{
 		findByIDFn: func(id uuid.UUID) (*model.User, error) { return testUser, nil },
 	}
-	svc := NewService(repo, hasher, testutil.TestAuthConfig())
+	svc := NewService(Options{Repo: repo, Hasher: hasher, Cfg: testutil.TestAuthConfig()})
 
 	err := svc.ChangePassword(testUser.ID, ChangePasswordInput{
 		CurrentPassword: "oldpassword",
@@ -520,9 +541,7 @@ func TestSendVerificationEmail_Success(t *testing.T) {
 			return nil
 		},
 	}
-	svc := NewService(repo, hasher, testutil.TestAuthConfig())
-	svc.SetEmailSender(emailMock)
-	svc.SetActionTokenSigningKey(testActionTokenKey())
+	svc := newTestService(repo, withEmailSender(emailMock), withActionTokenKey())
 
 	err := svc.SendVerificationEmail(testUser.ID, nil)
 
@@ -547,8 +566,7 @@ func TestSendVerificationEmail_NoEmailSender(t *testing.T) {
 			return nil
 		},
 	}
-	svc := NewService(repo, hasher, testutil.TestAuthConfig())
-	svc.SetActionTokenSigningKey(testActionTokenKey())
+	svc := newTestService(repo, withActionTokenKey())
 
 	err := svc.SendVerificationEmail(testUser.ID, nil)
 
@@ -585,14 +603,15 @@ func TestResendVerificationEmail_FreshUser(t *testing.T) {
 		findByIDFn:     func(_ uuid.UUID) (*model.User, error) { return testUser, nil },
 		updateFieldsFn: func(_ uuid.UUID, _ map[string]any) error { return nil },
 	}
-	svc := NewService(repo, hasher, testutil.TestAuthConfig())
-	svc.SetEmailSender(&mockEmailSender{
-		sendVerificationEmailFn: func(_, _ string) error {
-			emailSent = true
-			return nil
-		},
-	})
-	svc.SetActionTokenSigningKey(testActionTokenKey())
+	svc := newTestService(repo,
+		withEmailSender(&mockEmailSender{
+			sendVerificationEmailFn: func(_, _ string) error {
+				emailSent = true
+				return nil
+			},
+		}),
+		withActionTokenKey(),
+	)
 
 	require.NoError(t, svc.ResendVerificationEmail("test@example.com", nil))
 	assert.True(t, emailSent)
@@ -602,8 +621,7 @@ func TestResendVerificationEmail_UnknownEmail(t *testing.T) {
 	repo := &mockUserRepo{
 		findByEmailFn: func(_ string) (*model.User, error) { return nil, nil },
 	}
-	svc := newTestService(repo)
-	svc.SetActionTokenSigningKey(testActionTokenKey())
+	svc := newTestService(repo, withActionTokenKey())
 
 	// Anti-enumeration: silent success.
 	require.NoError(t, svc.ResendVerificationEmail("nobody@example.com", nil))
@@ -618,14 +636,15 @@ func TestResendVerificationEmail_AlreadyVerified(t *testing.T) {
 	repo := &mockUserRepo{
 		findByEmailFn: func(_ string) (*model.User, error) { return verified, nil },
 	}
-	svc := NewService(repo, hasher, testutil.TestAuthConfig())
-	svc.SetEmailSender(&mockEmailSender{
-		sendVerificationEmailFn: func(_, _ string) error {
-			emailSent = true
-			return nil
-		},
-	})
-	svc.SetActionTokenSigningKey(testActionTokenKey())
+	svc := newTestService(repo,
+		withEmailSender(&mockEmailSender{
+			sendVerificationEmailFn: func(_, _ string) error {
+				emailSent = true
+				return nil
+			},
+		}),
+		withActionTokenKey(),
+	)
 
 	require.NoError(t, svc.ResendVerificationEmail("test@example.com", nil))
 	assert.False(t, emailSent, "must not send to already verified user")
@@ -659,23 +678,22 @@ func TestConsumeVerificationToken_RoundTrip(t *testing.T) {
 		},
 	}
 
-	svc := NewService(repo, hasher, testutil.TestAuthConfig())
-	svc.SetEmailSender(&mockEmailSender{})
-	svc.SetActionTokenSigningKey(testActionTokenKey())
+	svc := newTestService(repo, withEmailSender(&mockEmailSender{}), withActionTokenKey())
 
 	rid := uuid.New()
 	require.NoError(t, svc.SendVerificationEmail(testUser.ID, &rid))
 
 	// Capture the JWT emitted by the sender.
 	var emittedToken string
-	svc2 := NewService(repo, hasher, testutil.TestAuthConfig())
-	svc2.SetActionTokenSigningKey(testActionTokenKey())
-	svc2.SetEmailSender(&mockEmailSender{
-		sendVerificationEmailFn: func(_, token string) error {
-			emittedToken = token
-			return nil
-		},
-	})
+	svc2 := newTestService(repo,
+		withEmailSender(&mockEmailSender{
+			sendVerificationEmailFn: func(_, token string) error {
+				emittedToken = token
+				return nil
+			},
+		}),
+		withActionTokenKey(),
+	)
 	require.NoError(t, svc2.SendVerificationEmail(testUser.ID, &rid))
 
 	u, gotRID, err := svc2.ConsumeVerificationToken(emittedToken)
@@ -688,8 +706,7 @@ func TestConsumeVerificationToken_RoundTrip(t *testing.T) {
 }
 
 func TestConsumeVerificationToken_InvalidToken(t *testing.T) {
-	svc := newTestService(&mockUserRepo{})
-	svc.SetActionTokenSigningKey(testActionTokenKey())
+	svc := newTestService(&mockUserRepo{}, withActionTokenKey())
 
 	_, _, err := svc.ConsumeVerificationToken("not-a-jwt")
 	require.Error(t, err)
@@ -729,8 +746,7 @@ func TestForgotPassword_ExistingUser(t *testing.T) {
 			return nil
 		},
 	}
-	svc := NewService(repo, hasher, testutil.TestAuthConfig())
-	svc.SetEmailSender(emailMock)
+	svc := newTestService(repo, withEmailSender(emailMock))
 
 	err := svc.ForgotPassword(ForgotPasswordInput{Email: "test@example.com"})
 
@@ -779,8 +795,7 @@ func TestAdminTriggerPasswordReset_Success(t *testing.T) {
 			return nil
 		},
 	}
-	svc := NewService(repo, hasher, testutil.TestAuthConfig())
-	svc.SetEmailSender(emailMock)
+	svc := newTestService(repo, withEmailSender(emailMock))
 
 	err := svc.AdminTriggerPasswordReset(testUser.ID)
 
@@ -822,7 +837,7 @@ func TestResetPassword_Success(t *testing.T) {
 			return nil
 		},
 	}
-	svc := NewService(repo, hasher, testutil.TestAuthConfig())
+	svc := NewService(Options{Repo: repo, Hasher: hasher, Cfg: testutil.TestAuthConfig()})
 
 	err := svc.ResetPassword(ResetPasswordInput{
 		Token:       "valid-reset-token",

@@ -303,7 +303,7 @@ func (m *mockEmailSender) SendAccountDeletionEmail(_, _ string) error    { retur
 // --- Helpers ---
 
 func newTestService(invRepo *mockInvitationRepo, userRepo *mockUserRepo, rbacRepo *mockRbacRepo, emailSender *mockEmailSender) *Service {
-	userSvc := user.NewService(userRepo, testutil.FastHasher(), testutil.TestAuthConfig())
+	userSvc := user.NewService(user.Options{Repo: userRepo, Hasher: testutil.FastHasher(), Cfg: testutil.TestAuthConfig()})
 	rbacSvc := rbac.NewService(rbacRepo)
 	var sender *mockEmailSender
 	if emailSender != nil {

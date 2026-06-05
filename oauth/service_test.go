@@ -373,7 +373,7 @@ func newTestService(oauthRepo *mockOAuthRepo, userRepo *mockUserRepo, sessionRep
 	hasher := testutil.FastHasher()
 	cfg := testutil.TestAuthConfig()
 
-	userSvc := user.NewService(userRepo, hasher, cfg)
+	userSvc := user.NewService(user.Options{Repo: userRepo, Hasher: hasher, Cfg: cfg})
 	sessionSvc := session.NewService(sessionRepo, cfg)
 
 	return NewService(oauthRepo, userSvc, sessionSvc, hasher, cfg)

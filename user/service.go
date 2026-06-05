@@ -45,47 +45,63 @@ type Service struct {
 	emailVerifyGate       EmailVerificationGate
 }
 
-func NewService(repo RepositoryInterface, hasher *crypto.Argon2Hasher, cfg config.AuthConfig) *Service {
-	return &Service{repo: repo, hasher: hasher, cfg: cfg}
+// Options bundles every dependency a user.Service needs at
+// construction time. Required fields are documented; optional fields
+// disable a feature when zero-valued (e.g. an unset EmailSender skips
+// verification emails). Passing everything via Options gives a single
+// compile-time-visible struct rather than a chain of post-construction
+// Set*() calls — a forgotten field is the wrong shape, not a
+// runtime panic.
+//
+// Two dependencies remain on dedicated setters because they cannot be
+// supplied at construction time:
+//   - SetEmailVerificationGate: the invitation.Service depends on
+//     user.Service, so the gate is wired AFTER both exist (real
+//     circular dependency).
+//   - SetDefaultRole: deliberately deferred until AFTER seedDefaults
+//     so the seeded admin user doesn't pick up the default user role
+//     on top of admin.
+type Options struct {
+	// Required
+	Repo   RepositoryInterface
+	Hasher *crypto.Argon2Hasher
+	Cfg    config.AuthConfig
+
+	// Optional — leaving them zero-valued disables the corresponding
+	// code path with the documented secure default.
+	EmailSender           email.Sender
+	RegFormProvider       RegFormProvider
+	PasswordValidator     *password.Validator
+	ActionTokenSigningKey []byte
 }
 
-// SetEmailSender sets the email sender (called after init to allow optional email).
-func (s *Service) SetEmailSender(sender email.Sender) {
-	s.emailSender = sender
+func NewService(o Options) *Service {
+	return &Service{
+		repo:                  o.Repo,
+		hasher:                o.Hasher,
+		cfg:                   o.Cfg,
+		emailSender:           o.EmailSender,
+		regForm:               o.RegFormProvider,
+		passwordValidator:     o.PasswordValidator,
+		actionTokenSigningKey: o.ActionTokenSigningKey,
+	}
 }
 
-// SetDefaultRole wires the role auto-assigned on registration. If roleID is
-// uuid.Nil, the feature is disabled.
+// SetEmailVerificationGate wires the invitation-backed admin gate.
+// Kept as a setter because invitation.Service has user.Service as a
+// dependency — passing it at NewService time would form a cycle.
+// When unset, secure-by-default behaviour requires email verification.
+func (s *Service) SetEmailVerificationGate(g EmailVerificationGate) {
+	s.emailVerifyGate = g
+}
+
+// SetDefaultRole wires the role auto-assigned on registration. Kept
+// as a setter so it can be called AFTER seedDefaults: the seeded
+// admin must not pick up the default user role on top of admin.
+// Passing uuid.Nil + nil disables the feature.
 func (s *Service) SetDefaultRole(roleID uuid.UUID, assigner RoleAssigner) {
 	s.defaultRoleID = roleID
 	s.roleAssigner = assigner
-}
-
-// SetRegFormProvider wires the admin-configurable registration-fields
-// schema. When nil, Register and CreateFromFederation behave as before
-// (no validation or storage of extra_fields).
-func (s *Service) SetRegFormProvider(p RegFormProvider) {
-	s.regForm = p
-}
-
-// SetPasswordValidator wires the admin-configurable password policy
-// validator. When nil, validatePassword falls back to a default policy
-// (kept for tests and bootstrap before the password package is wired).
-func (s *Service) SetPasswordValidator(v *password.Validator) {
-	s.passwordValidator = v
-}
-
-// SetActionTokenSigningKey wires the HMAC key used to sign verify-email
-// action tokens. Without it, SendVerificationEmail returns an error.
-func (s *Service) SetActionTokenSigningKey(key []byte) {
-	s.actionTokenSigningKey = key
-}
-
-// SetEmailVerificationGate wires the admin-toggleable check used by
-// Authenticate. When unset, the secure-by-default behaviour is to require
-// email verification.
-func (s *Service) SetEmailVerificationGate(g EmailVerificationGate) {
-	s.emailVerifyGate = g
 }
 
 func (s *Service) requiresEmailVerification() bool {

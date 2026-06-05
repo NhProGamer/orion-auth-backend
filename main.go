@@ -125,13 +125,26 @@ func main() {
 	passkeyRepo := passkey.NewRepository(db)
 	regFormRepo := regform.NewRepository(db)
 
-	// Services
-	userService := user.NewService(userRepo, hasher, cfg.Auth)
-	userService.SetEmailSender(emailSender)
-	sessionService := session.NewService(sessionRepo, cfg.Auth)
+	// Hoist deps that user.Service needs at construction time so we
+	// can pass them via Options instead of post-construction setters.
+	// invRepo is shared between invitation + password services.
 	hmacEncKey := loadHMACEncryptionKey(cfg.Auth.HMACSecretEncryptionKey)
 	actionTokenKey := loadActionTokenSigningKey(cfg.Auth.ActionTokenSigningKey)
-	userService.SetActionTokenSigningKey(actionTokenKey)
+	invRepo := invitation.NewRepository(db)
+	regFormService := regform.NewService(regFormRepo)
+	passwordService := password.NewService(invRepo)
+
+	// Services
+	userService := user.NewService(user.Options{
+		Repo:                  userRepo,
+		Hasher:                hasher,
+		Cfg:                   cfg.Auth,
+		EmailSender:           emailSender,
+		RegFormProvider:       regFormService,
+		PasswordValidator:     password.NewValidator(passwordService),
+		ActionTokenSigningKey: actionTokenKey,
+	})
+	sessionService := session.NewService(sessionRepo, cfg.Auth)
 	clientService := client.NewService(clientRepo, hasher, hmacEncKey)
 	oauthService := oauth.NewService(oauthRepo, userService, sessionService, hasher, cfg.Auth)
 	oidcService := oidc.NewService(db, userService, cfg.Issuer, cfg.PairwiseSalt)
@@ -143,21 +156,14 @@ func main() {
 	fedService.SetAuthUIBaseURL(cfg.AuthUI.BaseURL)
 	fedService.SetAllowedReturnToOrigins(cfg.CORS.AllowedOrigins)
 	fedService.SetOAuthResumer(newFederationOAuthAdapter(oauthService))
-	invRepo := invitation.NewRepository(db)
 	invService := invitation.NewService(invRepo, userService, rbacService, emailSender, cfg.Issuer)
 	invService.SetAllowedOrigins(cfg.CORS.AllowedOrigins)
 	invService.SetSessionTTLDefaults(cfg.Auth.SessionTTL, cfg.Auth.SessionExtendedTTL)
 	sessionService.SetTTLResolver(invService)
+	// Truly circular: invService depends on userService (above), userService
+	// needs invService as its EmailVerificationGate. Setter stays.
 	userService.SetEmailVerificationGate(invService)
 	fedService.SetProvisioningDependencies(userService, invService, invService)
-	regFormService := regform.NewService(regFormRepo)
-	userService.SetRegFormProvider(regFormService)
-
-	// Password policy (admin-configurable). Reads/writes the
-	// settings.password_policy row; reuses the invitation repository
-	// which already owns the settings table helpers.
-	passwordService := password.NewService(invRepo)
-	userService.SetPasswordValidator(password.NewValidator(passwordService))
 
 	// WebAuthn / Passkeys
 	wa, err := webauthn.New(&webauthn.Config{
