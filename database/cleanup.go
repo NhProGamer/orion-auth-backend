@@ -45,6 +45,10 @@ func runCleanup(db *gorm.DB) {
 		{"revoked_jtis", "DELETE FROM revoked_jtis WHERE expires_at < ?", []any{now}},
 		// Hard-delete users whose grace period has elapsed.
 		{"users_purged", "DELETE FROM users WHERE deletion_purge_after IS NOT NULL AND deletion_purge_after < ?", []any{now}},
+		// Outbox retention: keep sent/failed rows for 7 days for
+		// forensics, then drop. Pending rows are never purged here;
+		// MaxAttempts controls when they stop retrying.
+		{"outbound_emails_purged", "DELETE FROM outbound_emails WHERE status IN ('sent','failed') AND created_at < ?", []any{now.Add(-7 * 24 * time.Hour)}},
 	}
 
 	for _, q := range queries {

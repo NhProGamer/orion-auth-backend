@@ -92,7 +92,19 @@ func main() {
 
 	// Dependencies
 	hasher := crypto.NewArgon2Hasher(cfg.Argon2)
-	emailSender := email.NewSMTPSender(cfg.SMTP, cfg.Issuer)
+
+	// Email outbox: every Send* call enqueues a row in outbound_emails
+	// and a background worker drains the queue via SMTP with retries.
+	// A blip in the SMTP path no longer drops verification or
+	// password-reset emails — they sit in the outbox until delivery
+	// succeeds or MaxAttempts is reached.
+	smtpDeliverer := email.NewSMTPSender(cfg.SMTP, cfg.Issuer)
+	outboxRepo := email.NewOutboxRepository(db)
+	emailSender := email.NewOutboxSender(outboxRepo, cfg.Issuer)
+	emailWorker := email.NewOutboxWorker(outboxRepo, smtpDeliverer)
+	workerCtx, stopWorker := context.WithCancel(context.Background())
+	defer stopWorker()
+	go emailWorker.Start(workerCtx)
 
 	// Rate limiter: 20 burst, 5 req/s sustained for auth endpoints
 	authRateLimiter := middleware.NewRateLimiter(20, 5)
@@ -338,6 +350,7 @@ func main() {
 	<-quit
 
 	slog.Info("shutting down server...")
+	stopWorker()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
