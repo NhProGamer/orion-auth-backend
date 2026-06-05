@@ -36,6 +36,17 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: gofmt
+        # Fail the build on unformatted files. Prevents future
+        # drift now that c707ffe normalised the whole tree.
+        run: |
+          dirty=$(gofmt -l .)
+          if [ -n "$dirty" ]; then
+            echo "gofmt: the following files need formatting:"
+            echo "$dirty"
+            exit 1
+          fi
+
       - name: Test
         run: go test ./... -race -coverprofile=coverage.out -covermode=atomic
 
