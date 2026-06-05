@@ -11,7 +11,7 @@ const (
 	ActionPasswordReset   = "user.password_reset"
 
 	ActionAdminPasswordResetInitiated = "admin.password_reset_initiated"
-	ActionEmailVerified   = "user.email_verified"
+	ActionEmailVerified               = "user.email_verified"
 )
 
 // Session actions

@@ -23,11 +23,11 @@ func mockOIDCServer(t *testing.T) *httptest.Server {
 	srv := httptest.NewServer(mux)
 
 	disco := map[string]any{
-		"issuer":                 srv.URL,
-		"authorization_endpoint": srv.URL + "/authorize",
-		"token_endpoint":         srv.URL + "/token",
-		"userinfo_endpoint":      srv.URL + "/userinfo",
-		"jwks_uri":               srv.URL + "/jwks",
+		"issuer":                                srv.URL,
+		"authorization_endpoint":                srv.URL + "/authorize",
+		"token_endpoint":                        srv.URL + "/token",
+		"userinfo_endpoint":                     srv.URL + "/userinfo",
+		"jwks_uri":                              srv.URL + "/jwks",
 		"id_token_signing_alg_values_supported": []string{"RS256"},
 		"response_types_supported":              []string{"code"},
 		"subject_types_supported":               []string{"public"},

@@ -581,8 +581,8 @@ func TestResendVerificationEmail_FreshUser(t *testing.T) {
 
 	var emailSent bool
 	repo := &mockUserRepo{
-		findByEmailFn: func(_ string) (*model.User, error) { return testUser, nil },
-		findByIDFn:    func(_ uuid.UUID) (*model.User, error) { return testUser, nil },
+		findByEmailFn:  func(_ string) (*model.User, error) { return testUser, nil },
+		findByIDFn:     func(_ uuid.UUID) (*model.User, error) { return testUser, nil },
 		updateFieldsFn: func(_ uuid.UUID, _ map[string]any) error { return nil },
 	}
 	svc := NewService(repo, hasher, testutil.TestAuthConfig())

@@ -122,4 +122,3 @@ func (g *PolicyGate) Middleware(action string) gin.HandlerFunc {
 		c.Next()
 	}
 }
-

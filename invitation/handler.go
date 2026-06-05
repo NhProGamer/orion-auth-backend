@@ -88,7 +88,7 @@ func (h *Handler) LookupInvitation(c *gin.Context) {
 // @Router       /api/v1/auth/settings [get]
 func (h *Handler) PublicSettings(c *gin.Context) {
 	resp := gin.H{
-		"registration_enabled":                h.service.IsRegistrationEnabled(),
+		"registration_enabled":               h.service.IsRegistrationEnabled(),
 		"default_post_register_redirect_url": h.service.GetPostRegisterRedirectURL(),
 	}
 
@@ -247,15 +247,15 @@ func (h *Handler) GetSettings(c *gin.Context) {
 }
 
 type UpdateSettingsInput struct {
-	RegistrationEnabled                    *bool   `json:"registration_enabled"`
-	InvitationsDefaultRole                 *string `json:"invitations_default_role"`
-	DefaultAccessTokenTTL                  *int    `json:"default_access_token_ttl"`
-	DefaultRefreshTokenTTL                 *int    `json:"default_refresh_token_ttl"`
-	DefaultIDTokenTTL                      *int    `json:"default_id_token_ttl"`
-	DefaultPostRegisterRedirectURL         *string `json:"default_post_register_redirect_url"`
-	DefaultSessionTTL                      *int    `json:"default_session_ttl"`
-	DefaultSessionExtendedTTL              *int    `json:"default_session_extended_ttl"`
-	RegistrationEmailVerificationRequired  *bool   `json:"registration_email_verification_required"`
+	RegistrationEnabled                   *bool   `json:"registration_enabled"`
+	InvitationsDefaultRole                *string `json:"invitations_default_role"`
+	DefaultAccessTokenTTL                 *int    `json:"default_access_token_ttl"`
+	DefaultRefreshTokenTTL                *int    `json:"default_refresh_token_ttl"`
+	DefaultIDTokenTTL                     *int    `json:"default_id_token_ttl"`
+	DefaultPostRegisterRedirectURL        *string `json:"default_post_register_redirect_url"`
+	DefaultSessionTTL                     *int    `json:"default_session_ttl"`
+	DefaultSessionExtendedTTL             *int    `json:"default_session_extended_ttl"`
+	RegistrationEmailVerificationRequired *bool   `json:"registration_email_verification_required"`
 }
 
 // UpdateSettings godoc

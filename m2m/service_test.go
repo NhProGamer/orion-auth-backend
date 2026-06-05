@@ -15,14 +15,14 @@ import (
 // --- mocks ---
 
 type mockUsers struct {
-	users        map[uuid.UUID]*model.User
-	registerArgs *user.RegisterInput
+	users         map[uuid.UUID]*model.User
+	registerArgs  *user.RegisterInput
 	registerRoles []uuid.UUID
-	registerErr  error
-	updateErr    error
-	setPwdCalls  []setPwdCall
-	deleteErr    error
-	unlocked     []uuid.UUID
+	registerErr   error
+	updateErr     error
+	setPwdCalls   []setPwdCall
+	deleteErr     error
+	unlocked      []uuid.UUID
 }
 
 type setPwdCall struct {

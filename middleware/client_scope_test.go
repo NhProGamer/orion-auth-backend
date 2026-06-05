@@ -26,13 +26,13 @@ func TestContainsScope(t *testing.T) {
 
 func TestParseBearer(t *testing.T) {
 	cases := map[string]string{
-		"":                   "",
-		"Bearer ":            "",
-		"Bearer abc.def":     "abc.def",
-		"bearer abc":         "abc",
-		"BEARER xyz":         "xyz",
-		"Basic abc":          "",
-		"Bearer\tabc":        "",   // single space required
+		"":                    "",
+		"Bearer ":             "",
+		"Bearer abc.def":      "abc.def",
+		"bearer abc":          "abc",
+		"BEARER xyz":          "xyz",
+		"Basic abc":           "",
+		"Bearer\tabc":         "", // single space required
 		"Bearer  doublespace": "", // SplitN("Bearer  doublespace", " ", 2)[1] = " doublespace" — counts as malformed? actually it's not empty, returns " doublespace"
 	}
 	// Drop the problematic case from the map and assert it separately because
@@ -55,10 +55,10 @@ func TestParseBearer(t *testing.T) {
 // literal returned by GORM.
 func TestParseScopesPostgresLiteral(t *testing.T) {
 	cases := map[string][]string{
-		"":                            nil,
-		"{}":                          nil,
-		"{openid}":                    {"openid"},
-		"{openid,profile,email}":      {"openid", "profile", "email"},
+		"":                                 nil,
+		"{}":                               nil,
+		"{openid}":                         {"openid"},
+		"{openid,profile,email}":           {"openid", "profile", "email"},
 		"{m2m:users:read,m2m:users:write}": {"m2m:users:read", "m2m:users:write"},
 	}
 	for in, want := range cases {

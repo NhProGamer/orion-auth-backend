@@ -20,8 +20,8 @@ func TestSwaggerOnlyMountedInDebug(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	cases := []struct {
-		mode      string
-		wantCode  int
+		mode     string
+		wantCode int
 	}{
 		{"debug", http.StatusOK},
 		{"release", http.StatusNotFound},

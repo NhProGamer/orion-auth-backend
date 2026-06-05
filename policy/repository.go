@@ -81,12 +81,12 @@ type StatsBucket struct {
 }
 
 type Stats struct {
-	WindowFrom    time.Time         `json:"window_from"`
-	WindowTo      time.Time         `json:"window_to"`
-	TotalDenies   int64             `json:"total_denies"`
-	ByPolicyName  []StatsBucket     `json:"by_policy_name"`
-	ByPolicyType  []StatsBucket     `json:"by_policy_type"`
-	RecentDenies  []model.AuditLog  `json:"recent_denies"`
+	WindowFrom   time.Time        `json:"window_from"`
+	WindowTo     time.Time        `json:"window_to"`
+	TotalDenies  int64            `json:"total_denies"`
+	ByPolicyName []StatsBucket    `json:"by_policy_name"`
+	ByPolicyType []StatsBucket    `json:"by_policy_type"`
+	RecentDenies []model.AuditLog `json:"recent_denies"`
 }
 
 // Stats aggregates policy denial audit logs in the given window.

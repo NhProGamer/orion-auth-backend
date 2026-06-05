@@ -43,15 +43,15 @@ type CreateInput struct {
 	RequestURIs     []string `json:"request_uris"`
 	JWKSUri         *string  `json:"jwks_uri,omitempty"`
 	// Logout (OIDC RP-Initiated / Front-Channel / Back-Channel Logout 1.0)
-	PostLogoutRedirectURIs              []string `json:"post_logout_redirect_uris"`
-	BackchannelLogoutURI                *string  `json:"backchannel_logout_uri,omitempty"`
-	BackchannelLogoutSessionRequired    *bool    `json:"backchannel_logout_session_required,omitempty"`
-	FrontchannelLogoutURI               *string  `json:"frontchannel_logout_uri,omitempty"`
-	FrontchannelLogoutSessionRequired   *bool    `json:"frontchannel_logout_session_required,omitempty"`
+	PostLogoutRedirectURIs            []string `json:"post_logout_redirect_uris"`
+	BackchannelLogoutURI              *string  `json:"backchannel_logout_uri,omitempty"`
+	BackchannelLogoutSessionRequired  *bool    `json:"backchannel_logout_session_required,omitempty"`
+	FrontchannelLogoutURI             *string  `json:"frontchannel_logout_uri,omitempty"`
+	FrontchannelLogoutSessionRequired *bool    `json:"frontchannel_logout_session_required,omitempty"`
 	// OIDC subject + signed UserInfo
-	SubjectType                  *string `json:"subject_type,omitempty"`
-	SectorIdentifierURI          *string `json:"sector_identifier_uri,omitempty"`
-	UserinfoSignedResponseAlg    *string `json:"userinfo_signed_response_alg,omitempty"`
+	SubjectType               *string `json:"subject_type,omitempty"`
+	SectorIdentifierURI       *string `json:"sector_identifier_uri,omitempty"`
+	UserinfoSignedResponseAlg *string `json:"userinfo_signed_response_alg,omitempty"`
 	// JWE encryption (OIDC Core §10.2 / §5.3.2)
 	IDTokenEncryptedResponseAlg  *string `json:"id_token_encrypted_response_alg,omitempty"`
 	IDTokenEncryptedResponseEnc  *string `json:"id_token_encrypted_response_enc,omitempty"`
@@ -60,33 +60,33 @@ type CreateInput struct {
 }
 
 type UpdateInput struct {
-	Name            *string  `json:"name"`
-	Description     *string  `json:"description"`
-	RedirectURIs    []string `json:"redirect_uris"`
-	GrantTypes      []string `json:"grant_types"`
-	ResponseTypes   []string `json:"response_types"`
-	Scopes          []string `json:"scopes"`
-	TokenAuthMethod *string  `json:"token_auth_method"`
-	IsFirstParty    *bool    `json:"is_first_party"`
-	RequirePKCE     *bool    `json:"require_pkce"`
-	AccessTokenTTL  *int     `json:"access_token_ttl"`
-	RefreshTokenTTL *int     `json:"refresh_token_ttl"`
-	IDTokenTTL      *int     `json:"id_token_ttl"`
-	Active          *bool    `json:"active"`
-	RequestURIs     []string `json:"request_uris"`
-	JWKSUri         *string  `json:"jwks_uri,omitempty"`
-	PostLogoutRedirectURIs              []string `json:"post_logout_redirect_uris"`
-	BackchannelLogoutURI                *string  `json:"backchannel_logout_uri,omitempty"`
-	BackchannelLogoutSessionRequired    *bool    `json:"backchannel_logout_session_required,omitempty"`
-	FrontchannelLogoutURI               *string  `json:"frontchannel_logout_uri,omitempty"`
-	FrontchannelLogoutSessionRequired   *bool    `json:"frontchannel_logout_session_required,omitempty"`
-	SubjectType                  *string `json:"subject_type,omitempty"`
-	SectorIdentifierURI          *string `json:"sector_identifier_uri,omitempty"`
-	UserinfoSignedResponseAlg    *string `json:"userinfo_signed_response_alg,omitempty"`
-	IDTokenEncryptedResponseAlg  *string `json:"id_token_encrypted_response_alg,omitempty"`
-	IDTokenEncryptedResponseEnc  *string `json:"id_token_encrypted_response_enc,omitempty"`
-	UserinfoEncryptedResponseAlg *string `json:"userinfo_encrypted_response_alg,omitempty"`
-	UserinfoEncryptedResponseEnc *string `json:"userinfo_encrypted_response_enc,omitempty"`
+	Name                              *string  `json:"name"`
+	Description                       *string  `json:"description"`
+	RedirectURIs                      []string `json:"redirect_uris"`
+	GrantTypes                        []string `json:"grant_types"`
+	ResponseTypes                     []string `json:"response_types"`
+	Scopes                            []string `json:"scopes"`
+	TokenAuthMethod                   *string  `json:"token_auth_method"`
+	IsFirstParty                      *bool    `json:"is_first_party"`
+	RequirePKCE                       *bool    `json:"require_pkce"`
+	AccessTokenTTL                    *int     `json:"access_token_ttl"`
+	RefreshTokenTTL                   *int     `json:"refresh_token_ttl"`
+	IDTokenTTL                        *int     `json:"id_token_ttl"`
+	Active                            *bool    `json:"active"`
+	RequestURIs                       []string `json:"request_uris"`
+	JWKSUri                           *string  `json:"jwks_uri,omitempty"`
+	PostLogoutRedirectURIs            []string `json:"post_logout_redirect_uris"`
+	BackchannelLogoutURI              *string  `json:"backchannel_logout_uri,omitempty"`
+	BackchannelLogoutSessionRequired  *bool    `json:"backchannel_logout_session_required,omitempty"`
+	FrontchannelLogoutURI             *string  `json:"frontchannel_logout_uri,omitempty"`
+	FrontchannelLogoutSessionRequired *bool    `json:"frontchannel_logout_session_required,omitempty"`
+	SubjectType                       *string  `json:"subject_type,omitempty"`
+	SectorIdentifierURI               *string  `json:"sector_identifier_uri,omitempty"`
+	UserinfoSignedResponseAlg         *string  `json:"userinfo_signed_response_alg,omitempty"`
+	IDTokenEncryptedResponseAlg       *string  `json:"id_token_encrypted_response_alg,omitempty"`
+	IDTokenEncryptedResponseEnc       *string  `json:"id_token_encrypted_response_enc,omitempty"`
+	UserinfoEncryptedResponseAlg      *string  `json:"userinfo_encrypted_response_alg,omitempty"`
+	UserinfoEncryptedResponseEnc      *string  `json:"userinfo_encrypted_response_enc,omitempty"`
 }
 
 type CreateResponse struct {

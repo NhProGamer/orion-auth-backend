@@ -1680,10 +1680,10 @@ func (s *Service) issueTokensWithOpts(tx RepositoryInterface, client *model.OAut
 	}
 
 	var (
-		rawAT  string
-		atID   string
-		atJTI  *string
-		atErr  error
+		rawAT string
+		atID  string
+		atJTI *string
+		atErr error
 	)
 	if useJWT {
 		jwtStr, jti, err := s.jwtSigner.GenerateAccessTokenJWT(AccessTokenJWTClaims{

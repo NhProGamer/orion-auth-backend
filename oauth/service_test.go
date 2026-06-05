@@ -279,11 +279,11 @@ func (m *mockUserRepo) UpdateFields(id uuid.UUID, fields map[string]any) error {
 	}
 	return nil
 }
-func (m *mockUserRepo) List(_, _ int) ([]model.User, int64, error)      { return nil, 0, nil }
+func (m *mockUserRepo) List(_, _ int) ([]model.User, int64, error) { return nil, 0, nil }
 func (m *mockUserRepo) Search(_ string, _, _ int) ([]model.User, int64, error) {
 	return nil, 0, nil
 }
-func (m *mockUserRepo) Delete(_ uuid.UUID) error                        { return nil }
+func (m *mockUserRepo) Delete(_ uuid.UUID) error                             { return nil }
 func (m *mockUserRepo) FindByResetToken(_ string) (*model.User, error)       { return nil, nil }
 func (m *mockUserRepo) FindByVerifyToken(_ string) (*model.User, error)      { return nil, nil }
 func (m *mockUserRepo) FindByEmailChangeToken(_ string) (*model.User, error) { return nil, nil }

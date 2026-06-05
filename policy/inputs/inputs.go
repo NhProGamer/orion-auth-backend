@@ -128,8 +128,9 @@ func BuildConsentInput(u *model.User, c *model.OAuthClient, roles, permissions, 
 // policy can force MFA only when the user has the means to satisfy it.
 //
 // Supported modify field:
-//   modify.require_mfa: bool — overrides the default "needsMFA = hasMFA"
-//   If true and !hasMFA the call site denies with "MFA required but not enrolled".
+//
+//	modify.require_mfa: bool — overrides the default "needsMFA = hasMFA"
+//	If true and !hasMFA the call site denies with "MFA required but not enrolled".
 func BuildMFAInput(u *model.User, c *model.OAuthClient, roles, permissions, scopes []string, hasMFA bool, ipAddress, userAgent string) map[string]any {
 	input := map[string]any{
 		"user":       userFieldsWithRoles(u, roles, permissions),
@@ -213,14 +214,14 @@ func BuildClientAuthInput(c *model.OAuthClient, authMethod, method, path, ipAddr
 // manage_passkeys, manage_linked_accounts, delete_account.
 func BuildAccountActionInput(u *model.User, roles, permissions []string, action string, hasMFA, hasPasskey bool, accountAgeDays int, ipAddress, userAgent string) map[string]any {
 	input := map[string]any{
-		"user":              userFieldsWithRoles(u, roles, permissions),
-		"action":            action,
-		"has_mfa":           hasMFA,
-		"has_passkey":       hasPasskey,
-		"account_age_days":  accountAgeDays,
-		"ip_address":        ipAddress,
-		"user_agent":        userAgent,
-		"time":              timeFields(),
+		"user":             userFieldsWithRoles(u, roles, permissions),
+		"action":           action,
+		"has_mfa":          hasMFA,
+		"has_passkey":      hasPasskey,
+		"account_age_days": accountAgeDays,
+		"ip_address":       ipAddress,
+		"user_agent":       userAgent,
+		"time":             timeFields(),
 	}
 	return input
 }

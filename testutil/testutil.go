@@ -14,15 +14,15 @@ import (
 // TestAuthConfig returns an AuthConfig with sensible test defaults.
 func TestAuthConfig() config.AuthConfig {
 	return config.AuthConfig{
-		AccessTokenTTL:  1 * time.Hour,
-		RefreshTokenTTL: 24 * time.Hour,
-		SessionTTL:      720 * time.Hour,
+		AccessTokenTTL:     1 * time.Hour,
+		RefreshTokenTTL:    24 * time.Hour,
+		SessionTTL:         720 * time.Hour,
 		SessionExtendedTTL: 2160 * time.Hour,
-		AuthCodeTTL:     10 * time.Minute,
-		DeviceCodeTTL:   15 * time.Minute,
-		PasswordMinLen:  8,
-		MaxFailAttempts: 5,
-		LockoutDuration: 15 * time.Minute,
+		AuthCodeTTL:        10 * time.Minute,
+		DeviceCodeTTL:      15 * time.Minute,
+		PasswordMinLen:     8,
+		MaxFailAttempts:    5,
+		LockoutDuration:    15 * time.Minute,
 	}
 }
 

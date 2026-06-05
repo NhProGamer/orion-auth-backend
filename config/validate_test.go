@@ -39,9 +39,9 @@ func TestValidate_AcceptsHealthyReleaseConfig(t *testing.T) {
 
 func TestValidate_ReleaseModeRefusesUnsafeValues(t *testing.T) {
 	tests := []struct {
-		name       string
-		mutate     func(*Config)
-		wantInMsg  string
+		name      string
+		mutate    func(*Config)
+		wantInMsg string
 	}{
 		{
 			name:      "pairwise_salt sentinel",

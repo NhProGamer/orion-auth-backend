@@ -80,13 +80,13 @@ func (h *Handler) Update(c *gin.Context) {
 	saved := h.service.Get()
 	if h.auditService != nil {
 		h.auditService.LogFromContext(c, audit.ActionPasswordPolicyUpdated, map[string]any{
-			"min_length":         saved.MinLength,
-			"max_length":         saved.MaxLength,
-			"require_uppercase":  saved.RequireUpper,
-			"require_lowercase":  saved.RequireLower,
-			"require_digit":      saved.RequireDigit,
-			"require_symbol":     saved.RequireSymbol,
-			"min_score":          saved.MinScore,
+			"min_length":        saved.MinLength,
+			"max_length":        saved.MaxLength,
+			"require_uppercase": saved.RequireUpper,
+			"require_lowercase": saved.RequireLower,
+			"require_digit":     saved.RequireDigit,
+			"require_symbol":    saved.RequireSymbol,
+			"min_score":         saved.MinScore,
 		})
 	}
 	pkg.OK(c, gin.H{"policy": saved})

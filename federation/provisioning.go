@@ -49,10 +49,10 @@ const (
 // ProvisionOutcome bundles the result of the provisioning step.
 type ProvisionOutcome struct {
 	Kind               ProvisionKind
-	User               *model.User            // set only for LoginExisting
-	PendingLinkToken   string                 // set for PendingLinkConfirmation (raw, return to AuthUI)
-	PendingSignupToken string                 // set for PendingSignup (raw, return to AuthUI)
-	Link               *model.FederationLink  // set for AuthenticatedLink
+	User               *model.User           // set only for LoginExisting
+	PendingLinkToken   string                // set for PendingLinkConfirmation (raw, return to AuthUI)
+	PendingSignupToken string                // set for PendingSignup (raw, return to AuthUI)
+	Link               *model.FederationLink // set for AuthenticatedLink
 }
 
 // ErrAccountExistsLinkRequired is returned when an email collision happens

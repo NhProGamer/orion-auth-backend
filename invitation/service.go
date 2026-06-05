@@ -16,14 +16,14 @@ import (
 )
 
 type Service struct {
-	repo                 RepositoryInterface
-	userService          *user.Service
-	rbacService          *rbac.Service
-	emailSender          email.Sender
-	issuer               string
-	allowedOrigins       []string
-	defaultSessionTTL    time.Duration
-	extendedSessionTTL   time.Duration
+	repo               RepositoryInterface
+	userService        *user.Service
+	rbacService        *rbac.Service
+	emailSender        email.Sender
+	issuer             string
+	allowedOrigins     []string
+	defaultSessionTTL  time.Duration
+	extendedSessionTTL time.Duration
 }
 
 func NewService(repo RepositoryInterface, userService *user.Service, rbacService *rbac.Service, emailSender email.Sender, issuer string) *Service {

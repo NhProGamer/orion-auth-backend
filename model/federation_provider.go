@@ -33,11 +33,11 @@ func (FederationProvider) TableName() string {
 
 type FederationLink struct {
 	BaseModel
-	UserID     uuid.UUID       `gorm:"type:uuid;index;not null" json:"user_id"`
-	ProviderID uuid.UUID       `gorm:"type:uuid;not null" json:"provider_id"`
-	ExternalID string          `gorm:"type:varchar(255);not null" json:"external_id"`
-	Email      *string         `gorm:"type:varchar(255)" json:"email,omitempty"`
-	Metadata   json.RawMessage `gorm:"type:jsonb;default:'{}'" json:"metadata,omitempty"`
+	UserID     uuid.UUID           `gorm:"type:uuid;index;not null" json:"user_id"`
+	ProviderID uuid.UUID           `gorm:"type:uuid;not null" json:"provider_id"`
+	ExternalID string              `gorm:"type:varchar(255);not null" json:"external_id"`
+	Email      *string             `gorm:"type:varchar(255)" json:"email,omitempty"`
+	Metadata   json.RawMessage     `gorm:"type:jsonb;default:'{}'" json:"metadata,omitempty"`
 	Provider   *FederationProvider `gorm:"foreignKey:ProviderID" json:"-"`
 }
 

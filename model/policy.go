@@ -1,12 +1,12 @@
 package model
 
 const (
-	PolicyTypeTokenIssuance = "token_issuance"
-	PolicyTypeLogin         = "login"
-	PolicyTypeClientAuth    = "client_auth"
-	PolicyTypeAdminAPI      = "admin_api"
-	PolicyTypeConsent       = "consent"
-	PolicyTypeRefresh       = "refresh"
+	PolicyTypeTokenIssuance  = "token_issuance"
+	PolicyTypeLogin          = "login"
+	PolicyTypeClientAuth     = "client_auth"
+	PolicyTypeAdminAPI       = "admin_api"
+	PolicyTypeConsent        = "consent"
+	PolicyTypeRefresh        = "refresh"
 	PolicyTypeIntrospect     = "introspect"
 	PolicyTypeDeviceApproval = "device_approval"
 	PolicyTypeMFA            = "mfa"

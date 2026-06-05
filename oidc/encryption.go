@@ -140,8 +140,8 @@ func fetchClientJWKS(jwksURI string) (jwk.Set, error) {
 
 // pickEncryptionKey scans the JWK Set for a key suitable for encryption.
 // Preference order:
-//   1. keys explicitly marked use=enc
-//   2. keys without a use claim (RFC 7517 §4.2 leaves this acceptable)
+//  1. keys explicitly marked use=enc
+//  2. keys without a use claim (RFC 7517 §4.2 leaves this acceptable)
 //
 // Keys marked use=sig are skipped entirely. Returns nil if no candidate exists.
 func pickEncryptionKey(set jwk.Set) (jwk.Key, error) {

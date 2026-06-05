@@ -49,11 +49,11 @@ func (s *Service) SetPasskeyValidator(v PasskeyValidator) {
 
 // IssueRequest is the input for POST /me/reauth.
 type IssueRequest struct {
-	Method            string    `json:"method" binding:"required"`
-	Password          string    `json:"password,omitempty"`
-	Code              string    `json:"code,omitempty"`             // TOTP or backup code
+	Method             string    `json:"method" binding:"required"`
+	Password           string    `json:"password,omitempty"`
+	Code               string    `json:"code,omitempty"` // TOTP or backup code
 	PasskeyChallengeID uuid.UUID `json:"passkey_challenge_id,omitempty"`
-	PasskeyResponse   []byte    `json:"passkey_response,omitempty"` // raw assertion JSON
+	PasskeyResponse    []byte    `json:"passkey_response,omitempty"` // raw assertion JSON
 }
 
 // IssueResponse is returned by POST /me/reauth on success.
