@@ -100,6 +100,15 @@ func (s *Service) EnsureSigningKey() error {
 	return nil
 }
 
+// HasActiveKey reports whether an active signing key + private key are
+// loaded in memory. Used by the readiness probe to fail-fast when token
+// issuance would crash (no DB hit; cheap to call on every probe).
+func (s *Service) HasActiveKey() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.activeKey != nil && s.privateKey != nil
+}
+
 // RotateKey generates a new signing key and deactivates the old one.
 func (s *Service) RotateKey() error {
 	privPEM, pubPEM, err := appCrypto.GenerateRSAKeyPair()

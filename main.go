@@ -310,6 +310,7 @@ func main() {
 		m2mHandler:      m2mHandler,
 		dcrHandler:      dcrHandler,
 		hmacEncKey:      hmacEncKey,
+		oidcService:     oidcService,
 	})
 
 	// Server
@@ -376,6 +377,7 @@ type setupRouterArgs struct {
 	m2mHandler      *m2m.Handler
 	dcrHandler      *client.DCRHandler
 	hmacEncKey      []byte
+	oidcService     *oidc.Service
 }
 
 func setupRouter(a setupRouterArgs) *gin.Engine {
@@ -422,7 +424,7 @@ func setupRouter(a setupRouterArgs) *gin.Engine {
 
 	// Health endpoints
 	router.GET("/health", healthCheck)
-	router.GET("/ready", readinessCheck(db))
+	router.GET("/ready", readinessCheck(gormPing(db), a.oidcService))
 
 	// Email assets (logos used by transactional emails)
 	router.GET("/email-assets/:name", emailAssetHandler)
@@ -894,17 +896,55 @@ func emailAssetHandler(c *gin.Context) {
 	c.Data(http.StatusOK, "image/svg+xml", data)
 }
 
-func readinessCheck(db *gorm.DB) gin.HandlerFunc {
+// readinessProbe is the minimal surface readinessCheck depends on. Kept
+// as a local interface so the check is decoupled from the concrete
+// oidc.Service for tests.
+type readinessProbe interface {
+	HasActiveKey() bool
+}
+
+// dbPing abstracts a database round-trip so tests can stub the result
+// without standing up sqlmock or a real Postgres.
+type dbPing func() error
+
+func readinessCheck(ping dbPing, oidcProbe readinessProbe) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		checks := gin.H{}
+		ok := true
+
+		if ping == nil {
+			checks["database"] = "unavailable"
+			ok = false
+		} else if err := ping(); err != nil {
+			checks["database"] = "unreachable"
+			ok = false
+		} else {
+			checks["database"] = "ok"
+		}
+
+		if oidcProbe == nil || !oidcProbe.HasActiveKey() {
+			checks["jwks"] = "no active signing key"
+			ok = false
+		} else {
+			checks["jwks"] = "ok"
+		}
+
+		if !ok {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "error", "checks": checks})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "checks": checks})
+	}
+}
+
+// gormPing builds a dbPing closure around a gorm.DB, falling back to an
+// error if the underlying sql.DB cannot be reached.
+func gormPing(db *gorm.DB) dbPing {
+	return func() error {
 		sqlDB, err := db.DB()
 		if err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "error", "message": "database unavailable"})
-			return
+			return err
 		}
-		if err := sqlDB.Ping(); err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "error", "message": "database unreachable"})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+		return sqlDB.Ping()
 	}
 }
