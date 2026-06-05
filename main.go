@@ -388,8 +388,22 @@ func setupRouter(a setupRouterArgs) *gin.Engine {
 
 	gin.SetMode(cfg.Server.Mode)
 	router := gin.New()
+
+	// Trusted proxy configuration. Gin trusts all proxies by default, which
+	// allows X-Forwarded-For spoofing — audit logs and per-IP rate-limit
+	// buckets become attacker-controlled. Operators behind a reverse proxy
+	// must list its IP/CIDR explicitly; otherwise we ignore the header and
+	// use the direct TCP peer. TrustedPlatform takes precedence for CDN
+	// deployments (Cloudflare, etc.).
+	if cfg.Server.TrustedPlatform != "" {
+		router.TrustedPlatform = cfg.Server.TrustedPlatform
+	} else if err := router.SetTrustedProxies(cfg.Server.TrustedProxies); err != nil {
+		slog.Warn("failed to set trusted proxies; falling back to nil (direct peer only)", "error", err)
+		_ = router.SetTrustedProxies(nil)
+	}
+
 	router.Use(gin.Recovery())
-	router.Use(middleware.SecurityHeaders())
+	router.Use(middleware.SecurityHeaders(cfg.Server.Mode == gin.ReleaseMode))
 	router.Use(middleware.RequestID())
 	router.Use(middleware.CORS(cfg.CORS))
 

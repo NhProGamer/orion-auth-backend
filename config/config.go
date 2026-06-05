@@ -34,6 +34,15 @@ type ServerConfig struct {
 	Host string `mapstructure:"host"`
 	Port int    `mapstructure:"port"`
 	Mode string `mapstructure:"mode"`
+	// TrustedProxies is the list of IP/CIDR ranges Gin will trust to set
+	// X-Forwarded-For / X-Real-IP. Empty (default) means trust nothing:
+	// Context.ClientIP() returns the direct TCP peer. Configure when running
+	// behind a reverse proxy (e.g. ["10.0.0.0/8"], ["127.0.0.1"]).
+	TrustedProxies []string `mapstructure:"trusted_proxies"`
+	// TrustedPlatform overrides TrustedProxies when the deployment sits
+	// behind a CDN that injects a known header (e.g. "CF-Connecting-IP" for
+	// Cloudflare). Use the gin.PlatformXXX constants or a custom header name.
+	TrustedPlatform string `mapstructure:"trusted_platform"`
 }
 
 type DatabaseConfig struct {
