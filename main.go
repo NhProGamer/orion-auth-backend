@@ -33,6 +33,7 @@ import (
 	emailtemplates "orion-auth-backend/email/templates"
 	"orion-auth-backend/federation"
 	"orion-auth-backend/invitation"
+	"orion-auth-backend/metrics"
 	"orion-auth-backend/mfa"
 	"orion-auth-backend/middleware"
 	"orion-auth-backend/oauth"
@@ -408,6 +409,7 @@ func setupRouter(a setupRouterArgs) *gin.Engine {
 	router.Use(middleware.SecurityHeaders(cfg.Server.Mode == gin.ReleaseMode))
 	router.Use(middleware.RequestID())
 	router.Use(middleware.CORS(cfg.CORS))
+	router.Use(metrics.HTTPDuration())
 
 	// Swagger UI: dev-only. Mounted ONLY when mode == "debug". Any other
 	// value (release, test, an unknown override) leaves the route absent,
@@ -425,6 +427,11 @@ func setupRouter(a setupRouterArgs) *gin.Engine {
 	// Health endpoints
 	router.GET("/health", healthCheck)
 	router.GET("/ready", readinessCheck(gormPing(db), a.oidcService))
+
+	// Prometheus exposition: scraped by the monitoring stack. The handler
+	// runs through the global middleware chain so /metrics shows up in the
+	// request-duration histogram like any other route (label "/metrics").
+	router.GET("/metrics", gin.WrapH(metrics.Handler()))
 
 	// Email assets (logos used by transactional emails)
 	router.GET("/email-assets/:name", emailAssetHandler)

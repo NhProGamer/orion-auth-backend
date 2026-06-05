@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"orion-auth-backend/audit"
+	"orion-auth-backend/metrics"
 	"orion-auth-backend/middleware"
 	"orion-auth-backend/pkg"
 )
@@ -332,6 +333,11 @@ func (h *Handler) Login(c *gin.Context) {
 
 	user, err := h.service.Authenticate(input)
 	if err != nil {
+		outcome := metrics.LoginFail
+		if e, ok := err.(*pkg.AppError); ok {
+			outcome = metrics.LoginOutcomeFromError(e.Code)
+		}
+		metrics.RecordLogin(outcome)
 		if h.auditService != nil {
 			h.auditService.LogFromContext(c, audit.ActionUserLoginFailed, map[string]any{
 				"email": input.Email,
@@ -341,6 +347,7 @@ func (h *Handler) Login(c *gin.Context) {
 		return
 	}
 
+	metrics.RecordLogin(metrics.LoginSuccess)
 	if h.auditService != nil {
 		h.auditService.LogFromContext(c, audit.ActionUserLogin, map[string]any{
 			"user_id": user.ID,

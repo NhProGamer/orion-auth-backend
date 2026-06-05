@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"orion-auth-backend/audit"
+	"orion-auth-backend/metrics"
 	"orion-auth-backend/middleware"
 	"orion-auth-backend/model"
 	"orion-auth-backend/pkg"
@@ -240,6 +241,7 @@ func (h *Handler) AuthorizeLogin(c *gin.Context) {
 
 	resp, err := h.service.AuthorizeLogin(input, c.ClientIP(), c.GetHeader("User-Agent"))
 	if err != nil {
+		metrics.RecordLogin(metricsLoginOutcome(err))
 		if h.auditService != nil {
 			h.auditService.LogFromContext(c, audit.ActionUserLoginFailed, map[string]any{
 				"email": input.Email,
@@ -248,6 +250,12 @@ func (h *Handler) AuthorizeLogin(c *gin.Context) {
 		}
 		pkg.HandleError(c, err)
 		return
+	}
+
+	if resp.RequiresMFA {
+		metrics.RecordLogin(metrics.LoginMFARequired)
+	} else {
+		metrics.RecordLogin(metrics.LoginSuccess)
 	}
 
 	if h.auditService != nil {
@@ -270,6 +278,14 @@ func (h *Handler) AuthorizeLogin(c *gin.Context) {
 	}
 
 	pkg.OK(c, resp)
+}
+
+// metricsLoginOutcome maps an Authenticate error to a metrics label.
+func metricsLoginOutcome(err error) string {
+	if e, ok := err.(*pkg.AppError); ok {
+		return metrics.LoginOutcomeFromError(e.Code)
+	}
+	return metrics.LoginFail
 }
 
 // AuthorizeRegister handles the signup step of the authorize flow.
@@ -434,6 +450,7 @@ func (h *Handler) handleAuthorizationCodeGrant(c *gin.Context, client *model.OAu
 		return
 	}
 
+	metrics.RecordTokenIssued("authorization_code")
 	pkg.OK(c, resp)
 }
 
@@ -447,6 +464,7 @@ func (h *Handler) handleClientCredentialsGrant(c *gin.Context, client *model.OAu
 		return
 	}
 
+	metrics.RecordTokenIssued("client_credentials")
 	pkg.OK(c, resp)
 }
 
@@ -465,6 +483,7 @@ func (h *Handler) handleRefreshTokenGrant(c *gin.Context, client *model.OAuthCli
 		return
 	}
 
+	metrics.RecordTokenIssued("refresh_token")
 	pkg.OK(c, resp)
 }
 
@@ -650,6 +669,7 @@ func (h *Handler) handleDeviceCodeGrant(c *gin.Context, client *model.OAuthClien
 		return
 	}
 
+	metrics.RecordTokenIssued("urn:ietf:params:oauth:grant-type:device_code")
 	pkg.OK(c, resp)
 }
 
