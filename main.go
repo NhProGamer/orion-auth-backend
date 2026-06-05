@@ -185,7 +185,7 @@ func main() {
 		MFAValidator:         mfaService,
 		PolicyEvaluator:      policy.NewOAuthAdapter(policyService),
 		ResourceValidator:    resourceService,
-		RoleProvider:         newRoleProviderAdapter(rbacService),
+		RoleProvider:         rbac.NewOAuthRoleProvider(rbacService),
 	})
 	// invService is constructed BEFORE fedService so the federation
 	// provisioning trio (Users/Registration/Invitations) can be passed
@@ -295,7 +295,7 @@ func main() {
 	// Policy gate for account_action policies (deny-on-self-service rules).
 	accountPolicyGate := account.NewPolicyGate(
 		userService,
-		newRoleProviderAdapter(rbacService),
+		rbac.NewOAuthRoleProvider(rbacService),
 		mfaService,
 		passkeyService,
 		policy.NewAccountAdapter(policyService),
@@ -312,7 +312,7 @@ func main() {
 	invHandler.SetAuditService(auditService)
 	regFormHandler.SetAuditService(auditService)
 	passwordHandler.SetAuditService(auditService)
-	invHandler.SetFederationLister(&federationListerAdapter{fedService: fedService})
+	invHandler.SetFederationLister(federation.NewInvitationLister(fedService))
 	policyHandler.SetAuditService(auditService)
 	resourceHandler.SetAuditService(auditService)
 	reauthHandler.SetAuditService(auditService)
@@ -815,53 +815,6 @@ func seedAdminClient(db *gorm.DB, issuer string) {
 	slog.Warn("Client ID: " + adminClientID)
 	slog.Warn("Public client (no secret, PKCE required)")
 	slog.Warn("========================================")
-}
-
-// roleProviderAdapter adapts rbac.Service to oauth.RoleProvider, exposing
-// just role names (not full Role objects) so the policy input stays string-flat.
-type roleProviderAdapter struct {
-	svc *rbac.Service
-}
-
-func newRoleProviderAdapter(svc *rbac.Service) *roleProviderAdapter {
-	return &roleProviderAdapter{svc: svc}
-}
-
-func (a *roleProviderAdapter) GetUserRoleNames(userID uuid.UUID) ([]string, error) {
-	roles, err := a.svc.GetUserRoles(userID)
-	if err != nil {
-		return nil, err
-	}
-	names := make([]string, len(roles))
-	for i, r := range roles {
-		names[i] = r.Name
-	}
-	return names, nil
-}
-
-func (a *roleProviderAdapter) GetUserPermissions(userID uuid.UUID) ([]string, error) {
-	return a.svc.GetUserPermissions(userID)
-}
-
-// federationListerAdapter adapts federation.Service to invitation.FederationLister.
-type federationListerAdapter struct {
-	fedService *federation.Service
-}
-
-func (a *federationListerAdapter) ListActiveProviders() ([]invitation.FederationProviderInfo, error) {
-	providers, err := a.fedService.ListActiveProviders()
-	if err != nil {
-		return nil, err
-	}
-	result := make([]invitation.FederationProviderInfo, len(providers))
-	for i, p := range providers {
-		result[i] = invitation.FederationProviderInfo{
-			Name:        p.Name,
-			DisplayName: p.DisplayName,
-			Type:        p.Type,
-		}
-	}
-	return result, nil
 }
 
 // healthCheck godoc
