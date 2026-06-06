@@ -9,16 +9,34 @@ import (
 	"orion-auth-backend/config"
 	"orion-auth-backend/model"
 	"orion-auth-backend/pkg"
+	"orion-auth-backend/pkg/clock"
 )
 
 type Service struct {
 	repo        RepositoryInterface
 	cfg         config.AuthConfig
 	ttlResolver TTLResolver
+	clock       clock.Clock
 }
 
 func NewService(repo RepositoryInterface, cfg config.AuthConfig) *Service {
-	return &Service{repo: repo, cfg: cfg}
+	return &Service{repo: repo, cfg: cfg, clock: clock.Real()}
+}
+
+// SetClock overrides the time source after construction. Tests wire a
+// *clock.Fake to assert exact TTL boundaries; production never calls
+// this because NewService installs clock.Real().
+func (s *Service) SetClock(c clock.Clock) {
+	if c != nil {
+		s.clock = c
+	}
+}
+
+func (s *Service) now() time.Time {
+	if s.clock == nil {
+		return time.Now()
+	}
+	return s.clock.Now()
 }
 
 // TTLResolver is the optional hook through which the service resolves the
@@ -56,7 +74,7 @@ func (s *Service) Create(input CreateInput) (*model.Session, error) {
 		return nil, pkg.ErrInternal("failed to generate session ID")
 	}
 
-	now := time.Now()
+	now := s.now()
 	ipAddr := &input.IPAddress
 	if input.IPAddress == "" {
 		ipAddr = nil
@@ -97,7 +115,7 @@ func (s *Service) IsActive(id uuid.UUID) (bool, error) {
 	if sess == nil {
 		return false, nil
 	}
-	return sess.IsActive(), nil
+	return !sess.Revoked && sess.ExpiresAt.After(s.now()), nil
 }
 
 func (s *Service) ListActive(userID uuid.UUID) ([]model.Session, error) {

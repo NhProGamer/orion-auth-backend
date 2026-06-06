@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"orion-auth-backend/model"
+	"orion-auth-backend/pkg/clock"
 	"orion-auth-backend/testutil"
 )
 
@@ -133,6 +134,57 @@ func TestCreate_DefaultTTL(t *testing.T) {
 	delta := created.ExpiresAt.Sub(before)
 	assert.GreaterOrEqual(t, delta, cfg.SessionTTL-time.Second)
 	assert.LessOrEqual(t, delta, cfg.SessionTTL+time.Second)
+}
+
+// TestCreate_UsesInjectedClock pins the contract that session creation's
+// ExpiresAt is computed from the injected clock. Replaces the previous
+// "before / after" wall-clock window with an exact equality assertion.
+func TestCreate_UsesInjectedClock(t *testing.T) {
+	t0 := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	fake := clock.NewFake(t0)
+
+	var created *model.Session
+	repo := &mockSessionRepo{
+		createFn: func(s *model.Session) error {
+			created = s
+			return nil
+		},
+	}
+	svc := newTestService(repo)
+	svc.SetClock(fake)
+
+	userID, _ := uuid.NewV7()
+	_, err := svc.Create(CreateInput{UserID: userID})
+	require.NoError(t, err)
+
+	cfg := testutil.TestAuthConfig()
+	wantExpiry := t0.Add(cfg.SessionTTL)
+	assert.True(t, created.ExpiresAt.Equal(wantExpiry),
+		"ExpiresAt = %v, want exactly %v", created.ExpiresAt, wantExpiry)
+}
+
+// TestIsActive_UsesInjectedClock verifies the active-session predicate
+// trips on the injected clock — relevant for middleware.BearerAuth which
+// gates user-bound tokens behind this exact check.
+func TestIsActive_UsesInjectedClock(t *testing.T) {
+	expiry := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	sess := &model.Session{ExpiresAt: expiry}
+	repo := &mockSessionRepo{findByIDFn: func(id uuid.UUID) (*model.Session, error) {
+		return sess, nil
+	}}
+	svc := newTestService(repo)
+	fake := clock.NewFake(expiry.Add(-time.Second))
+	svc.SetClock(fake)
+
+	id, _ := uuid.NewV7()
+	active, err := svc.IsActive(id)
+	require.NoError(t, err)
+	assert.True(t, active, "session should be active 1s before expiry")
+
+	fake.Set(expiry.Add(time.Nanosecond))
+	active, err = svc.IsActive(id)
+	require.NoError(t, err)
+	assert.False(t, active, "session should be inactive 1ns after expiry")
 }
 
 func TestCreate_ExtendedTTL(t *testing.T) {
