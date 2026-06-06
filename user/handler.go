@@ -301,13 +301,9 @@ func (h *Handler) Register(c *gin.Context) {
 		})
 	}
 
-	// Best-effort: kick off the verify-email flow without OAuth context.
-	// Failures are logged but do not block the response — the user can
-	// hit /auth/resend-verification later if SMTP is briefly down.
-	if err := h.service.SendVerificationEmail(user.ID, nil); err != nil {
-		slog.Warn("failed to send verification email after register",
-			"user_id", user.ID, "error", err)
-	}
+	// Verify-email enqueue is now part of Register's transaction —
+	// if it had failed, Register would have returned an error and we
+	// wouldn't be here. No separate SendVerificationEmail call needed.
 
 	c.JSON(http.StatusCreated, gin.H{
 		"user": user.PublicProfile(),

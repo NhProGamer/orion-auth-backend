@@ -1,6 +1,7 @@
 package user
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -257,6 +258,51 @@ func TestRegister_EmailNormalization(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "alice@example.com", capturedEmail)
 	assert.Equal(t, "alice@example.com", user.Email)
+}
+
+// fakeRoleAssigner records calls and can fail on demand. Used by the
+// Register / RegisterAdmin tests to verify that role-assignment errors
+// now bubble up (the old behaviour swallowed them with slog.Warn).
+type fakeRoleAssigner struct {
+	calls   []uuid.UUID
+	failErr error
+}
+
+func (f *fakeRoleAssigner) AssignRole(_, roleID uuid.UUID) error {
+	if f.failErr != nil {
+		return f.failErr
+	}
+	f.calls = append(f.calls, roleID)
+	return nil
+}
+
+func (f *fakeRoleAssigner) AssignRoleInTx(_ *gorm.DB, _, roleID uuid.UUID) error {
+	if f.failErr != nil {
+		return f.failErr
+	}
+	f.calls = append(f.calls, roleID)
+	return nil
+}
+
+// TestRegister_DefaultRoleAssignmentFailureRollsBack ensures the
+// long-standing "silent slog.Warn on AssignRole failure" bug is fixed:
+// a role-assignment error now propagates out of Register and the
+// caller sees a non-nil error instead of a user-without-role.
+func TestRegister_DefaultRoleAssignmentFailureRollsBack(t *testing.T) {
+	hasher := testutil.FastHasher()
+	repo := &mockUserRepo{
+		findByEmailFn: func(email string) (*model.User, error) { return nil, nil },
+		createFn:      func(user *model.User) error { return nil },
+	}
+	roleAssigner := &fakeRoleAssigner{failErr: errors.New("rbac down")}
+	svc := NewService(Options{Repo: repo, Hasher: hasher, Cfg: testutil.TestAuthConfig()})
+	svc.SetDefaultRole(uuid.New(), roleAssigner)
+
+	_, err := svc.Register(RegisterInput{Email: "x@y.com", Password: "strongpassword"})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to assign default role")
+	assert.Empty(t, roleAssigner.calls, "AssignRoleInTx should not record success on failure")
 }
 
 // ---------------------------------------------------------------------------

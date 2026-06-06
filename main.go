@@ -142,6 +142,7 @@ func main() {
 		RegFormProvider:       regFormService,
 		PasswordValidator:     password.NewValidator(passwordService),
 		ActionTokenSigningKey: actionTokenKey,
+		DB:                    db,
 	})
 	sessionService := session.NewService(sessionRepo, cfg.Auth)
 	clientService := client.NewService(clientRepo, hasher, hmacEncKey)

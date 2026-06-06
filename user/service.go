@@ -8,6 +8,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"gorm.io/gorm"
+
 	"orion-auth-backend/actiontoken"
 	"orion-auth-backend/config"
 	"orion-auth-backend/crypto"
@@ -20,8 +22,14 @@ import (
 
 // RoleAssigner is the slice of rbac.Service used to auto-assign a default
 // role on registration. Defined here to keep user/ free of an rbac import.
+//
+// AssignRoleInTx binds the assignment to a caller-supplied transaction so
+// the user create + role assignment commit together. Implementations
+// should fall back to the non-Tx path when tx is nil — tests with mock
+// repos pass nil since they have no transaction semantics.
 type RoleAssigner interface {
 	AssignRole(userID, roleID uuid.UUID) error
+	AssignRoleInTx(tx *gorm.DB, userID, roleID uuid.UUID) error
 }
 
 // EmailVerificationGate is the read-side of the
@@ -45,6 +53,7 @@ type Service struct {
 	actionTokenSigningKey []byte
 	emailVerifyGate       EmailVerificationGate
 	clock                 clock.Clock
+	db                    *gorm.DB
 }
 
 // Options bundles every dependency a user.Service needs at
@@ -80,6 +89,13 @@ type Options struct {
 	// to clock.Real() — tests opt into a *clock.Fake to control
 	// lockout / TTL windows deterministically.
 	Clock clock.Clock
+
+	// DB is the gorm handle used to compose Register / verification /
+	// password-reset writes in a single transaction. When nil (the
+	// default in unit tests), the service runs each repo call directly
+	// without a Tx; in production main.go wires the real *gorm.DB so
+	// failures roll back the whole flow.
+	DB *gorm.DB
 }
 
 func NewService(o Options) *Service {
@@ -96,7 +112,22 @@ func NewService(o Options) *Service {
 		passwordValidator:     o.PasswordValidator,
 		actionTokenSigningKey: o.ActionTokenSigningKey,
 		clock:                 clk,
+		db:                    o.DB,
 	}
+}
+
+// withTx runs fn inside a database transaction when one is available,
+// or pass-through when no *gorm.DB is wired (unit tests). The supplied
+// repo is the Tx-bound view when applicable; tx is nil in the
+// pass-through case so callers can branch the rare site that still
+// needs a raw DB handle.
+func (s *Service) withTx(fn func(repo RepositoryInterface, tx *gorm.DB) error) error {
+	if s.db == nil {
+		return fn(s.repo, nil)
+	}
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		return fn(s.repo.WithTx(tx), tx)
+	})
 }
 
 // SetEmailVerificationGate wires the invitation-backed admin gate.
@@ -216,19 +247,83 @@ func (s *Service) Register(input RegisterInput) (*model.User, error) {
 		return nil, err
 	}
 
-	if err := s.repo.Create(user); err != nil {
-		slog.Error("failed to create user", "error", err)
-		return nil, pkg.ErrInternal("failed to create user")
-	}
-
-	if s.roleAssigner != nil && s.defaultRoleID != uuid.Nil {
-		if err := s.roleAssigner.AssignRole(user.ID, s.defaultRoleID); err != nil {
-			slog.Warn("failed to assign default role to new user", "user_id", user.ID, "role_id", s.defaultRoleID, "error", err)
+	// Atomic create + default-role assignment + verify-email enqueue.
+	// Any failure rolls back the user row — better to surface a 5xx
+	// than to leave a userless-of-role account or a verified email
+	// gate that no email was ever sent for.
+	err = s.withTx(func(repo RepositoryInterface, tx *gorm.DB) error {
+		if err := repo.Create(user); err != nil {
+			slog.Error("failed to create user", "error", err)
+			return pkg.ErrInternal("failed to create user")
 		}
+		if s.roleAssigner != nil && s.defaultRoleID != uuid.Nil {
+			if err := s.roleAssigner.AssignRoleInTx(tx, user.ID, s.defaultRoleID); err != nil {
+				return pkg.ErrInternal("failed to assign default role: " + err.Error())
+			}
+		}
+		if err := s.enqueueVerifyEmailInTx(tx, repo, user, nil); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	slog.Info("user registered", "user_id", user.ID, "email", user.Email)
 	return user, nil
+}
+
+// enqueueVerifyEmailInTx persists the verification JTI on the user row
+// and enqueues the email — both inside the supplied Tx when available.
+// Behaviour matches SendVerificationEmail except a side-effect failure
+// now returns an error (so the caller's Tx rolls back) instead of being
+// swallowed by slog.Warn. The action token signing key being unset is
+// not fatal here — the verify-email flow simply degrades to "no email
+// sent" and the user can request a resend later.
+func (s *Service) enqueueVerifyEmailInTx(tx *gorm.DB, repo RepositoryInterface, u *model.User, authRequestID *uuid.UUID) error {
+	if len(s.actionTokenSigningKey) == 0 {
+		// Boot-time misconfig: don't fail the registration over it.
+		slog.Warn("action_token_signing_key not configured; skipping verify email", "user_id", u.ID)
+		return nil
+	}
+
+	jti, err := uuid.NewV7()
+	if err != nil {
+		return pkg.ErrInternal("failed to generate verification jti")
+	}
+	now := s.clock.Now()
+	expiresAt := now.Add(24 * time.Hour)
+
+	tokenStr, err := actiontoken.Sign(actiontoken.Claims{
+		Subject:   u.ID,
+		Action:    actiontoken.ActionVerifyEmail,
+		JTI:       jti.String(),
+		RequestID: authRequestID,
+		IssuedAt:  now,
+		ExpiresAt: expiresAt,
+	}, s.actionTokenSigningKey)
+	if err != nil {
+		return pkg.ErrInternal("failed to sign verification token")
+	}
+
+	if err := repo.UpdateFields(u.ID, map[string]any{
+		"email_verify_token":      jti.String(),
+		"email_verify_expires_at": expiresAt,
+	}); err != nil {
+		return pkg.ErrInternal("failed to store verification jti")
+	}
+
+	if s.emailSender == nil {
+		slog.Warn("no email sender configured, verification token not enqueued", "user_id", u.ID)
+		return nil
+	}
+	if tx != nil {
+		if txSender, ok := s.emailSender.(email.TxSender); ok {
+			return txSender.SendVerificationEmailInTx(tx, u.Email, tokenStr)
+		}
+	}
+	return s.emailSender.SendVerificationEmail(u.Email, tokenStr)
 }
 
 func (s *Service) Authenticate(input LoginInput) (*model.User, error) {

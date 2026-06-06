@@ -138,6 +138,18 @@ func (s *Service) AssignRole(userID, roleID uuid.UUID) error {
 	return nil
 }
 
+// AssignRoleInTx is the Tx-aware variant of AssignRole. Callers that
+// are themselves wrapping multiple writes (user.Service.Register,
+// federation.Service.CompleteSignup) pass the open transaction so a
+// role-assignment failure rolls back the whole flow rather than
+// leaving a user without their default role.
+func (s *Service) AssignRoleInTx(tx *gorm.DB, userID, roleID uuid.UUID) error {
+	if tx == nil {
+		return s.AssignRole(userID, roleID)
+	}
+	return s.WithTx(tx).AssignRole(userID, roleID)
+}
+
 func (s *Service) RemoveRole(userID, roleID uuid.UUID) error {
 	if err := s.repo.RemoveRole(userID, roleID); err != nil {
 		return pkg.ErrInternal("failed to remove role")
