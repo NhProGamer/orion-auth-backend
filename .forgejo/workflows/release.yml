@@ -1,3 +1,7 @@
+# Triggered by Forgejo releases. Tag names follow the SemVer policy
+# documented in VERSIONING.md: vX.Y.Z for stable, vX.Y.Z-rc.N for an
+# explicit release-candidate cut. The Tests workflow's tag-format gate
+# rejects anything else before it ever reaches the registry.
 on:
   release:
     types: [published]
