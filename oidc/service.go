@@ -20,6 +20,7 @@ import (
 
 	appCrypto "orion-auth-backend/crypto"
 	"orion-auth-backend/model"
+	"orion-auth-backend/pkg/clock"
 	"orion-auth-backend/rbac"
 	"orion-auth-backend/user"
 )
@@ -44,11 +45,22 @@ type Service struct {
 	clientFinder   ClientFinder
 	issuer         string
 	pairwiseSalt   string
+	clock          clock.Clock
 
 	mu         sync.RWMutex
 	activeKey  *model.SigningKey
 	privateKey *rsa.PrivateKey
 	allKeys    []model.SigningKey
+}
+
+// now returns the current time via the injected clock, falling back to
+// the wall clock when the field is nil. Lets tests that construct
+// &Service{} directly (without going through NewService) keep working.
+func (s *Service) now() time.Time {
+	if s.clock == nil {
+		return time.Now()
+	}
+	return s.clock.Now()
 }
 
 func (s *Service) SetRBACService(rs *rbac.Service) {
@@ -69,6 +81,17 @@ func NewService(db *gorm.DB, userService *user.Service, issuer string, pairwiseS
 		userService:  userService,
 		issuer:       issuer,
 		pairwiseSalt: pairwiseSalt,
+		clock:        clock.Real(),
+	}
+}
+
+// SetClock overrides the time source after construction. Used by tests
+// to wire a *clock.Fake for deterministic key-rotation and token-expiry
+// assertions; production code never touches it because NewService
+// already installs clock.Real().
+func (s *Service) SetClock(c clock.Clock) {
+	if c != nil {
+		s.clock = c
 	}
 }
 
@@ -120,7 +143,7 @@ func (s *Service) RotateKey() error {
 	}
 
 	// Deactivate old keys (keep them for verification with expiry)
-	gracePeriod := time.Now().Add(24 * time.Hour)
+	gracePeriod := s.now().Add(24 * time.Hour)
 	if err := s.keyRepo.DeactivateActive(gracePeriod); err != nil {
 		return err
 	}
@@ -153,7 +176,7 @@ func (s *Service) RotateKey() error {
 }
 
 func (s *Service) loadAllKeys() {
-	keys, err := s.keyRepo.FindAllValid(time.Now())
+	keys, err := s.keyRepo.FindAllValid(s.now())
 	if err != nil {
 		slog.Error("failed to load valid signing keys", "error", err)
 		return
@@ -198,7 +221,7 @@ func (s *Service) GenerateIDToken(claims IDTokenClaims) (string, error) {
 		return "", errors.New("no active signing key")
 	}
 
-	now := time.Now()
+	now := s.now()
 
 	sub := claims.UserID.String()
 	if claims.SubjectType == "pairwise" && s.pairwiseSalt != "" {
@@ -460,7 +483,7 @@ func (s *Service) GenerateAccessTokenJWT(claims AccessTokenClaims, signingAlg st
 		return "", "", errors.New("unsupported access token signing alg for current server key: " + signingAlg)
 	}
 
-	now := time.Now()
+	now := s.now()
 	sub := claims.ClientID.String()
 	if claims.UserID != nil {
 		sub = claims.UserID.String()
@@ -786,7 +809,7 @@ func (s *Service) GenerateUserInfoJWT(claims map[string]any, clientID uuid.UUID)
 		return "", errors.New("no active signing key")
 	}
 
-	now := time.Now()
+	now := s.now()
 	jwtClaims := jwt.MapClaims{
 		"iss": s.issuer,
 		"aud": clientID.String(),
@@ -956,7 +979,7 @@ func (s *Service) GenerateLogoutToken(userID, clientID uuid.UUID, sessionRequire
 	}
 
 	jti, _ := uuid.NewV7()
-	now := time.Now()
+	now := s.now()
 
 	claims := jwt.MapClaims{
 		"iss": s.issuer,
