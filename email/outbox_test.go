@@ -1,6 +1,7 @@
 package email
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"sync"
@@ -275,6 +276,77 @@ func TestWorker_SkipsNotYetDueRows(t *testing.T) {
 	if repo.rows[0].Status != model.OutboundStatusPending {
 		t.Errorf("status = %q, want pending", repo.rows[0].Status)
 	}
+}
+
+// TestWorker_StopWaitsForInflightTick pins the contract that Stop
+// blocks until Start returns, which only happens after the current
+// tick (and its ProcessBatch transaction) finishes. Without this
+// guarantee a SIGTERM during an SMTP send would leave the row in an
+// indeterminate state and risk double-delivery at the next boot.
+func TestWorker_StopWaitsForInflightTick(t *testing.T) {
+	repo := newFakeOutboxRepo()
+	_ = NewOutboxSender(repo, "x", NewResolver(nil)).SendVerificationEmail("a@test", "t")
+
+	gate := make(chan struct{})
+	d := newSlowDeliverer(gate)
+	w := NewOutboxWorker(repo, d)
+	w.SetInterval(time.Hour) // never fire the ticker; we only care about Start's first tick
+
+	ctx, cancel := context.WithCancel(context.Background())
+	startReturned := make(chan struct{})
+	go func() {
+		w.Start(ctx)
+		close(startReturned)
+	}()
+
+	// Wait until Deliver is in flight, then cancel the worker ctx.
+	<-d.entered
+	cancel()
+
+	// Stop should not return while Deliver is parked inside the Tx.
+	stopReturned := make(chan error, 1)
+	go func() {
+		stopReturned <- w.Stop(context.Background())
+	}()
+	select {
+	case <-stopReturned:
+		t.Fatal("Stop returned before the in-flight tick completed")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	// Release Deliver; Stop should now return promptly.
+	close(gate)
+	select {
+	case err := <-stopReturned:
+		if err != nil {
+			t.Errorf("Stop returned %v, want nil", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop did not return after the tick finished")
+	}
+	<-startReturned
+
+	if repo.rows[0].Status != model.OutboundStatusSent {
+		t.Errorf("row status = %q, want sent (Tx should have committed before Stop returned)", repo.rows[0].Status)
+	}
+}
+
+// slowDeliverer signals when Deliver is entered and parks until release
+// closes, letting the test choreograph the shutdown race.
+type slowDeliverer struct {
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (s *slowDeliverer) Deliver(_, _, _ string) error {
+	s.once.Do(func() { close(s.entered) })
+	<-s.release
+	return nil
+}
+
+func newSlowDeliverer(release chan struct{}) *slowDeliverer {
+	return &slowDeliverer{entered: make(chan struct{}), release: release}
 }
 
 func TestExpBackoffMonotonicAndCapped(t *testing.T) {

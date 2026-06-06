@@ -3,6 +3,7 @@ package email
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	"orion-auth-backend/metrics"
@@ -27,6 +28,12 @@ type OutboxWorker struct {
 	backoff   BackoffFn
 	batchSize int
 	interval  time.Duration
+
+	// done is closed when Start returns; Stop awaits it. nil until
+	// Start runs, so a worker created but never started doesn't
+	// block its caller's Stop call.
+	doneMu sync.Mutex
+	done   chan struct{}
 }
 
 // NewOutboxWorker uses sensible defaults: batch=10, interval=15s,
@@ -46,11 +53,19 @@ func (w *OutboxWorker) SetBatchSize(n int)          { w.batchSize = n }
 func (w *OutboxWorker) SetBackoff(b BackoffFn)      { w.backoff = b }
 
 // Start blocks until ctx is cancelled, polling at the configured
-// interval. Call as a goroutine from main; the polite shutdown is
-// done by cancelling the context.
+// interval. Stop awaits the in-flight tick to finish via a done
+// channel; calling Start once and Stop afterwards is the supported
+// lifecycle. Concurrent Starts are not supported.
 func (w *OutboxWorker) Start(ctx context.Context) {
 	slog.Info("email outbox worker started",
 		"interval", w.interval, "batch_size", w.batchSize)
+
+	w.doneMu.Lock()
+	w.done = make(chan struct{})
+	done := w.done
+	w.doneMu.Unlock()
+	defer close(done)
+
 	// Run one tick immediately on startup so a backlog from a prior
 	// process is drained without waiting for the first interval.
 	w.tick(ctx)
@@ -64,6 +79,29 @@ func (w *OutboxWorker) Start(ctx context.Context) {
 		case <-t.C:
 			w.tick(ctx)
 		}
+	}
+}
+
+// Stop blocks until the goroutine running Start has returned, or
+// until shutdownCtx is cancelled (whichever is first). The caller is
+// responsible for cancelling Start's own ctx beforehand — Stop only
+// waits, it does not signal. This shape lets main.go cancel the
+// worker context, then wait up to 5s for the in-flight ProcessBatch
+// transaction to commit before calling srv.Shutdown.
+func (w *OutboxWorker) Stop(shutdownCtx context.Context) error {
+	w.doneMu.Lock()
+	done := w.done
+	w.doneMu.Unlock()
+	if done == nil {
+		// Start was never called; nothing to wait for.
+		return nil
+	}
+	select {
+	case <-done:
+		return nil
+	case <-shutdownCtx.Done():
+		slog.Warn("outbox worker did not drain before shutdown deadline")
+		return shutdownCtx.Err()
 	}
 }
 

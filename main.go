@@ -390,7 +390,17 @@ func main() {
 	<-quit
 
 	slog.Info("shutting down server...")
+	// Cancel the worker's context so its loop exits, then wait (with
+	// timeout) for the in-flight ProcessBatch to commit. Without the
+	// wait we used to risk killing the goroutine mid-SMTP-send, which
+	// could double-deliver the same row at the next boot.
 	stopWorker()
+	workerShutdownCtx, cancelWorkerShutdown := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := emailWorker.Stop(workerShutdownCtx); err != nil {
+		slog.Warn("email worker did not drain cleanly", "error", err)
+	}
+	cancelWorkerShutdown()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
