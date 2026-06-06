@@ -944,31 +944,40 @@ func (s *Service) ForgotPassword(input ForgotPasswordInput) error {
 		// Don't reveal whether the email exists
 		return nil
 	}
+	return s.issuePasswordResetInTx(u)
+}
 
+// issuePasswordResetInTx persists a one-hour reset token on the user
+// row and enqueues the reset email — both inside the same Tx so a
+// failure no longer leaves the user with a fresh reset token but no
+// email to act on. Used by both ForgotPassword (anti-enumerated public
+// endpoint) and AdminTriggerPasswordReset (admin-initiated reset).
+func (s *Service) issuePasswordResetInTx(u *model.User) error {
 	token, err := crypto.GenerateRandomString(32)
 	if err != nil {
 		return pkg.ErrInternal("failed to generate reset token")
 	}
-
 	tokenHash := crypto.HashToken(token)
 	expiresAt := s.clock.Now().Add(1 * time.Hour)
 
-	if err := s.repo.UpdateFields(u.ID, map[string]any{
-		"password_reset_token":      tokenHash,
-		"password_reset_expires_at": expiresAt,
-	}); err != nil {
-		return pkg.ErrInternal("failed to store reset token")
-	}
-
-	if s.emailSender != nil {
-		if err := s.emailSender.SendPasswordResetEmail(u.Email, token); err != nil {
-			slog.Error("failed to send reset email", "error", err)
+	return s.withTx(func(repo RepositoryInterface, tx *gorm.DB) error {
+		if err := repo.UpdateFields(u.ID, map[string]any{
+			"password_reset_token":      tokenHash,
+			"password_reset_expires_at": expiresAt,
+		}); err != nil {
+			return pkg.ErrInternal("failed to store reset token")
 		}
-	} else {
-		slog.Warn("no email sender configured, reset token not sent", "email", u.Email)
-	}
-
-	return nil
+		if s.emailSender == nil {
+			slog.Warn("no email sender configured, reset token not sent", "email", u.Email)
+			return nil
+		}
+		if tx != nil {
+			if txSender, ok := s.emailSender.(email.TxSender); ok {
+				return txSender.SendPasswordResetEmailInTx(tx, u.Email, token)
+			}
+		}
+		return s.emailSender.SendPasswordResetEmail(u.Email, token)
+	})
 }
 
 // AdminTriggerPasswordReset issues a password reset token for the target user
@@ -984,29 +993,9 @@ func (s *Service) AdminTriggerPasswordReset(userID uuid.UUID) error {
 		return pkg.ErrNotFound("user not found")
 	}
 
-	token, err := crypto.GenerateRandomString(32)
-	if err != nil {
-		return pkg.ErrInternal("failed to generate reset token")
+	if err := s.issuePasswordResetInTx(u); err != nil {
+		return err
 	}
-
-	tokenHash := crypto.HashToken(token)
-	expiresAt := s.clock.Now().Add(1 * time.Hour)
-
-	if err := s.repo.UpdateFields(u.ID, map[string]any{
-		"password_reset_token":      tokenHash,
-		"password_reset_expires_at": expiresAt,
-	}); err != nil {
-		return pkg.ErrInternal("failed to store reset token")
-	}
-
-	if s.emailSender != nil {
-		if err := s.emailSender.SendPasswordResetEmail(u.Email, token); err != nil {
-			slog.Error("failed to send reset email", "error", err)
-		}
-	} else {
-		slog.Warn("no email sender configured, reset token not sent", "email", u.Email)
-	}
-
 	slog.Info("admin-initiated password reset", "target_user_id", u.ID)
 	return nil
 }
