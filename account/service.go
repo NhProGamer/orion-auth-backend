@@ -245,22 +245,29 @@ func (s *Service) RequestDeletion(userID uuid.UUID) error {
 	now := time.Now()
 	purgeAfter := now.Add(s.deletionGracePeriod)
 
-	if err := s.users.UpdateFields(userID, map[string]any{
-		"deleted_at":           now,
-		"deletion_token":       hash,
-		"deletion_purge_after": purgeAfter,
-		"active":               false,
-	}); err != nil {
-		return pkg.ErrInternal("failed to schedule deletion")
-	}
-
-	if _, err := s.sessions.RevokeAll(userID, nil); err != nil {
-		slog.Warn("failed to revoke sessions during deletion request", "user_id", userID, "error", err)
-	}
-	if s.mailer != nil {
-		if err := s.mailer.SendAccountDeletionEmail(u.Email, rawToken); err != nil {
-			slog.Warn("failed to send deletion email", "user_id", userID, "error", err)
+	// Tx: deactivation + session revoke + cancel-link email enqueue.
+	// All three were previously fire-and-Warn — meaning a user could
+	// end up deactivated with active sessions still authorised, or
+	// deactivated with no cancellation email ever sent (locking them
+	// out of the recover path until the purge deadline). Atomic now.
+	if err := s.withTx(func(tx *gorm.DB) error {
+		if err := s.users.UpdateFieldsInTx(tx, userID, map[string]any{
+			"deleted_at":           now,
+			"deletion_token":       hash,
+			"deletion_purge_after": purgeAfter,
+			"active":               false,
+		}); err != nil {
+			return pkg.ErrInternal("failed to schedule deletion")
 		}
+		if _, err := s.sessions.RevokeAllInTx(tx, userID, nil); err != nil {
+			return pkg.ErrInternal("failed to revoke sessions: " + err.Error())
+		}
+		return s.sendMailInTx(tx,
+			func(ts email.TxSender) error { return ts.SendAccountDeletionEmailInTx(tx, u.Email, rawToken) },
+			func() error { return s.mailer.SendAccountDeletionEmail(u.Email, rawToken) },
+		)
+	}); err != nil {
+		return err
 	}
 	slog.Info("account deletion requested", "user_id", userID, "purge_after", purgeAfter)
 	return nil
