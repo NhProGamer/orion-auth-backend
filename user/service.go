@@ -15,6 +15,7 @@ import (
 	"orion-auth-backend/model"
 	"orion-auth-backend/password"
 	"orion-auth-backend/pkg"
+	"orion-auth-backend/pkg/clock"
 )
 
 // RoleAssigner is the slice of rbac.Service used to auto-assign a default
@@ -43,6 +44,7 @@ type Service struct {
 	passwordValidator     *password.Validator
 	actionTokenSigningKey []byte
 	emailVerifyGate       EmailVerificationGate
+	clock                 clock.Clock
 }
 
 // Options bundles every dependency a user.Service needs at
@@ -73,9 +75,18 @@ type Options struct {
 	RegFormProvider       RegFormProvider
 	PasswordValidator     *password.Validator
 	ActionTokenSigningKey []byte
+
+	// Clock injects the time source. When nil, the service falls back
+	// to clock.Real() — tests opt into a *clock.Fake to control
+	// lockout / TTL windows deterministically.
+	Clock clock.Clock
 }
 
 func NewService(o Options) *Service {
+	clk := o.Clock
+	if clk == nil {
+		clk = clock.Real()
+	}
 	return &Service{
 		repo:                  o.Repo,
 		hasher:                o.Hasher,
@@ -84,6 +95,7 @@ func NewService(o Options) *Service {
 		regForm:               o.RegFormProvider,
 		passwordValidator:     o.PasswordValidator,
 		actionTokenSigningKey: o.ActionTokenSigningKey,
+		clock:                 clk,
 	}
 }
 
@@ -234,7 +246,7 @@ func (s *Service) Authenticate(input LoginInput) (*model.User, error) {
 		return nil, pkg.ErrForbidden("account is deactivated")
 	}
 
-	if user.IsLocked() {
+	if user.LockedUntil != nil && user.LockedUntil.After(s.clock.Now()) {
 		return nil, pkg.ErrAccountLocked("account is temporarily locked due to too many failed login attempts")
 	}
 
@@ -720,7 +732,7 @@ func (s *Service) SendVerificationEmail(userID uuid.UUID, authRequestID *uuid.UU
 		return pkg.ErrInternal("failed to generate verification jti")
 	}
 
-	now := time.Now()
+	now := s.clock.Now()
 	expiresAt := now.Add(24 * time.Hour)
 
 	tokenStr, err := actiontoken.Sign(actiontoken.Claims{
@@ -845,7 +857,7 @@ func (s *Service) ForgotPassword(input ForgotPasswordInput) error {
 	}
 
 	tokenHash := crypto.HashToken(token)
-	expiresAt := time.Now().Add(1 * time.Hour)
+	expiresAt := s.clock.Now().Add(1 * time.Hour)
 
 	if err := s.repo.UpdateFields(u.ID, map[string]any{
 		"password_reset_token":      tokenHash,
@@ -884,7 +896,7 @@ func (s *Service) AdminTriggerPasswordReset(userID uuid.UUID) error {
 	}
 
 	tokenHash := crypto.HashToken(token)
-	expiresAt := time.Now().Add(1 * time.Hour)
+	expiresAt := s.clock.Now().Add(1 * time.Hour)
 
 	if err := s.repo.UpdateFields(u.ID, map[string]any{
 		"password_reset_token":      tokenHash,
@@ -948,7 +960,7 @@ func (s *Service) incrementFailedAttempts(user *model.User) {
 	}
 
 	if attempts >= s.cfg.MaxFailAttempts {
-		lockUntil := time.Now().Add(s.cfg.LockoutDuration)
+		lockUntil := s.clock.Now().Add(s.cfg.LockoutDuration)
 		fields["locked_until"] = lockUntil
 		slog.Warn("account locked due to failed attempts", "user_id", user.ID, "attempts", attempts)
 	}

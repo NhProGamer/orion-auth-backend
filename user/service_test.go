@@ -11,6 +11,7 @@ import (
 
 	"orion-auth-backend/email"
 	"orion-auth-backend/model"
+	"orion-auth-backend/pkg/clock"
 	"orion-auth-backend/testutil"
 )
 
@@ -434,6 +435,44 @@ func TestAuthenticate_WrongPassword_LocksAfterMaxAttempts(t *testing.T) {
 	lockTime, ok := lockedUntil.(time.Time)
 	assert.True(t, ok)
 	assert.True(t, lockTime.After(time.Now()))
+}
+
+// TestAuthenticate_LockReleasesAfterDuration pins the contract that an
+// account locked for cfg.LockoutDuration becomes usable exactly when the
+// (injected) clock crosses the lock expiry — historically untestable
+// because every retry was at the mercy of real wall time.
+func TestAuthenticate_LockReleasesAfterDuration(t *testing.T) {
+	hasher := testutil.FastHasher()
+	testUser := testutil.TestUser(hasher, "password123")
+
+	now0 := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	lockedUntil := now0.Add(15 * time.Minute)
+	testUser.LockedUntil = &lockedUntil
+
+	repo := &mockUserRepo{
+		findByEmailFn:  func(email string) (*model.User, error) { return testUser, nil },
+		updateFieldsFn: func(id uuid.UUID, fields map[string]any) error { return nil },
+	}
+	fake := clock.NewFake(now0)
+	svc := NewService(Options{
+		Repo: repo, Hasher: hasher, Cfg: testutil.TestAuthConfig(), Clock: fake,
+	})
+
+	// At now0: locked.
+	_, err := svc.Authenticate(LoginInput{Email: "test@example.com", Password: "password123"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "temporarily locked")
+
+	// One minute before expiry: still locked.
+	fake.Set(lockedUntil.Add(-time.Minute))
+	_, err = svc.Authenticate(LoginInput{Email: "test@example.com", Password: "password123"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "temporarily locked")
+
+	// One nanosecond past expiry: unlocked, password accepted.
+	fake.Set(lockedUntil.Add(time.Nanosecond))
+	_, err = svc.Authenticate(LoginInput{Email: "test@example.com", Password: "password123"})
+	require.NoError(t, err)
 }
 
 // ---------------------------------------------------------------------------
