@@ -618,12 +618,18 @@ func (s *Service) CreateFromFederation(input FederationProvisionInput, roleIDs [
 		return nil, err
 	}
 
-	if err := s.repo.Create(u); err != nil {
-		slog.Error("failed to create user via federation path", "error", err)
-		return nil, pkg.ErrInternal("failed to create user")
-	}
-
-	if s.roleAssigner != nil {
+	// Tx: federation-provisioned user row + role assignments commit
+	// together. Failure rolls back the whole thing so the caller
+	// (federation.Service.CompleteSignup) can decide between retrying
+	// and surfacing the error to the AuthUI.
+	if err := s.withTx(func(repo RepositoryInterface, tx *gorm.DB) error {
+		if err := repo.Create(u); err != nil {
+			slog.Error("failed to create user via federation path", "error", err)
+			return pkg.ErrInternal("failed to create user")
+		}
+		if s.roleAssigner == nil {
+			return nil
+		}
 		// Caller-supplied roles (from an invitation) take precedence.
 		// Otherwise fall back to the default user role, matching the
 		// behaviour of the password-based Register path.
@@ -632,10 +638,13 @@ func (s *Service) CreateFromFederation(input FederationProvisionInput, roleIDs [
 			assignRoles = []uuid.UUID{s.defaultRoleID}
 		}
 		for _, rid := range assignRoles {
-			if err := s.roleAssigner.AssignRole(u.ID, rid); err != nil {
-				slog.Warn("failed to assign role to federation-created user", "user_id", u.ID, "role_id", rid, "error", err)
+			if err := s.roleAssigner.AssignRoleInTx(tx, u.ID, rid); err != nil {
+				return pkg.ErrInternal("failed to assign role " + rid.String() + ": " + err.Error())
 			}
 		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	slog.Info("user provisioned via federation", "user_id", u.ID, "email", u.Email, "email_verified", input.EmailVerified)
