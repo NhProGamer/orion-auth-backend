@@ -840,43 +840,12 @@ func (s *Service) SendVerificationEmail(userID uuid.UUID, authRequestID *uuid.UU
 	if len(s.actionTokenSigningKey) == 0 {
 		return pkg.ErrInternal("action token signing key not configured")
 	}
-
-	jti, err := uuid.NewV7()
-	if err != nil {
-		return pkg.ErrInternal("failed to generate verification jti")
-	}
-
-	now := s.clock.Now()
-	expiresAt := now.Add(24 * time.Hour)
-
-	tokenStr, err := actiontoken.Sign(actiontoken.Claims{
-		Subject:   userID,
-		Action:    actiontoken.ActionVerifyEmail,
-		JTI:       jti.String(),
-		RequestID: authRequestID,
-		IssuedAt:  now,
-		ExpiresAt: expiresAt,
-	}, s.actionTokenSigningKey)
-	if err != nil {
-		return pkg.ErrInternal("failed to sign verification token")
-	}
-
-	if err := s.repo.UpdateFields(userID, map[string]any{
-		"email_verify_token":      jti.String(),
-		"email_verify_expires_at": expiresAt,
-	}); err != nil {
-		return pkg.ErrInternal("failed to store verification jti")
-	}
-
-	if s.emailSender != nil {
-		if err := s.emailSender.SendVerificationEmail(u.Email, tokenStr); err != nil {
-			slog.Error("failed to send verification email", "error", err)
-		}
-	} else {
-		slog.Warn("no email sender configured, verification token not sent", "user_id", userID)
-	}
-
-	return nil
+	// JTI persistence and outbox enqueue share the Tx so the token
+	// rows and the queued email commit together — no more "user has
+	// a fresh verify token but the email vanished into SMTP".
+	return s.withTx(func(repo RepositoryInterface, tx *gorm.DB) error {
+		return s.enqueueVerifyEmailInTx(tx, repo, u, authRequestID)
+	})
 }
 
 // ResendVerificationEmail looks up a user by email and reissues the
