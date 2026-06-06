@@ -192,28 +192,36 @@ func (s *Service) ConfirmEmailChange(input ConfirmEmailChangeInput) (oldEmail, n
 	}
 
 	old := u.Email
-	new := *u.EmailChangeNew
+	newAddr := *u.EmailChangeNew
 
-	if err := s.users.UpdateFields(u.ID, map[string]any{
-		"email":                   new,
-		"email_verified":          true,
-		"email_change_new":        nil,
-		"email_change_token":      nil,
-		"email_change_expires_at": nil,
-	}); err != nil {
-		return "", "", uuid.Nil, pkg.ErrInternal("failed to apply email change")
-	}
-
-	if _, err := s.sessions.RevokeAll(u.ID, nil); err != nil {
-		slog.Warn("failed to revoke sessions after email change", "user_id", u.ID, "error", err)
-	}
-	if s.mailer != nil {
-		if err := s.mailer.SendEmailChangedNotice(old, new); err != nil {
-			slog.Warn("failed to send email-changed notice", "user_id", u.ID, "error", err)
+	// Critical Tx: email column swap + session revocation must commit
+	// together. The old code revoked sessions via slog.Warn — meaning
+	// the email could change while old sessions still authorised the
+	// old identity, opening a window for stale tokens to act on a
+	// resource the new owner now controls. Failure to revoke now
+	// rolls back the email swap.
+	if err := s.withTx(func(tx *gorm.DB) error {
+		if err := s.users.UpdateFieldsInTx(tx, u.ID, map[string]any{
+			"email":                   newAddr,
+			"email_verified":          true,
+			"email_change_new":        nil,
+			"email_change_token":      nil,
+			"email_change_expires_at": nil,
+		}); err != nil {
+			return pkg.ErrInternal("failed to apply email change")
 		}
+		if _, err := s.sessions.RevokeAllInTx(tx, u.ID, nil); err != nil {
+			return pkg.ErrInternal("failed to revoke sessions: " + err.Error())
+		}
+		return s.sendMailInTx(tx,
+			func(ts email.TxSender) error { return ts.SendEmailChangedNoticeInTx(tx, old, newAddr) },
+			func() error { return s.mailer.SendEmailChangedNotice(old, newAddr) },
+		)
+	}); err != nil {
+		return "", "", uuid.Nil, err
 	}
-	slog.Info("email changed", "user_id", u.ID, "old_email", old, "new_email", new)
-	return old, new, u.ID, nil
+	slog.Info("email changed", "user_id", u.ID, "old_email", old, "new_email", newAddr)
+	return old, newAddr, u.ID, nil
 }
 
 // --- Account deletion (soft + grace) ---
