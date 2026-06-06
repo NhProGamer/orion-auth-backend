@@ -2,11 +2,13 @@ package invitation
 
 import (
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 
 	"orion-auth-backend/model"
 )
 
 type RepositoryInterface interface {
+	WithTx(tx *gorm.DB) RepositoryInterface
 	Create(inv *model.Invitation) error
 	FindByToken(tokenHash string) (*model.Invitation, error)
 	FindByID(id uuid.UUID) (*model.Invitation, error)

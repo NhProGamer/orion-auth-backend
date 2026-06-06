@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 
 	"orion-auth-backend/crypto"
 	"orion-auth-backend/email"
@@ -24,6 +25,7 @@ type Service struct {
 	allowedOrigins     []string
 	defaultSessionTTL  time.Duration
 	extendedSessionTTL time.Duration
+	db                 *gorm.DB
 }
 
 // Options is the constructor surface for invitation.Service. All
@@ -41,6 +43,11 @@ type Options struct {
 	AllowedOrigins     []string      // CORS allowlist for operator-supplied redirect URLs
 	DefaultSessionTTL  time.Duration // fallback when admin has not overridden
 	ExtendedSessionTTL time.Duration // fallback for remember_me sessions
+
+	// DB is the gorm handle used to wrap Create (and future Tx flows) so
+	// the invitation INSERT and the outbox enqueue commit together. Tests
+	// leave it nil and the service falls back to per-call writes.
+	DB *gorm.DB
 }
 
 func NewService(o Options) *Service {
@@ -53,7 +60,21 @@ func NewService(o Options) *Service {
 		allowedOrigins:     o.AllowedOrigins,
 		defaultSessionTTL:  o.DefaultSessionTTL,
 		extendedSessionTTL: o.ExtendedSessionTTL,
+		db:                 o.DB,
 	}
+}
+
+// withTx mirrors user.Service.withTx — runs fn inside a database
+// transaction when DB was wired, or pass-through with a nil tx in unit
+// tests. Same shape so future refactors can collapse both helpers
+// into a shared package if needed.
+func (s *Service) withTx(fn func(repo RepositoryInterface, tx *gorm.DB) error) error {
+	if s.db == nil {
+		return fn(s.repo, nil)
+	}
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		return fn(s.repo.WithTx(tx), tx)
+	})
 }
 
 type CreateInput struct {
@@ -82,15 +103,27 @@ func (s *Service) Create(input CreateInput, invitedBy uuid.UUID) (*model.Invitat
 		ExpiresAt: time.Now().Add(7 * 24 * time.Hour), // 7 days
 	}
 
-	if err := s.repo.Create(inv); err != nil {
-		slog.Error("failed to create invitation", "error", err)
-		return nil, pkg.ErrInternal("failed to create invitation")
-	}
-
-	if s.emailSender != nil {
-		if err := s.emailSender.SendInvitationEmail(input.Email, rawToken); err != nil {
-			slog.Error("failed to send invitation email", "error", err, "email", input.Email)
+	// Invitation row + outbox enqueue commit together: a previous
+	// failure mode left the row INSERTed but the email send swallowed
+	// with slog.Error, so admins thought the invite went out when in
+	// fact the recipient never got it. Now a side-effect failure rolls
+	// the row back and the admin gets a 5xx.
+	if err := s.withTx(func(repo RepositoryInterface, tx *gorm.DB) error {
+		if err := repo.Create(inv); err != nil {
+			slog.Error("failed to create invitation", "error", err)
+			return pkg.ErrInternal("failed to create invitation")
 		}
+		if s.emailSender == nil {
+			return nil
+		}
+		if tx != nil {
+			if txSender, ok := s.emailSender.(email.TxSender); ok {
+				return txSender.SendInvitationEmailInTx(tx, input.Email, rawToken)
+			}
+		}
+		return s.emailSender.SendInvitationEmail(input.Email, rawToken)
+	}); err != nil {
+		return nil, err
 	}
 
 	slog.Info("invitation created", "email", input.Email, "invited_by", invitedBy)

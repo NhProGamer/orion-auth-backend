@@ -29,6 +29,8 @@ type mockInvitationRepo struct {
 	getAllSettingsFn func() ([]model.Setting, error)
 }
 
+func (m *mockInvitationRepo) WithTx(_ *gorm.DB) RepositoryInterface { return m }
+
 func (m *mockInvitationRepo) Create(inv *model.Invitation) error {
 	if m.createFn != nil {
 		return m.createFn(inv)

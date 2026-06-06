@@ -199,6 +199,7 @@ func main() {
 		AllowedOrigins:     cfg.CORS.AllowedOrigins,
 		DefaultSessionTTL:  cfg.Auth.SessionTTL,
 		ExtendedSessionTTL: cfg.Auth.SessionExtendedTTL,
+		DB:                 db,
 	})
 	sessionService.SetTTLResolver(invService)
 	// Truly circular: invService depends on userService (above), userService

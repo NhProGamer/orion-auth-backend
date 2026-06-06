@@ -17,6 +17,13 @@ func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{db: db}
 }
 
+// WithTx returns a Repository bound to tx so the service can compose
+// invitation INSERT + outbox enqueue inside a caller-managed
+// transaction.
+func (r *Repository) WithTx(tx *gorm.DB) RepositoryInterface {
+	return &Repository{db: tx}
+}
+
 func (r *Repository) Create(inv *model.Invitation) error {
 	return r.db.Create(inv).Error
 }
