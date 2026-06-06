@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 
 	"orion-auth-backend/middleware"
 	"orion-auth-backend/model"
@@ -35,6 +36,9 @@ func (s *stubUserStore) FindByEmail(string) (*model.User, error)            { re
 func (s *stubUserStore) FindByEmailChangeToken(string) (*model.User, error) { return nil, nil }
 func (s *stubUserStore) FindByDeletionToken(string) (*model.User, error)    { return nil, nil }
 func (s *stubUserStore) UpdateFields(uuid.UUID, map[string]any) error       { return nil }
+func (s *stubUserStore) UpdateFieldsInTx(_ *gorm.DB, _ uuid.UUID, _ map[string]any) error {
+	return nil
+}
 func (s *stubUserStore) ChangePassword(uuid.UUID, user.ChangePasswordInput) error {
 	return nil
 }

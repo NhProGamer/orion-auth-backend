@@ -245,6 +245,7 @@ func main() {
 		emailSender,
 		cfg.Account.EmailChangeTokenTTL,
 		cfg.Account.DeletionGracePeriod,
+		db,
 	)
 
 	// Seed defaults on first launch

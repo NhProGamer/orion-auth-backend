@@ -2,11 +2,13 @@ package session
 
 import (
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 
 	"orion-auth-backend/model"
 )
 
 type RepositoryInterface interface {
+	WithTx(tx *gorm.DB) RepositoryInterface
 	Create(session *model.Session) error
 	FindByID(id uuid.UUID) (*model.Session, error)
 	FindActiveByUser(userID uuid.UUID) ([]model.Session, error)

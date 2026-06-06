@@ -18,6 +18,12 @@ func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{db: db}
 }
 
+// WithTx returns a Repository bound to tx so account.Service can revoke
+// sessions inside the same transaction that updates the user row.
+func (r *Repository) WithTx(tx *gorm.DB) RepositoryInterface {
+	return &Repository{db: tx}
+}
+
 func (r *Repository) Create(session *model.Session) error {
 	return r.db.Create(session).Error
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"orion-auth-backend/model"
 	"orion-auth-backend/pkg/clock"
@@ -23,6 +24,8 @@ type mockSessionRepo struct {
 	revokeAllForUserFn func(userID uuid.UUID, exceptID *uuid.UUID) (int64, error)
 	updateLastActiveFn func(id uuid.UUID) error
 }
+
+func (m *mockSessionRepo) WithTx(_ *gorm.DB) RepositoryInterface { return m }
 
 func (m *mockSessionRepo) Create(s *model.Session) error {
 	if m.createFn != nil {

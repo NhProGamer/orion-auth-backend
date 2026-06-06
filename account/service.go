@@ -6,8 +6,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 
 	"orion-auth-backend/crypto"
+	"orion-auth-backend/email"
 	"orion-auth-backend/pkg"
 	"orion-auth-backend/user"
 )
@@ -18,16 +20,47 @@ type Service struct {
 	mailer              Mailer
 	emailChangeTokenTTL time.Duration
 	deletionGracePeriod time.Duration
+	db                  *gorm.DB
 }
 
-func NewService(users UserStore, sessions SessionRevoker, mailer Mailer, emailChangeTTL, deletionGrace time.Duration) *Service {
+func NewService(users UserStore, sessions SessionRevoker, mailer Mailer, emailChangeTTL, deletionGrace time.Duration, db *gorm.DB) *Service {
 	return &Service{
 		users:               users,
 		sessions:            sessions,
 		mailer:              mailer,
 		emailChangeTokenTTL: emailChangeTTL,
 		deletionGracePeriod: deletionGrace,
+		db:                  db,
 	}
+}
+
+// withTx mirrors the helper used by user / invitation services: run fn
+// inside a database transaction when one is configured, or pass-through
+// with a nil tx when tests omit the DB handle.
+func (s *Service) withTx(fn func(tx *gorm.DB) error) error {
+	if s.db == nil {
+		return fn(nil)
+	}
+	return s.db.Transaction(fn)
+}
+
+// sendMailInTx delivers a Mailer notification through the supplied Tx
+// when the mailer satisfies email.TxSender — that's the OutboxSender
+// path used in production. Falls back to the non-Tx Send* call (best-
+// effort) so SMTPSender or test fakes keep working.
+type txMailerCall func(s email.TxSender) error
+type plainMailerCall func() error
+
+func (s *Service) sendMailInTx(tx *gorm.DB, viaTx txMailerCall, fallback plainMailerCall) error {
+	if s.mailer == nil {
+		return nil
+	}
+	if tx != nil {
+		if txSender, ok := s.mailer.(email.TxSender); ok {
+			return viaTx(txSender)
+		}
+	}
+	return fallback()
 }
 
 // --- Password change ---
@@ -109,18 +142,24 @@ func (s *Service) RequestEmailChange(userID uuid.UUID, input ChangeEmailRequestI
 	}
 	expiresAt := time.Now().Add(s.emailChangeTokenTTL)
 
-	if err := s.users.UpdateFields(userID, map[string]any{
-		"email_change_new":        newEmail,
-		"email_change_token":      hash,
-		"email_change_expires_at": expiresAt,
-	}); err != nil {
-		return pkg.ErrInternal("failed to record email change request")
-	}
-
-	if s.mailer != nil {
-		if err := s.mailer.SendEmailChangeConfirmation(newEmail, rawToken); err != nil {
-			slog.Warn("failed to send email change confirmation", "user_id", userID, "error", err)
+	// Atomic: token persistence + confirmation email enqueue commit
+	// together. Without the Tx the user used to end up with a fresh
+	// email_change_token persisted but no email queued, then had to
+	// wait for the TTL to expire before they could retry.
+	if err := s.withTx(func(tx *gorm.DB) error {
+		if err := s.users.UpdateFieldsInTx(tx, userID, map[string]any{
+			"email_change_new":        newEmail,
+			"email_change_token":      hash,
+			"email_change_expires_at": expiresAt,
+		}); err != nil {
+			return pkg.ErrInternal("failed to record email change request")
 		}
+		return s.sendMailInTx(tx,
+			func(ts email.TxSender) error { return ts.SendEmailChangeConfirmationInTx(tx, newEmail, rawToken) },
+			func() error { return s.mailer.SendEmailChangeConfirmation(newEmail, rawToken) },
+		)
+	}); err != nil {
+		return err
 	}
 	slog.Info("email change requested", "user_id", userID, "new_email", newEmail)
 	return nil

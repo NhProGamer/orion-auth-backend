@@ -300,6 +300,8 @@ type mockSessionRepo struct {
 	createFn func(s *model.Session) error
 }
 
+func (m *mockSessionRepo) WithTx(_ *gorm.DB) session.RepositoryInterface { return m }
+
 func (m *mockSessionRepo) Create(s *model.Session) error {
 	if m.createFn != nil {
 		return m.createFn(s)

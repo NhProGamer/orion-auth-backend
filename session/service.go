@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 
 	"orion-auth-backend/config"
 	"orion-auth-backend/model"
@@ -155,6 +156,22 @@ func (s *Service) RevokeAll(userID uuid.UUID, currentSessionID *uuid.UUID) (int6
 		return 0, pkg.ErrInternal("failed to revoke sessions")
 	}
 
+	slog.Info("sessions revoked", "user_id", userID, "count", count)
+	return count, nil
+}
+
+// RevokeAllInTx is the Tx-aware variant. Used by account.Service when
+// revoking sessions must commit with the user-row update (email change,
+// account deletion) so callers never end up with a changed email but
+// stale sessions still authorising the old one.
+func (s *Service) RevokeAllInTx(tx *gorm.DB, userID uuid.UUID, currentSessionID *uuid.UUID) (int64, error) {
+	if tx == nil {
+		return s.RevokeAll(userID, currentSessionID)
+	}
+	count, err := s.repo.WithTx(tx).RevokeAllForUser(userID, currentSessionID)
+	if err != nil {
+		return 0, pkg.ErrInternal("failed to revoke sessions")
+	}
 	slog.Info("sessions revoked", "user_id", userID, "count", count)
 	return count, nil
 }

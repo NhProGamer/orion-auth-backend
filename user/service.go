@@ -776,6 +776,17 @@ func (s *Service) UpdateFields(id uuid.UUID, fields map[string]any) error {
 	return s.repo.UpdateFields(id, fields)
 }
 
+// UpdateFieldsInTx is the Tx-aware variant. Callers that compose
+// session-revoke + email enqueue with the update use this so the
+// whole flow commits or rolls back atomically. When tx is nil it
+// falls back to the non-Tx path.
+func (s *Service) UpdateFieldsInTx(tx *gorm.DB, id uuid.UUID, fields map[string]any) error {
+	if tx == nil {
+		return s.repo.UpdateFields(id, fields)
+	}
+	return s.repo.WithTx(tx).UpdateFields(id, fields)
+}
+
 // FindByEmailChangeToken proxies to the repository.
 func (s *Service) FindByEmailChangeToken(tokenHash string) (*model.User, error) {
 	return s.repo.FindByEmailChangeToken(tokenHash)
