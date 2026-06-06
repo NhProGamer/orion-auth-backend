@@ -417,17 +417,27 @@ func (s *Service) RegisterAdmin(input RegisterInput, roleIDs []uuid.UUID) (*mode
 		DisplayName:  input.DisplayName,
 		Active:       true,
 	}
-	if err := s.repo.Create(u); err != nil {
-		slog.Error("failed to create user via admin path", "error", err)
-		return nil, pkg.ErrInternal("failed to create user")
-	}
 
-	if s.roleAssigner != nil {
+	// Tx: user row + every requested role assignment commit together.
+	// A partial failure used to leave a user with a subset of the
+	// intended roles and was logged as a Warn only; now it rolls back
+	// and the caller (M2M admin API) sees the exact failing role.
+	if err := s.withTx(func(repo RepositoryInterface, tx *gorm.DB) error {
+		if err := repo.Create(u); err != nil {
+			slog.Error("failed to create user via admin path", "error", err)
+			return pkg.ErrInternal("failed to create user")
+		}
+		if s.roleAssigner == nil {
+			return nil
+		}
 		for _, rid := range roleIDs {
-			if err := s.roleAssigner.AssignRole(u.ID, rid); err != nil {
-				slog.Warn("failed to assign role to admin-created user", "user_id", u.ID, "role_id", rid, "error", err)
+			if err := s.roleAssigner.AssignRoleInTx(tx, u.ID, rid); err != nil {
+				return pkg.ErrInternal("failed to assign role " + rid.String() + ": " + err.Error())
 			}
 		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	slog.Info("user registered via admin path", "user_id", u.ID, "email", u.Email, "roles", len(roleIDs))
