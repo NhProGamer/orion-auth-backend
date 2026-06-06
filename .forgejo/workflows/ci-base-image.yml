@@ -1,0 +1,49 @@
+# Rebuild the CI base image (Dockerfile.ci) when its inputs change.
+#
+# The base image is consumed by test.yml and wiki-docs.yml — it ships
+# pre-installed swag + a warmed Go module cache, eliminating ~60-90s of
+# cold-start work per workflow run.
+#
+# Manual trigger (workflow_dispatch) is supported so the image can be
+# bootstrapped before the other workflows reference it.
+
+name: CI Base Image
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'go.mod'
+      - 'go.sum'
+      - 'Dockerfile.ci'
+      - '.forgejo/workflows/ci-base-image.yml'
+  workflow_dispatch:
+
+jobs:
+  build-ci-image:
+    runs-on: docker
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: git.nhsoul.fr
+          username: ${{ github.actor }}
+          password: ${{ secrets.REGISTRY_TOKEN }}
+
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.ci
+          push: true
+          provenance: false
+          sbom: false
+          # Registry-backed BuildKit cache. mode=max exports intermediate
+          # layers so a Dockerfile.ci tweak that only touches apk install
+          # still skips the `go mod download` layer.
+          cache-from: type=registry,ref=git.nhsoul.fr/nhpro/orion-auth-backend-ci:buildcache
+          cache-to: type=registry,ref=git.nhsoul.fr/nhpro/orion-auth-backend-ci:buildcache,mode=max
+          tags: |
+            git.nhsoul.fr/nhpro/orion-auth-backend-ci:latest

@@ -1,0 +1,44 @@
+# syntax=docker/dockerfile:1.7
+#
+# CI base image — used by .forgejo/workflows/test.yml and wiki-docs.yml.
+# Pre-installs the swag binary and pre-warms the Go module cache against
+# the current go.sum, so the per-PR workflow no longer pays the cold
+# `apk add` + `go install swag` + `go mod download` cost on every run.
+#
+# Rebuilt automatically by .forgejo/workflows/ci-base-image.yml when
+# go.mod, go.sum, or this Dockerfile changes.
+#
+# Why this approach instead of actions/cache@v4: the Forgejo runner's
+# cache backend has been unreachable from inside workflow containers
+# twice (commits 98fc590 / d93b550 — both reverted). The OCI registry
+# cache is proven working (see release.yml), so we lean on the same
+# mechanism here.
+
+FROM golang:1.25-alpine
+
+ARG SWAG_VERSION=v1.16.6
+
+# git + build-base: required by go modules using cgo / git deps.
+# ca-certificates: TLS to fetch modules and to clone the wiki repo.
+# python3: used by wiki-docs.yml for scripts/swagger-to-wiki.py.
+RUN apk add --no-cache \
+        git \
+        ca-certificates \
+        build-base \
+        python3 \
+        bash
+
+# Pre-install swag at the version pinned across the workflows.
+RUN go install github.com/swaggo/swag/cmd/swag@${SWAG_VERSION}
+
+# Pre-warm /go/pkg/mod with the current go.sum. Subsequent `go mod
+# download` calls inside the runner container resolve from cache and
+# stay near-instant unless go.sum changed.
+WORKDIR /warm
+COPY go.mod go.sum ./
+RUN go mod download
+RUN rm -rf /warm
+
+# Standard build env. WORKDIR is left at /workspace so the runner can
+# clone into it.
+WORKDIR /workspace
