@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/lib/pq"
+	"gorm.io/gorm"
 
 	"orion-auth-backend/crypto"
 	"orion-auth-backend/model"
@@ -260,7 +261,8 @@ type mockUserRepo struct {
 	updateFieldsFn func(id uuid.UUID, fields map[string]any) error
 }
 
-func (m *mockUserRepo) Create(_ *model.User) error { return nil }
+func (m *mockUserRepo) WithTx(_ *gorm.DB) user.RepositoryInterface { return m }
+func (m *mockUserRepo) Create(_ *model.User) error                 { return nil }
 func (m *mockUserRepo) FindByID(id uuid.UUID) (*model.User, error) {
 	if m.findByIDFn != nil {
 		return m.findByIDFn(id)

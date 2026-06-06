@@ -18,6 +18,18 @@ func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{db: db}
 }
 
+// WithTx returns a Repository pointing at tx. The receiver is left
+// unchanged so concurrent code paths cannot collide on the underlying
+// *gorm.DB handle. The service composes Tx-scoped writes via:
+//
+//	s.db.Transaction(func(tx *gorm.DB) error {
+//	    if err := s.repo.WithTx(tx).Create(u); err != nil { ... }
+//	    ...
+//	})
+func (r *Repository) WithTx(tx *gorm.DB) RepositoryInterface {
+	return &Repository{db: tx}
+}
+
 func (r *Repository) Create(user *model.User) error {
 	return r.db.Create(user).Error
 }

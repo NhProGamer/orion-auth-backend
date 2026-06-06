@@ -9,6 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"gorm.io/gorm"
+
 	"orion-auth-backend/email"
 	"orion-auth-backend/model"
 	"orion-auth-backend/pkg/clock"
@@ -30,6 +32,10 @@ type mockUserRepo struct {
 	findByResetTokenFn  func(tokenHash string) (*model.User, error)
 	findByVerifyTokenFn func(tokenHash string) (*model.User, error)
 }
+
+// WithTx returns the same mock — the in-memory fake has no transaction
+// semantics. Tests that need to assert rollback drive a real *gorm.DB.
+func (m *mockUserRepo) WithTx(_ *gorm.DB) RepositoryInterface { return m }
 
 func (m *mockUserRepo) Create(user *model.User) error {
 	if m.createFn != nil {

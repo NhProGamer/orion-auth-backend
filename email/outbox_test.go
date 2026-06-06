@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"gorm.io/gorm"
+
 	"orion-auth-backend/model"
 )
 
@@ -54,6 +56,13 @@ func (r *fakeOutboxRepo) Enqueue(e *model.OutboundEmail) error {
 	e.CreatedAt = r.clock
 	r.rows = append(r.rows, *e)
 	return nil
+}
+
+// EnqueueInTx ignores the Tx in tests — the fake has no notion of
+// rollback. Tests that need to assert rollback semantics use a
+// separate harness that drives the real gorm Tx.
+func (r *fakeOutboxRepo) EnqueueInTx(_ *gorm.DB, e *model.OutboundEmail) error {
+	return r.Enqueue(e)
 }
 
 func (r *fakeOutboxRepo) ProcessBatch(limit int, backoff BackoffFn, deliver func(*model.OutboundEmail) error) (int, error) {

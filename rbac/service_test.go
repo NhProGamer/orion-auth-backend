@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"orion-auth-backend/model"
 )
@@ -28,6 +29,8 @@ type mockRbacRepo struct {
 	removeRoleFn         func(userID, roleID uuid.UUID) error
 	getUserPermissionsFn func(userID uuid.UUID) ([]string, error)
 }
+
+func (m *mockRbacRepo) WithTx(_ *gorm.DB) RepositoryInterface { return m }
 
 func (m *mockRbacRepo) CreateRole(role *model.Role) error {
 	if m.createRoleFn != nil {

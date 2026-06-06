@@ -4,6 +4,7 @@ import (
 	"log/slog"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 
 	"orion-auth-backend/model"
 	"orion-auth-backend/pkg"
@@ -15,6 +16,13 @@ type Service struct {
 
 func NewService(repo RepositoryInterface) *Service {
 	return &Service{repo: repo}
+}
+
+// WithTx returns a Service whose repository writes go through tx.
+// Used by user.Service / federation provisioning to compose role
+// assignment with the user-row INSERT atomically.
+func (s *Service) WithTx(tx *gorm.DB) *Service {
+	return &Service{repo: s.repo.WithTx(tx)}
 }
 
 // --- Roles ---

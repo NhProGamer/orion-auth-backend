@@ -17,6 +17,13 @@ func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{db: db}
 }
 
+// WithTx returns a Repository bound to the given Tx. Used by the
+// service layer to compose role assignments inside a caller's
+// transaction without leaking the *gorm.DB to other packages.
+func (r *Repository) WithTx(tx *gorm.DB) RepositoryInterface {
+	return &Repository{db: tx}
+}
+
 // --- Roles ---
 
 func (r *Repository) CreateRole(role *model.Role) error {

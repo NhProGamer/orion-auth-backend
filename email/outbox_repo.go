@@ -16,6 +16,14 @@ import (
 type OutboxRepository interface {
 	Enqueue(e *model.OutboundEmail) error
 
+	// EnqueueInTx enqueues the row using tx instead of the repository's
+	// own *gorm.DB handle. Lets the service compose `INSERT users` +
+	// `INSERT outbound_emails` + role assignments inside a single
+	// transaction — if any step fails the whole thing rolls back, so we
+	// never end up with a user row whose verification email was never
+	// queued.
+	EnqueueInTx(tx *gorm.DB, e *model.OutboundEmail) error
+
 	// ProcessBatch fetches up to `limit` due rows under FOR UPDATE
 	// SKIP LOCKED, calls `deliver` for each, and either marks the row
 	// sent (deliver returned nil) or bumps attempts/next_retry_at
@@ -43,6 +51,17 @@ func NewOutboxRepository(db *gorm.DB) OutboxRepository {
 }
 
 func (r *gormOutboxRepository) Enqueue(e *model.OutboundEmail) error {
+	return enqueueOutboundEmail(r.db, e)
+}
+
+func (r *gormOutboxRepository) EnqueueInTx(tx *gorm.DB, e *model.OutboundEmail) error {
+	return enqueueOutboundEmail(tx, e)
+}
+
+// enqueueOutboundEmail centralises the default-field policy so the two
+// public methods don't drift. Whatever handle (db or tx) is passed gets
+// the row; everything else is identical.
+func enqueueOutboundEmail(db *gorm.DB, e *model.OutboundEmail) error {
 	if e.ID == uuid.Nil {
 		id, _ := uuid.NewV7()
 		e.ID = id
@@ -53,7 +72,7 @@ func (r *gormOutboxRepository) Enqueue(e *model.OutboundEmail) error {
 	if e.Status == "" {
 		e.Status = model.OutboundStatusPending
 	}
-	return r.db.Create(e).Error
+	return db.Create(e).Error
 }
 
 func (r *gormOutboxRepository) ProcessBatch(limit int, backoff BackoffFn, deliver func(*model.OutboundEmail) error) (int, error) {
