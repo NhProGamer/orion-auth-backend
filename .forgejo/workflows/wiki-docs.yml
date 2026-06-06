@@ -11,21 +11,30 @@ env:
 jobs:
   update-wiki:
     runs-on: docker
+    # Same base image as test.yml — swag + python3 + warm module cache
+    # are all preinstalled, so the per-push wiki refresh skips the cold
+    # apk + go install + go mod download steps.
     container:
-      image: golang:1.25-alpine
+      image: git.nhsoul.fr/nhpro/orion-auth-backend-ci:latest
     steps:
-      - name: Install system dependencies
-        run: apk add --no-cache git python3
-
       - name: Checkout
         run: |
           git clone https://oauth2:${{ secrets.WIKI_TOKEN }}@git.nhsoul.fr/nhpro/orion-auth-backend.git .
           git checkout ${{ github.sha }}
 
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: /go/pkg/mod
+          key: ${{ runner.os }}-go-mod-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-mod-
+
+      - name: Resolve modules
+        run: go mod download
+
       - name: Generate swagger docs
-        run: |
-          go install github.com/swaggo/swag/cmd/swag@${{ env.SWAG_VERSION }}
-          swag init -g main.go -o docs/
+        run: swag init -g main.go -o docs/
 
       - name: Convert and push to wiki
         run: |

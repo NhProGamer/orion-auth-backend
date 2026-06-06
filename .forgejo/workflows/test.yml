@@ -15,24 +15,44 @@ env:
 jobs:
   test:
     runs-on: docker
+    # Pre-warmed CI base image: ships swag + a /go/pkg/mod that already
+    # contains every dep recorded in go.sum at last image build time.
+    # See Dockerfile.ci and .forgejo/workflows/ci-base-image.yml.
     container:
-      image: golang:1.25-alpine
+      image: git.nhsoul.fr/nhpro/orion-auth-backend-ci:latest
     steps:
-      - name: Install system dependencies
-        run: apk add --no-cache git build-base
-
       - name: Checkout
         run: |
           git clone https://oauth2:${{ github.token }}@git.nhsoul.fr/${{ github.repository }}.git .
           git checkout ${{ github.sha }}
 
-      - name: Download Go modules
+      # Per-PR caches on top of the base image:
+      # - /go/pkg/mod covers deps added since the image's go.sum.
+      # - /root/.cache/go-build is the incremental compilation cache;
+      #   restoring it cuts `go test` recompilation by ~30s when the
+      #   touched package set is small.
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: /go/pkg/mod
+          key: ${{ runner.os }}-go-mod-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-mod-
+
+      - name: Cache Go build
+        uses: actions/cache@v4
+        with:
+          path: /root/.cache/go-build
+          key: ${{ runner.os }}-go-build-${{ hashFiles('go.sum', '**/*.go') }}
+          restore-keys: |
+            ${{ runner.os }}-go-build-
+
+      - name: Resolve modules
+        # No-op when the cache + base image already cover everything.
         run: go mod download
 
       - name: Generate swagger docs
-        run: |
-          go install github.com/swaggo/swag/cmd/swag@${{ env.SWAG_VERSION }}
-          swag init -g main.go -o docs/
+        run: swag init -g main.go -o docs/
 
       - name: Vet
         run: go vet ./...
