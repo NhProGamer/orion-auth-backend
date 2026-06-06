@@ -14,6 +14,7 @@ import (
 	"orion-auth-backend/crypto"
 	"orion-auth-backend/model"
 	"orion-auth-backend/pkg"
+	"orion-auth-backend/pkg/clock"
 	"orion-auth-backend/session"
 	"orion-auth-backend/testutil"
 	"orion-auth-backend/user"
@@ -388,6 +389,9 @@ func withAccessTokenJWTSigner(s AccessTokenJWTSigner) optModifier {
 }
 func withResourceValidator(v ResourceValidator) optModifier {
 	return func(o *Options) { o.ResourceValidator = v }
+}
+func withClock(c clock.Clock) optModifier {
+	return func(o *Options) { o.Clock = c }
 }
 
 func newTestService(oauthRepo *mockOAuthRepo, userRepo *mockUserRepo, sessionRepo *mockSessionRepo, mods ...optModifier) *Service {
@@ -2406,5 +2410,37 @@ func TestContainsScope(t *testing.T) {
 	}
 	if containsScope([]string{"openid", "profile"}, "admin") {
 		t.Error("expected false")
+	}
+}
+
+// TestCreatePAR_UsesInjectedClock pins the contract that PAR expiry is
+// computed from the injected clock, not wall time. Used to verify clock
+// injection is actually plumbed through this code path; future TTL
+// changes will regress here if they bypass the clock.
+func TestCreatePAR_UsesInjectedClock(t *testing.T) {
+	t0 := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	fake := clock.NewFake(t0)
+
+	var capturedExpiry time.Time
+	oauthRepo := &mockOAuthRepo{
+		createPARFn: func(par *model.PushedAuthorizationRequest) error {
+			capturedExpiry = par.ExpiresAt
+			return nil
+		},
+	}
+	svc := newTestService(oauthRepo, &mockUserRepo{}, &mockSessionRepo{}, withClock(fake))
+
+	client := newTestClient()
+	_, err := svc.CreatePAR(client, InitAuthorizeParams{
+		ResponseType: "code",
+		RedirectURI:  "https://example.com/callback",
+		Scope:        "openid",
+	})
+	if err != nil {
+		t.Fatalf("CreatePAR: %v", err)
+	}
+	want := t0.Add(60 * time.Second)
+	if !capturedExpiry.Equal(want) {
+		t.Errorf("PAR expiry: got %v, want %v", capturedExpiry, want)
 	}
 }

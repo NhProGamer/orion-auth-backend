@@ -53,7 +53,7 @@ func (s *Service) InitDeviceAuthorization(client *model.OAuthClient, scope, issu
 		Scopes:         pq.StringArray(scopes),
 		Status:         "pending",
 		IntervalSecs:   5,
-		ExpiresAt:      time.Now().Add(s.cfg.DeviceCodeTTL),
+		ExpiresAt:      s.clock.Now().Add(s.cfg.DeviceCodeTTL),
 	}
 
 	if err := s.repo.CreateDeviceCode(dc); err != nil {
@@ -191,7 +191,7 @@ func (s *Service) ExchangeDeviceCode(client *model.OAuthClient, deviceCodeRaw st
 	}
 
 	// Check polling interval
-	now := time.Now()
+	now := s.clock.Now()
 	if dc.LastPolledAt != nil && now.Sub(*dc.LastPolledAt) < time.Duration(dc.IntervalSecs)*time.Second {
 		return nil, pkg.ErrSlowDown()
 	}

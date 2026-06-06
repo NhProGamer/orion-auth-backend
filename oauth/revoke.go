@@ -33,7 +33,7 @@ func (s *Service) Revoke(token, tokenTypeHint string, client *model.OAuthClient)
 			if exp, ok := claims["exp"].(float64); ok {
 				expiry = time.Unix(int64(exp), 0)
 			} else {
-				expiry = time.Now().Add(24 * time.Hour) // safety: short-lived AT
+				expiry = s.clock.Now().Add(24 * time.Hour) // safety: short-lived AT
 			}
 			if jti != "" {
 				if err := s.repo.RevokeJTI(jti, expiry); err != nil {

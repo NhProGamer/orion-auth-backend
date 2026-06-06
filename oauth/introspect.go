@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -203,7 +202,7 @@ func (s *Service) deniedByIntrospectPolicy(tokenType string, tokenClientID uuid.
 }
 
 func (s *Service) introspectRefreshToken(rt *model.RefreshToken, issuer string, requestingClientID uuid.UUID) *IntrospectResponse {
-	if rt.Revoked || rt.WasRotated() || rt.ExpiresAt.Before(time.Now()) {
+	if rt.Revoked || rt.WasRotated() || rt.ExpiresAt.Before(s.clock.Now()) {
 		return &IntrospectResponse{Active: false}
 	}
 

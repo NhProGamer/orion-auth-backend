@@ -20,6 +20,7 @@ import (
 	"orion-auth-backend/crypto"
 	"orion-auth-backend/model"
 	"orion-auth-backend/pkg"
+	"orion-auth-backend/pkg/clock"
 	"orion-auth-backend/policy/inputs"
 	"orion-auth-backend/session"
 	"orion-auth-backend/user"
@@ -123,6 +124,7 @@ type Service struct {
 	resourceValidator ResourceValidator
 	idTokenValidator  IDTokenValidator
 	roleProvider      RoleProvider
+	clock             clock.Clock
 }
 
 // Options is the constructor surface for oauth.Service.
@@ -151,9 +153,19 @@ type Options struct {
 	PolicyEvaluator      PolicyEvaluator
 	ResourceValidator    ResourceValidator
 	RoleProvider         RoleProvider
+
+	// Clock injects the time source. nil → clock.Real(). Tests pin
+	// or advance a *clock.Fake to assert exact TTL behavior on
+	// auth requests, authcodes, PAR, device codes, and access/refresh
+	// token expiry.
+	Clock clock.Clock
 }
 
 func NewService(o Options) *Service {
+	clk := o.Clock
+	if clk == nil {
+		clk = clock.Real()
+	}
 	return &Service{
 		repo:              o.Repo,
 		userService:       o.UserService,
@@ -168,6 +180,7 @@ func NewService(o Options) *Service {
 		policyEvaluator:   o.PolicyEvaluator,
 		resourceValidator: o.ResourceValidator,
 		roleProvider:      o.RoleProvider,
+		clock:             clk,
 	}
 }
 
@@ -300,7 +313,7 @@ func (s *Service) CreatePAR(client *model.OAuthClient, params InitAuthorizeParam
 		RequestURI: requestURI,
 		ClientID:   client.ID,
 		Params:     string(paramsJSON),
-		ExpiresAt:  time.Now().Add(time.Duration(expiresIn) * time.Second),
+		ExpiresAt:  s.clock.Now().Add(time.Duration(expiresIn) * time.Second),
 	}
 
 	if err := s.repo.CreatePAR(par); err != nil {
@@ -486,7 +499,7 @@ func (s *Service) InitAuthorize(client *model.OAuthClient, params InitAuthorizeP
 		ResponseType: params.ResponseType,
 		Scopes:       pq.StringArray(scopes),
 		Audience:     validatedAudience,
-		ExpiresAt:    time.Now().Add(10 * time.Minute),
+		ExpiresAt:    s.clock.Now().Add(10 * time.Minute),
 	}
 
 	if params.State != "" {
@@ -587,7 +600,7 @@ func (s *Service) handlePromptNone(client *model.OAuthClient, params InitAuthori
 		UserID:        &userID,
 		Authenticated: true,
 		ConsentGiven:  true,
-		ExpiresAt:     time.Now().Add(1 * time.Minute),
+		ExpiresAt:     s.clock.Now().Add(1 * time.Minute),
 	}
 	if params.State != "" {
 		req.State = &params.State
@@ -602,7 +615,7 @@ func (s *Service) handlePromptNone(client *model.OAuthClient, params InitAuthori
 	if params.Claims != "" {
 		req.ClaimsParam = &params.Claims
 	}
-	now := time.Now()
+	now := s.clock.Now()
 	req.AuthTime = &now
 
 	if err := s.repo.CreateAuthRequest(req); err != nil {
@@ -737,7 +750,7 @@ func (s *Service) AuthorizeLogin(input AuthorizeLoginInput, ipAddress, userAgent
 	req.UserID = &u.ID
 	req.RememberMe = input.RememberMe
 	req.AuthMethods = append(req.AuthMethods, "pwd")
-	now := time.Now()
+	now := s.clock.Now()
 	if needsMFA {
 		// Don't mark as authenticated yet — MFA step required
 	} else {
@@ -803,7 +816,7 @@ func (s *Service) AuthorizeRegister(input AuthorizeRegisterInput, ipAddress, use
 	// Bind the user to the request and bump expiry so the request survives
 	// until the user clicks the verify-email link (24h).
 	req.UserID = &newUser.ID
-	req.ExpiresAt = time.Now().Add(24 * time.Hour)
+	req.ExpiresAt = s.clock.Now().Add(24 * time.Hour)
 	if err := s.repo.UpdateAuthRequest(req); err != nil {
 		return nil, pkg.ErrServerError("failed to update authorization request")
 	}
@@ -857,7 +870,7 @@ func (s *Service) AuthorizeMFA(input AuthorizeMFAInput) (*AuthorizeLoginResponse
 
 	req.Authenticated = true
 	req.AuthMethods = append(req.AuthMethods, "otp")
-	now := time.Now()
+	now := s.clock.Now()
 	req.AuthTime = &now
 
 	// Check consent
@@ -971,14 +984,14 @@ func (s *Service) AuthorizeConsent(input AuthorizeConsentInput, ipAddress, userA
 			UserID:    *req.UserID,
 			ClientID:  req.ClientID,
 			Scopes:    pq.StringArray(grantedScopes),
-			GrantedAt: time.Now(),
+			GrantedAt: s.clock.Now(),
 		}
 		if err := s.repo.CreateConsent(consent); err != nil {
 			return nil, pkg.ErrServerError("failed to store consent")
 		}
 	} else {
 		consent.Scopes = pq.StringArray(grantedScopes)
-		consent.GrantedAt = time.Now()
+		consent.GrantedAt = s.clock.Now()
 		if err := s.repo.UpdateConsent(consent); err != nil {
 			return nil, pkg.ErrServerError("failed to update consent")
 		}
@@ -1043,7 +1056,7 @@ func (s *Service) ResumeAuthorizeAfterExternalLogin(requestID, userID uuid.UUID,
 
 	req.UserID = &u.ID
 	req.AuthMethods = append(req.AuthMethods, "fed:"+providerName)
-	now := time.Now()
+	now := s.clock.Now()
 	if !needsMFA {
 		req.Authenticated = true
 		req.AuthTime = &now
@@ -1128,7 +1141,7 @@ func (s *Service) CompleteAfterEmailVerification(requestID, userID uuid.UUID, ip
 		return "", pkg.ErrInvalidRequest("authorization request does not match user")
 	}
 
-	now := time.Now()
+	now := s.clock.Now()
 	req.Authenticated = true
 	req.AuthTime = &now
 	req.ConsentGiven = true
@@ -1189,7 +1202,7 @@ func (s *Service) completeAuthorize(req *model.AuthorizationRequest, ipAddress, 
 		Scopes:      req.Scopes,
 		Audience:    req.Audience,
 		SessionID:   &sess.ID,
-		ExpiresAt:   time.Now().Add(s.cfg.AuthCodeTTL),
+		ExpiresAt:   s.clock.Now().Add(s.cfg.AuthCodeTTL),
 	}
 	if req.CodeChallenge != nil {
 		authCode.CodeChallenge = req.CodeChallenge
@@ -1251,7 +1264,7 @@ func (s *Service) completeAuthorize(req *model.AuthorizationRequest, ipAddress, 
 				SessionID: &sess.ID,
 				Scopes:    req.Scopes,
 				Audience:  req.Audience,
-				ExpiresAt: time.Now().Add(time.Duration(client.AccessTokenTTL) * time.Second),
+				ExpiresAt: s.clock.Now().Add(time.Duration(client.AccessTokenTTL) * time.Second),
 			}
 			if err := s.repo.CreateAccessToken(accessToken); err != nil {
 				return nil, pkg.ErrServerError("failed to store access token")
@@ -1271,7 +1284,7 @@ func (s *Service) completeAuthorize(req *model.AuthorizationRequest, ipAddress, 
 			if req.Nonce != nil {
 				nonce = *req.Nonce
 			}
-			authTime := time.Now()
+			authTime := s.clock.Now()
 			if req.AuthTime != nil {
 				authTime = *req.AuthTime
 			}
@@ -1471,7 +1484,7 @@ func (s *Service) ExchangeClientCredentials(client *model.OAuthClient, scope, au
 		Scopes:    pq.StringArray(scopes),
 		Audience:  tokenAudience,
 		JTI:       jtiPtr,
-		ExpiresAt: time.Now().Add(time.Duration(ttl) * time.Second),
+		ExpiresAt: s.clock.Now().Add(time.Duration(ttl) * time.Second),
 	}
 
 	if err := s.repo.CreateAccessToken(accessToken); err != nil {
@@ -1514,7 +1527,7 @@ func (s *Service) ExchangeRefreshToken(client *model.OAuthClient, refreshTokenRa
 			return pkg.ErrInvalidGrant("token not issued to this client")
 		}
 
-		if rt.ExpiresAt.Before(time.Now()) {
+		if rt.ExpiresAt.Before(s.clock.Now()) {
 			return pkg.ErrInvalidGrant("refresh token expired")
 		}
 
@@ -1576,7 +1589,7 @@ func (s *Service) ExchangeRefreshToken(client *model.OAuthClient, refreshTokenRa
 
 		// Issue new tokens (preserve audience from original token)
 		resp, err = s.issueTokensWithOpts(tx, client, &rt.UserID, &rt.SessionID, grantedScopes, issueOpts{
-			authTime: time.Now(),
+			authTime: s.clock.Now(),
 			audience: rt.Audience,
 		})
 		if err != nil {
@@ -1605,7 +1618,7 @@ type issueOpts struct {
 }
 
 func (s *Service) issueTokens(tx RepositoryInterface, client *model.OAuthClient, userID *uuid.UUID, sessionID *uuid.UUID, scopes pq.StringArray) (*TokenResponse, error) {
-	return s.issueTokensWithOpts(tx, client, userID, sessionID, scopes, issueOpts{authTime: time.Now()})
+	return s.issueTokensWithOpts(tx, client, userID, sessionID, scopes, issueOpts{authTime: s.clock.Now()})
 }
 
 func (s *Service) issueTokensWithOpts(tx RepositoryInterface, client *model.OAuthClient, userID *uuid.UUID, sessionID *uuid.UUID, scopes pq.StringArray, opts issueOpts) (*TokenResponse, error) {
@@ -1736,7 +1749,7 @@ func (s *Service) issueTokensWithOpts(tx RepositoryInterface, client *model.OAut
 		Scopes:    scopes,
 		Audience:  opts.audience,
 		FamilyID:  familyID,
-		ExpiresAt: time.Now().Add(time.Duration(client.RefreshTokenTTL) * time.Second),
+		ExpiresAt: s.clock.Now().Add(time.Duration(client.RefreshTokenTTL) * time.Second),
 	}
 
 	if err := tx.CreateRefreshToken(refreshToken); err != nil {
@@ -1752,7 +1765,7 @@ func (s *Service) issueTokensWithOpts(tx RepositoryInterface, client *model.OAut
 		Scopes:         scopes,
 		Audience:       opts.audience,
 		JTI:            atJTI,
-		ExpiresAt:      time.Now().Add(atTTL),
+		ExpiresAt:      s.clock.Now().Add(atTTL),
 	}
 
 	if err := tx.CreateAccessToken(accessToken); err != nil {
@@ -1772,7 +1785,7 @@ func (s *Service) issueTokensWithOpts(tx RepositoryInterface, client *model.OAut
 		atHashValue := computeATHash(rawAT)
 		authTime := opts.authTime
 		if authTime.IsZero() {
-			authTime = time.Now()
+			authTime = s.clock.Now()
 		}
 
 		sectorID := ""
