@@ -1,14 +1,10 @@
 package middleware
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 
 	"orion-auth-backend/pkg"
 )
@@ -20,38 +16,6 @@ const (
 	ContextClientID  = "client_id"
 	ContextScopes    = "scopes"
 )
-
-// AccessTokenRow is a lightweight struct for token lookup. Exported so other
-// middleware (RequireClientScope, future audience-gated middlewares) can
-// reuse LookupAccessToken without duplicating the schema mapping.
-type AccessTokenRow struct {
-	ID        string    `gorm:"column:id"`
-	ClientID  string    `gorm:"column:client_id"`
-	UserID    *string   `gorm:"column:user_id"`
-	SessionID *string   `gorm:"column:session_id"`
-	Scopes    string    `gorm:"column:scopes"`
-	Audience  *string   `gorm:"column:audience"`
-	ExpiresAt time.Time `gorm:"column:expires_at"`
-	Revoked   bool      `gorm:"column:revoked"`
-}
-
-// LookupAccessToken hashes the raw bearer and returns the matching row if it
-// is non-revoked and unexpired. Returns (nil, nil) when no such token exists.
-// Shared by BearerAuth and RequireClientScope.
-func LookupAccessToken(db *gorm.DB, raw string) (*AccessTokenRow, error) {
-	if raw == "" {
-		return nil, nil
-	}
-	hash := hashTokenSHA256(raw)
-	var row AccessTokenRow
-	err := db.Table("access_tokens").
-		Where("id = ? AND revoked = FALSE AND expires_at > ?", hash, time.Now()).
-		First(&row).Error
-	if err != nil {
-		return nil, err
-	}
-	return &row, nil
-}
 
 // ParseBearer extracts the raw token from an `Authorization: Bearer …` header.
 // Returns "" if the header is missing or malformed.
@@ -66,9 +30,12 @@ func ParseBearer(authHeader string) string {
 	return parts[1]
 }
 
-// BearerAuth validates the Bearer token from the Authorization header.
-// It looks up the token hash in the access_tokens table.
-func BearerAuth(db *gorm.DB) gin.HandlerFunc {
+// BearerAuth validates the Bearer token from the Authorization header by
+// consulting the TokenLookup service (which hashes + checks revocation +
+// expiry), then verifies the parent session is still alive when the token
+// is user-bound. Both interfaces let the middleware be unit-tested without
+// a database.
+func BearerAuth(tokens TokenLookup, sessions SessionValidator) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		raw := ParseBearer(c.GetHeader("Authorization"))
 		if raw == "" {
@@ -77,22 +44,16 @@ func BearerAuth(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		token, err := LookupAccessToken(db, raw)
+		token, err := tokens.LookupActiveAccessToken(raw)
 		if err != nil || token == nil {
 			pkg.HandleError(c, pkg.ErrUnauthorized("invalid or expired token"))
 			c.Abort()
 			return
 		}
 
-		// Verify associated session is still active (if user-bound token)
 		if token.SessionID != nil {
-			var sessionActive bool
-			err = db.Table("sessions").
-				Select("COUNT(*) > 0").
-				Where("id = ? AND revoked = FALSE AND expires_at > ?", *token.SessionID, time.Now()).
-				Scan(&sessionActive).Error
-
-			if err != nil || !sessionActive {
+			active, err := sessions.IsActive(*token.SessionID)
+			if err != nil || !active {
 				pkg.HandleError(c, pkg.ErrUnauthorized("session expired or revoked"))
 				c.Abort()
 				return
@@ -100,18 +61,14 @@ func BearerAuth(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		c.Set(ContextTokenID, token.ID)
-		if cid, err := uuid.Parse(token.ClientID); err == nil {
-			c.Set(ContextClientID, cid)
-		}
+		c.Set(ContextClientID, token.ClientID)
 		if token.UserID != nil {
-			uid, _ := uuid.Parse(*token.UserID)
-			c.Set(ContextUserID, uid)
+			c.Set(ContextUserID, *token.UserID)
 		}
 		if token.SessionID != nil {
-			sid, _ := uuid.Parse(*token.SessionID)
-			c.Set(ContextSessionID, sid)
+			c.Set(ContextSessionID, *token.SessionID)
 		}
-		c.Set(ContextScopes, parseScopes(token.Scopes))
+		c.Set(ContextScopes, []string(token.Scopes))
 
 		c.Next()
 	}
@@ -158,19 +115,4 @@ func GetScopes(c *gin.Context) []string {
 		return nil
 	}
 	return scopes
-}
-
-func hashTokenSHA256(raw string) string {
-	h := sha256.Sum256([]byte(raw))
-	return hex.EncodeToString(h[:])
-}
-
-func parseScopes(raw string) []string {
-	// PostgreSQL text[] comes as {scope1,scope2}
-	raw = strings.TrimPrefix(raw, "{")
-	raw = strings.TrimSuffix(raw, "}")
-	if raw == "" {
-		return nil
-	}
-	return strings.Split(raw, ",")
 }

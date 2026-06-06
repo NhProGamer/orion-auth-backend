@@ -332,6 +332,9 @@ func main() {
 		db:              db,
 		hasher:          hasher,
 		authRL:          authRateLimiter,
+		clientService:   clientService,
+		oauthService:    oauthService,
+		sessionService:  sessionService,
 		rbacService:     rbacService,
 		policyService:   policyService,
 		reauthService:   reauthService,
@@ -401,6 +404,9 @@ type setupRouterArgs struct {
 	db              *gorm.DB
 	hasher          *crypto.Argon2Hasher
 	authRL          *middleware.RateLimiter
+	clientService   *client.Service
+	oauthService    *oauth.Service
+	sessionService  *session.Service
 	rbacService     *rbac.Service
 	policyService   *policy.Service
 	reauthService   *reauth.Service
@@ -487,7 +493,7 @@ func setupRouter(a setupRouterArgs) *gin.Engine {
 	// OAuth2 endpoints (root level, rate limited)
 	oauthRL := middleware.NewRateLimiter(10, 3)
 	jwksCache := middleware.NewJWKSCache()
-	clientAuthMiddleware := middleware.ClientAuth(db, hasher, cfg.Issuer+"/token", jwksCache, a.hmacEncKey, policy.NewDeciderAdapter(policyService))
+	clientAuthMiddleware := middleware.ClientAuth(a.clientService, hasher, cfg.Issuer+"/token", jwksCache, a.hmacEncKey, policy.NewDeciderAdapter(policyService))
 	a.oauthHandler.SetJWKSCache(jwksCache)
 	a.oauthHandler.RegisterRoutes(router, clientAuthMiddleware, oauthRL.Middleware(), cfg.Issuer)
 
@@ -498,7 +504,7 @@ func setupRouter(a setupRouterArgs) *gin.Engine {
 	router.DELETE("/register/:client_id", a.dcrHandler.DeleteRegistration)
 
 	// OIDC endpoints (root level)
-	bearerAuthMiddleware := middleware.BearerAuth(db)
+	bearerAuthMiddleware := middleware.BearerAuth(a.oauthService, a.sessionService)
 	a.oidcHandler.RegisterRoutes(router, bearerAuthMiddleware, oauthRL.Middleware())
 
 	// Account permission gates (RBAC permissions seeded by migration 028).
@@ -558,15 +564,15 @@ func setupRouter(a setupRouterArgs) *gin.Engine {
 	const m2mAudience = "urn:orion:m2m"
 	m2mBase := router.Group("/api/v1/m2m")
 	m2mRead := m2mBase.Group("")
-	m2mRead.Use(middleware.RequireClientScope(db, "m2m:users:read", m2mAudience))
+	m2mRead.Use(middleware.RequireClientScope(a.oauthService, "m2m:users:read", m2mAudience))
 	m2mWrite := m2mBase.Group("")
-	m2mWrite.Use(middleware.RequireClientScope(db, "m2m:users:write", m2mAudience))
+	m2mWrite.Use(middleware.RequireClientScope(a.oauthService, "m2m:users:write", m2mAudience))
 	m2mDelete := m2mBase.Group("")
-	m2mDelete.Use(middleware.RequireClientScope(db, "m2m:users:delete", m2mAudience))
+	m2mDelete.Use(middleware.RequireClientScope(a.oauthService, "m2m:users:delete", m2mAudience))
 	m2mManageAuth := m2mBase.Group("")
-	m2mManageAuth.Use(middleware.RequireClientScope(db, "m2m:users:manage_auth", m2mAudience))
+	m2mManageAuth.Use(middleware.RequireClientScope(a.oauthService, "m2m:users:manage_auth", m2mAudience))
 	m2mManageRoles := m2mBase.Group("")
-	m2mManageRoles.Use(middleware.RequireClientScope(db, "m2m:users:manage_roles", m2mAudience))
+	m2mManageRoles.Use(middleware.RequireClientScope(a.oauthService, "m2m:users:manage_roles", m2mAudience))
 	a.m2mHandler.RegisterRoutes(m2mRead, m2mWrite, m2mDelete, m2mManageAuth, m2mManageRoles)
 
 	// Admin API routes (authenticated + RBAC)

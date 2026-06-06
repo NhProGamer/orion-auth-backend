@@ -187,6 +187,30 @@ func (s *Service) loadRoles(userID uuid.UUID) (roles, permissions []string) {
 	return roles, permissions
 }
 
+// LookupActiveAccessToken hashes a raw bearer string and returns the
+// matching access token row only when it is not revoked and not expired.
+// Returns (nil, nil) when no such token exists — the caller (typically
+// middleware.BearerAuth or RequireClientScope) treats that as "not
+// authenticated". Replaces the raw SELECT against access_tokens that
+// used to live in middleware/auth.go.
+func (s *Service) LookupActiveAccessToken(raw string) (*model.AccessToken, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	hash := crypto.HashToken(raw)
+	token, err := s.repo.FindAccessToken(hash)
+	if err != nil {
+		return nil, err
+	}
+	if token == nil {
+		return nil, nil
+	}
+	if !token.IsValid() {
+		return nil, nil
+	}
+	return token, nil
+}
+
 // TokenResponse is the standard OAuth2 token response.
 type TokenResponse struct {
 	AccessToken  string `json:"access_token"`

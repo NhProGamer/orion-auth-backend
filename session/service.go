@@ -85,6 +85,21 @@ func (s *Service) Create(input CreateInput) (*model.Session, error) {
 	return session, nil
 }
 
+// IsActive returns true when the session exists, is not revoked, and has
+// not yet expired. Used by middleware.BearerAuth to gate user-bound access
+// tokens behind their parent session — moves the rule out of a raw SELECT
+// in the middleware and into the service that owns sessions.
+func (s *Service) IsActive(id uuid.UUID) (bool, error) {
+	sess, err := s.repo.FindByID(id)
+	if err != nil {
+		return false, err
+	}
+	if sess == nil {
+		return false, nil
+	}
+	return sess.IsActive(), nil
+}
+
 func (s *Service) ListActive(userID uuid.UUID) ([]model.Session, error) {
 	sessions, err := s.repo.FindActiveByUser(userID)
 	if err != nil {

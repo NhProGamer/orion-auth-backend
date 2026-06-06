@@ -255,6 +255,15 @@ func (s *Service) GetByID(id uuid.UUID) (*model.OAuthClient, error) {
 	return client, nil
 }
 
+// FindActive returns the client only if it exists AND is active. Used by
+// middleware.ClientAuth so the middleware can consult the service layer
+// instead of running SELECTs against the OAuthClient table directly.
+// Returns (nil, nil) when no active client matches (caller decides whether
+// that is a 401, a 403, or a 404).
+func (s *Service) FindActive(id uuid.UUID) (*model.OAuthClient, error) {
+	return s.repo.FindActiveByID(id)
+}
+
 func (s *Service) Update(id uuid.UUID, input UpdateInput) (*model.OAuthClient, error) {
 	if input.RedirectURIs != nil {
 		if err := validateRedirectURIs(input.RedirectURIs); err != nil {

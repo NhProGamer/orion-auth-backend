@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -50,33 +49,3 @@ func TestParseBearer(t *testing.T) {
 	}
 }
 
-// parseScopes lives in middleware/auth.go but is used by client_scope; this
-// test pins the contract that the function understands the Postgres TEXT[]
-// literal returned by GORM.
-func TestParseScopesPostgresLiteral(t *testing.T) {
-	cases := map[string][]string{
-		"":                                 nil,
-		"{}":                               nil,
-		"{openid}":                         {"openid"},
-		"{openid,profile,email}":           {"openid", "profile", "email"},
-		"{m2m:users:read,m2m:users:write}": {"m2m:users:read", "m2m:users:write"},
-	}
-	for in, want := range cases {
-		got := parseScopes(in)
-		if !equalSlices(got, want) {
-			t.Errorf("parseScopes(%q) = %v, want %v", in, got, want)
-		}
-	}
-}
-
-func equalSlices(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if strings.TrimSpace(a[i]) != strings.TrimSpace(b[i]) {
-			return false
-		}
-	}
-	return true
-}

@@ -9,7 +9,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 
 	"orion-auth-backend/crypto"
 	"orion-auth-backend/model"
@@ -37,7 +36,10 @@ type PolicyEvaluator interface {
 //
 // If evaluator is non-nil, client_auth policies are evaluated after a
 // successful credential check. A deny aborts the request with invalid_client.
-func ClientAuth(db *gorm.DB, hasher *crypto.Argon2Hasher, tokenEndpoint string, jwksCache *JWKSCache, hmacEncryptionKey []byte, evaluator PolicyEvaluator) gin.HandlerFunc {
+//
+// The clients dependency is the service-layer ClientFinder — the middleware
+// never touches the database directly, so it can be unit-tested with a stub.
+func ClientAuth(clients ClientFinder, hasher *crypto.Argon2Hasher, tokenEndpoint string, jwksCache *JWKSCache, hmacEncryptionKey []byte, evaluator PolicyEvaluator) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var clientID uuid.UUID
 		var clientSecret string
@@ -93,7 +95,7 @@ func ClientAuth(db *gorm.DB, hasher *crypto.Argon2Hasher, tokenEndpoint string, 
 			assertionType := c.PostForm("client_assertion_type")
 			assertion := c.PostForm("client_assertion")
 			if assertionType == "urn:ietf:params:oauth:client-assertion-type:jwt-bearer" && assertion != "" {
-				alg, subID, hmacSealed, jwksURI, err := resolveAssertionClient(db, assertion)
+				alg, subID, hmacSealed, jwksURI, err := resolveAssertionClient(clients, assertion)
 				if err != nil {
 					pkg.HandleError(c, pkg.ErrInvalidClient(err.Error()))
 					c.Abort()
@@ -155,10 +157,9 @@ func ClientAuth(db *gorm.DB, hasher *crypto.Argon2Hasher, tokenEndpoint string, 
 			return
 		}
 
-		// Look up client
-		var oauthClient model.OAuthClient
-		err := db.Where("id = ? AND active = TRUE", clientID).First(&oauthClient).Error
-		if err != nil {
+		// Look up client through the service layer (enforces active = TRUE).
+		oauthClient, err := clients.FindActive(clientID)
+		if err != nil || oauthClient == nil {
 			pkg.HandleError(c, pkg.ErrInvalidClient("unknown client"))
 			c.Abort()
 			return
@@ -202,7 +203,7 @@ func ClientAuth(db *gorm.DB, hasher *crypto.Argon2Hasher, tokenEndpoint string, 
 				}
 			}
 			pInput := inputs.BuildClientAuthInput(
-				&oauthClient,
+				oauthClient,
 				authMethod,
 				c.Request.Method,
 				c.Request.URL.Path,
@@ -217,7 +218,7 @@ func ClientAuth(db *gorm.DB, hasher *crypto.Argon2Hasher, tokenEndpoint string, 
 			}
 		}
 
-		c.Set(ContextOAuthClient, &oauthClient)
+		c.Set(ContextOAuthClient, oauthClient)
 		c.Next()
 	}
 }
@@ -227,7 +228,7 @@ func ClientAuth(db *gorm.DB, hasher *crypto.Argon2Hasher, tokenEndpoint string, 
 // either flavour of client_assertion:
 //   - alg HS256 → returns sealed HMAC key (caller decrypts and verifies)
 //   - alg RS*/ES*/PS* → returns the client's JWKS URI for remote key fetch
-func resolveAssertionClient(db *gorm.DB, assertion string) (alg string, clientID uuid.UUID, hmacSealed []byte, jwksURI string, err error) {
+func resolveAssertionClient(clients ClientFinder, assertion string) (alg string, clientID uuid.UUID, hmacSealed []byte, jwksURI string, err error) {
 	parts := strings.SplitN(assertion, ".", 3)
 	if len(parts) != 3 {
 		return "", uuid.Nil, nil, "", errors.New("malformed JWT")
@@ -258,8 +259,8 @@ func resolveAssertionClient(db *gorm.DB, assertion string) (alg string, clientID
 		return "", uuid.Nil, nil, "", errors.New("invalid client_id in sub claim")
 	}
 
-	var client model.OAuthClient
-	if dberr := db.Where("id = ? AND active = TRUE", cid).First(&client).Error; dberr != nil {
+	client, ferr := clients.FindActive(cid)
+	if ferr != nil || client == nil {
 		return "", uuid.Nil, nil, "", errors.New("unknown client")
 	}
 

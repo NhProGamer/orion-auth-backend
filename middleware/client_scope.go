@@ -5,8 +5,6 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
-	"gorm.io/gorm"
 
 	"orion-auth-backend/pkg"
 )
@@ -22,7 +20,7 @@ import (
 // On failure the response follows RFC 6750: a 403 with a structured
 // `error.code` plus a `WWW-Authenticate: Bearer scope="..."` header so SDKs
 // can surface the missing scope.
-func RequireClientScope(db *gorm.DB, requiredScope, audience string) gin.HandlerFunc {
+func RequireClientScope(tokens TokenLookup, requiredScope, audience string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		raw := ParseBearer(c.GetHeader("Authorization"))
 		if raw == "" {
@@ -31,7 +29,7 @@ func RequireClientScope(db *gorm.DB, requiredScope, audience string) gin.Handler
 			return
 		}
 
-		token, err := LookupAccessToken(db, raw)
+		token, err := tokens.LookupActiveAccessToken(raw)
 		if err != nil || token == nil {
 			pkg.HandleError(c, pkg.ErrUnauthorized("invalid or expired token"))
 			c.Abort()
@@ -53,18 +51,16 @@ func RequireClientScope(db *gorm.DB, requiredScope, audience string) gin.Handler
 			return
 		}
 
-		if !containsScope(parseScopes(token.Scopes), requiredScope) {
+		scopes := []string(token.Scopes)
+		if !containsScope(scopes, requiredScope) {
 			abortForbidden(c, http.StatusForbidden, "insufficient_scope",
 				fmt.Sprintf("token is missing required scope %q", requiredScope), requiredScope)
 			return
 		}
 
-		// Expose client_id to handlers (for audit logs).
-		if cid, err := uuid.Parse(token.ClientID); err == nil {
-			c.Set(ContextClientID, cid)
-		}
+		c.Set(ContextClientID, token.ClientID)
 		c.Set(ContextTokenID, token.ID)
-		c.Set(ContextScopes, parseScopes(token.Scopes))
+		c.Set(ContextScopes, scopes)
 
 		c.Next()
 	}
