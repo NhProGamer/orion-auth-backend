@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"orion-auth-backend/metrics"
 	"orion-auth-backend/model"
 )
 
@@ -79,5 +80,13 @@ func (w *OutboxWorker) tick(ctx context.Context) {
 	}
 	if n > 0 {
 		slog.Debug("outbox tick processed rows", "count", n)
+	}
+	// Publish the current depth even when no rows were touched: a
+	// growing queue with zero deliveries is the exact signal alerts
+	// need to fire on.
+	if depth, err := w.repo.PendingCount(); err != nil {
+		slog.Debug("outbox tick: pending count failed", "error", err)
+	} else {
+		metrics.SetOutboundEmailQueueDepth(float64(depth))
 	}
 }

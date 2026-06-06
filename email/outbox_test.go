@@ -65,6 +65,20 @@ func (r *fakeOutboxRepo) EnqueueInTx(_ *gorm.DB, e *model.OutboundEmail) error {
 	return r.Enqueue(e)
 }
 
+// PendingCount mirrors the production repository: count rows still in
+// the pending status. Used by the worker's metrics tick.
+func (r *fakeOutboxRepo) PendingCount() (int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var n int64
+	for _, row := range r.rows {
+		if row.Status == model.OutboundStatusPending {
+			n++
+		}
+	}
+	return n, nil
+}
+
 func (r *fakeOutboxRepo) ProcessBatch(limit int, backoff BackoffFn, deliver func(*model.OutboundEmail) error) (int, error) {
 	r.mu.Lock()
 	now := r.clock

@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
+	"orion-auth-backend/metrics"
 	"orion-auth-backend/model"
 )
 
@@ -32,6 +33,11 @@ type OutboxRepository interface {
 	// at most one worker per cycle. Returns the number of rows it
 	// touched.
 	ProcessBatch(limit int, backoff BackoffFn, deliver func(*model.OutboundEmail) error) (int, error)
+
+	// PendingCount returns the number of rows still queued for
+	// delivery. The worker publishes it as a gauge after each tick so
+	// operators can alert on steady growth (SMTP backpressure).
+	PendingCount() (int64, error)
 }
 
 // BackoffFn computes the delay before the next retry given the current
@@ -94,27 +100,40 @@ func (r *gormOutboxRepository) ProcessBatch(limit int, backoff BackoffFn, delive
 			row := &rows[i]
 			deliverErr := deliver(row)
 			row.Attempts++
+			var outcome string
 			if deliverErr == nil {
 				row.Status = model.OutboundStatusSent
 				row.SentAt = &now
 				row.LastError = nil
+				outcome = metrics.OutboxDelivered
 			} else {
 				msg := deliverErr.Error()
 				row.LastError = &msg
 				if row.Attempts >= row.MaxAttempts {
 					row.Status = model.OutboundStatusFailed
+					outcome = metrics.OutboxMaxAttemptsFailed
 				} else {
 					row.NextRetryAt = now.Add(backoff(row.Attempts))
+					outcome = metrics.OutboxAttemptedRetry
 				}
 			}
 			if err := tx.Save(row).Error; err != nil {
 				return err
 			}
+			metrics.RecordOutboundEmail(outcome)
 			processed++
 		}
 		return nil
 	})
 	return processed, err
+}
+
+func (r *gormOutboxRepository) PendingCount() (int64, error) {
+	var count int64
+	err := r.db.Model(&model.OutboundEmail{}).
+		Where("status = ?", model.OutboundStatusPending).
+		Count(&count).Error
+	return count, err
 }
 
 // ExpBackoff is the default BackoffFn: doubles every retry starting
