@@ -43,6 +43,21 @@ var (
 		},
 		[]string{"method", "route", "status"},
 	)
+
+	outboundEmailQueueDepth = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "orionauth_outbound_email_queue_depth",
+			Help: "Pending rows in outbound_emails. Steady growth signals SMTP backpressure or a misconfigured worker; alert thresholds belong in the monitoring stack, not in /ready.",
+		},
+	)
+
+	outboundEmailDelivered = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "orionauth_outbound_email_delivered_total",
+			Help: "Outbound email delivery attempts by terminal outcome: delivered (SMTP accepted), attempted_retry (transient failure, will retry), max_attempts_failed (exhausted MaxAttempts).",
+		},
+		[]string{"result"},
+	)
 )
 
 // Handler returns the Prometheus exposition endpoint. Mount it at
@@ -104,4 +119,25 @@ func LoginOutcomeFromError(code string) string {
 // RecordTokenIssued advances orionauth_oauth_token_issued_total{grant_type}.
 func RecordTokenIssued(grantType string) {
 	tokensIssued.WithLabelValues(grantType).Inc()
+}
+
+// Outbox delivery outcomes — kept as constants so callers can't typo
+// the label set. Mirror the "result" cardinality declared in the
+// outboundEmailDelivered Help string.
+const (
+	OutboxDelivered         = "delivered"
+	OutboxAttemptedRetry    = "attempted_retry"
+	OutboxMaxAttemptsFailed = "max_attempts_failed"
+)
+
+// RecordOutboundEmail advances orionauth_outbound_email_delivered_total{result}.
+func RecordOutboundEmail(result string) {
+	outboundEmailDelivered.WithLabelValues(result).Inc()
+}
+
+// SetOutboundEmailQueueDepth publishes the current pending-row count
+// to the outbound_email_queue_depth Gauge. Called from the worker
+// tick after each ProcessBatch — operators alert on steady growth.
+func SetOutboundEmailQueueDepth(depth float64) {
+	outboundEmailQueueDepth.Set(depth)
 }
