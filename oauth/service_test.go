@@ -311,6 +311,7 @@ func (m *mockSessionRepo) Create(s *model.Session) error {
 	return nil
 }
 func (m *mockSessionRepo) FindByID(_ uuid.UUID) (*model.Session, error)              { return nil, nil }
+func (m *mockSessionRepo) FindActiveByCookieHash(_ string) (*model.Session, error)   { return nil, nil }
 func (m *mockSessionRepo) FindActiveByUser(_ uuid.UUID) ([]model.Session, error)     { return nil, nil }
 func (m *mockSessionRepo) Revoke(_ uuid.UUID) error                                  { return nil }
 func (m *mockSessionRepo) RevokeAllForUser(_ uuid.UUID, _ *uuid.UUID) (int64, error) { return 0, nil }

@@ -39,6 +39,27 @@ func setSessionStateCookie(c *gin.Context, resp *AuthorizeConsentResponse) {
 	}
 }
 
+// sessionCookieName is the HttpOnly IdP SSO cookie. Its presence lets a
+// returning user be silently re-authenticated across services without
+// retyping credentials (see Service.trySilentSSO).
+const sessionCookieName = "orionauth_sid"
+
+// setSessionCookie issues the IdP SSO cookie after a session is created.
+// remember_me sessions get a persistent cookie sized to the session lifetime;
+// otherwise a browser-session cookie (Max-Age 0) that dies when the browser
+// closes. SameSite=Lax so it rides the top-level redirect into /authorize.
+func setSessionCookie(c *gin.Context, resp *AuthorizeConsentResponse) {
+	if resp == nil || resp.SessionCookie == "" {
+		return
+	}
+	maxAge := 0
+	if resp.CookieExtended && resp.CookieMaxAge > 0 {
+		maxAge = resp.CookieMaxAge
+	}
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(sessionCookieName, resp.SessionCookie, maxAge, "/", "", true, true)
+}
+
 func (h *Handler) SetAuditService(s *audit.Service) {
 	h.auditService = s
 }
@@ -92,14 +113,23 @@ func (h *Handler) Authorize(c *gin.Context) {
 		return
 	}
 
+	// IdP SSO cookie, shared by every browser entry point below so an already
+	// authenticated user is silently re-authorized regardless of how the
+	// request arrives (standard params, PAR, or remote JAR).
+	sid, _ := c.Cookie(sessionCookieName)
+
 	// request_uri: routes either to the PAR store (urn:ietf:params:oauth:request_uri:…)
 	// or to a remote HTTP(S) Request Object whitelisted on the client (RFC 9101 §5.2.2).
 	if requestURI := c.Query("request_uri"); requestURI != "" {
 		if strings.HasPrefix(requestURI, "urn:ietf:params:oauth:request_uri:") {
-			resp, err := h.service.InitAuthorizeFromPAR(requestURI, clientID)
+			resp, err := h.service.InitAuthorizeFromPAR(requestURI, clientID, sid)
 			if err != nil {
 				pkg.HandleError(c, err)
 				return
+			}
+			if resp.Redirect != nil {
+				setSessionCookie(c, resp.Redirect)
+				setSessionStateCookie(c, resp.Redirect)
 			}
 			pkg.OK(c, resp)
 			return
@@ -124,12 +154,16 @@ func (h *Handler) Authorize(c *gin.Context) {
 			pkg.HandleError(c, pkg.ErrInvalidRequest("invalid remote request object: "+err.Error()))
 			return
 		}
-		params := InitAuthorizeParams{}
+		params := InitAuthorizeParams{SessionCookie: sid}
 		mergeJARParams(&params, jarParams)
 		resp, err := h.service.InitAuthorize(client, params)
 		if err != nil {
 			pkg.HandleError(c, err)
 			return
+		}
+		if resp.Redirect != nil {
+			setSessionCookie(c, resp.Redirect)
+			setSessionStateCookie(c, resp.Redirect)
 		}
 		pkg.OK(c, resp)
 		return
@@ -175,10 +209,21 @@ func (h *Handler) Authorize(c *gin.Context) {
 		mergeJARParams(&params, jarParams)
 	}
 
+	// Inject the IdP SSO cookie so InitAuthorize can skip the login screen
+	// for an already-authenticated user.
+	params.SessionCookie = sid
+
 	resp, err := h.service.InitAuthorize(client, params)
 	if err != nil {
 		pkg.HandleError(c, err)
 		return
+	}
+
+	// Silent SSO or prompt=none completed in one shot: issue the cookies for
+	// the freshly created session before handing the redirect to the browser.
+	if resp.Redirect != nil {
+		setSessionCookie(c, resp.Redirect)
+		setSessionStateCookie(c, resp.Redirect)
 	}
 
 	pkg.OK(c, resp)
@@ -272,6 +317,7 @@ func (h *Handler) AuthorizeLogin(c *gin.Context) {
 			pkg.HandleError(c, err)
 			return
 		}
+		setSessionCookie(c, codeResp)
 		setSessionStateCookie(c, codeResp)
 		c.JSON(http.StatusOK, codeResp)
 		return
@@ -352,6 +398,7 @@ func (h *Handler) AuthorizeMFA(c *gin.Context) {
 			pkg.HandleError(c, err)
 			return
 		}
+		setSessionCookie(c, codeResp)
 		setSessionStateCookie(c, codeResp)
 		c.JSON(http.StatusOK, codeResp)
 		return
@@ -388,6 +435,7 @@ func (h *Handler) AuthorizeConsent(c *gin.Context) {
 		})
 	}
 
+	setSessionCookie(c, resp)
 	setSessionStateCookie(c, resp)
 	pkg.OK(c, resp)
 }

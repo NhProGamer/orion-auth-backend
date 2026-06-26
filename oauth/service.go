@@ -268,6 +268,10 @@ type InitAuthorizeParams struct {
 	Claims        string
 	IDTokenHint   string
 	ResponseMode  string
+	// SessionCookie is the raw orionauth_sid cookie value, injected by the
+	// handler from the request. When it resolves to a live session and the
+	// client is not forcing re-auth, InitAuthorize skips the login screen.
+	SessionCookie string
 }
 
 type InitAuthorizeResponse struct {
@@ -326,7 +330,7 @@ func (s *Service) CreatePAR(client *model.OAuthClient, params InitAuthorizeParam
 	}, nil
 }
 
-func (s *Service) InitAuthorizeFromPAR(requestURI, clientIDStr string) (*InitAuthorizeResponse, error) {
+func (s *Service) InitAuthorizeFromPAR(requestURI, clientIDStr, sessionCookie string) (*InitAuthorizeResponse, error) {
 	par, err := s.repo.FindPAR(requestURI)
 	if err != nil || par == nil {
 		return nil, pkg.ErrInvalidRequest("invalid or expired request_uri")
@@ -345,6 +349,9 @@ func (s *Service) InitAuthorizeFromPAR(requestURI, clientIDStr string) (*InitAut
 	if err := json.Unmarshal([]byte(par.Params), &params); err != nil {
 		return nil, pkg.ErrServerError("failed to parse PAR params")
 	}
+	// The SSO cookie travels on the browser GET, not in the back-channel PAR
+	// push, so it is supplied separately by the handler.
+	params.SessionCookie = sessionCookie
 
 	// Look up client and proceed with normal authorize flow
 	client, err := s.repo.findClient(clientIDStr)
@@ -492,6 +499,14 @@ func (s *Service) InitAuthorize(client *model.OAuthClient, params InitAuthorizeP
 		return s.handlePromptNone(client, params, scopes, validatedAudience, resourceInfo)
 	}
 
+	// Silent SSO: a valid IdP session cookie lets us skip the login screen.
+	// prompt=login forces re-authentication, so the cookie is ignored then.
+	if params.SessionCookie != "" && params.Prompt != "login" {
+		if resp := s.trySilentSSO(client, params, scopes, validatedAudience, resourceInfo, maxAge); resp != nil {
+			return resp, nil
+		}
+	}
+
 	// Create authorization request
 	req := &model.AuthorizationRequest{
 		ClientID:     client.ID,
@@ -635,6 +650,98 @@ func (s *Service) handlePromptNone(client *model.OAuthClient, params InitAuthori
 		ScopesRequested: scopes,
 		Redirect:        redirect,
 	}, nil
+}
+
+// trySilentSSO attempts to authorize the request off an existing IdP session
+// (resolved from the orionauth_sid cookie) without prompting for credentials.
+// It returns nil to fall back to the interactive login when no live session
+// matches or max_age forbids reuse. The consent rules are unchanged from the
+// password flow: first-party clients auto-consent, third-party clients still
+// need a stored consent covering the requested scopes (else the consent screen
+// is shown — without a login step).
+func (s *Service) trySilentSSO(client *model.OAuthClient, params InitAuthorizeParams, scopes []string, audience *string, resource *ResourceInfo, maxAge *int) *InitAuthorizeResponse {
+	sess, err := s.sessionService.FindByCookieToken(params.SessionCookie)
+	if err != nil || sess == nil {
+		return nil
+	}
+
+	// Honour max_age: re-authenticate if the session is older than allowed.
+	if maxAge != nil && s.clock.Now().Sub(sess.AuthenticatedAt) > time.Duration(*maxAge)*time.Second {
+		return nil
+	}
+
+	// Consent: same rule set as the password flow.
+	needsConsent := !client.IsFirstParty
+	if consent, _ := s.repo.FindActiveConsent(sess.UserID, client.ID); consent != nil && consent.CoversScopes(scopes) {
+		needsConsent = false
+	}
+	if params.Prompt == "consent" {
+		needsConsent = true
+	}
+
+	userID := sess.UserID
+	authTime := sess.AuthenticatedAt
+	req := &model.AuthorizationRequest{
+		ClientID:      client.ID,
+		RedirectURI:   params.RedirectURI,
+		ResponseType:  params.ResponseType,
+		Scopes:        pq.StringArray(scopes),
+		Audience:      audience,
+		UserID:        &userID,
+		RememberMe:    sess.Extended,
+		Authenticated: true,
+		ConsentGiven:  !needsConsent,
+		AuthTime:      &authTime,
+		ExpiresAt:     s.clock.Now().Add(10 * time.Minute),
+	}
+	if params.State != "" {
+		req.State = &params.State
+	}
+	if params.Nonce != "" {
+		req.Nonce = &params.Nonce
+	}
+	if params.CodeChallenge != "" {
+		req.CodeChallenge = &params.CodeChallenge
+		req.CodeChallengeMethod = &params.CodeChallengeMethod
+	}
+	if params.Claims != "" {
+		req.ClaimsParam = &params.Claims
+	}
+	if params.ResponseMode != "" {
+		req.ResponseMode = &params.ResponseMode
+	}
+
+	if err := s.repo.CreateAuthRequest(req); err != nil {
+		return nil
+	}
+
+	// Third-party client needing consent: hand back to the UI for the consent
+	// screen, but with no login required since the user is already known.
+	if needsConsent {
+		return &InitAuthorizeResponse{
+			RequestID:       req.ID,
+			ClientName:      client.Name,
+			ClientID:        client.ID,
+			ScopesRequested: scopes,
+			RequiresLogin:   false,
+			RequiresConsent: true,
+			Resource:        resource,
+			ResponseMode:    params.ResponseMode,
+		}
+	}
+
+	// First-party or pre-consented: complete immediately, no UI interaction.
+	redirect, err := s.completeAuthorize(req, "", "")
+	if err != nil {
+		return nil
+	}
+	return &InitAuthorizeResponse{
+		RequestID:       req.ID,
+		ClientName:      client.Name,
+		ClientID:        client.ID,
+		ScopesRequested: scopes,
+		Redirect:        redirect,
+	}
 }
 
 type AuthorizeLoginInput struct {
@@ -925,6 +1032,16 @@ type AuthorizeConsentResponse struct {
 	TokenType    string `json:"token_type,omitempty"`
 	ExpiresIn    int    `json:"expires_in,omitempty"`
 	IDToken      string `json:"id_token,omitempty"`
+
+	// IdP SSO cookie material — set when a session is created, consumed by
+	// the handler to issue the orionauth_sid cookie, never serialized.
+	SessionCookie string `json:"-"`
+	// CookieExtended reports whether the session was opened with remember_me,
+	// so the handler issues a persistent (vs session-scoped) cookie.
+	CookieExtended bool `json:"-"`
+	// CookieMaxAge is the remaining session lifetime in seconds, used as the
+	// persistent cookie Max-Age when CookieExtended is true.
+	CookieMaxAge int `json:"-"`
 }
 
 func (s *Service) AuthorizeConsent(input AuthorizeConsentInput, ipAddress, userAgent string) (*AuthorizeConsentResponse, error) {
@@ -1239,6 +1356,13 @@ func (s *Service) completeAuthorize(req *model.AuthorizationRequest, ipAddress, 
 
 	// Compute session_state (OIDC Session Management 1.0)
 	resp.SessionState = computeSessionState(req.ClientID.String(), req.RedirectURI, sess.ID.String())
+
+	// Carry the IdP SSO cookie material up to the handler. A remember_me
+	// session gets a persistent cookie sized to its remaining lifetime;
+	// otherwise the handler issues a browser-session cookie.
+	resp.SessionCookie = sess.CookieToken
+	resp.CookieExtended = sess.Extended
+	resp.CookieMaxAge = int(sess.ExpiresAt.Sub(s.clock.Now()).Seconds())
 
 	// Hybrid flows: issue additional tokens in the authorization response
 	if isHybridResponseType(req.ResponseType) {
