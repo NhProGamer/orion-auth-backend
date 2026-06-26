@@ -154,6 +154,12 @@ func (h *Handler) EndSession(c *gin.Context) {
 		return
 	}
 
+	// Clear the IdP SSO + session_state cookies so logout actually ends the
+	// single sign-on — otherwise the next /authorize would silently re-auth.
+	c.SetCookie("orionauth_sid", "", -1, "/", "", true, true)
+	c.SetSameSite(http.SameSiteNoneMode)
+	c.SetCookie("orionauth_session_state", "", -1, "/", "", true, false)
+
 	q := url.Values{}
 	if resp.RedirectURI != "" {
 		q.Set("redirect_uri", resp.RedirectURI)
