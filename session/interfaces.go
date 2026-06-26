@@ -11,6 +11,7 @@ type RepositoryInterface interface {
 	WithTx(tx *gorm.DB) RepositoryInterface
 	Create(session *model.Session) error
 	FindByID(id uuid.UUID) (*model.Session, error)
+	FindActiveByCookieHash(hash string) (*model.Session, error)
 	FindActiveByUser(userID uuid.UUID) ([]model.Session, error)
 	Revoke(id uuid.UUID) error
 	RevokeAllForUser(userID uuid.UUID, exceptID *uuid.UUID) (int64, error)

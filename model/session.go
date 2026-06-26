@@ -19,6 +19,19 @@ type Session struct {
 	RevokedAt       *time.Time `json:"revoked_at,omitempty"`
 	ExpiresAt       time.Time  `gorm:"index;not null" json:"expires_at"`
 	CreatedAt       time.Time  `gorm:"autoCreateTime" json:"created_at"`
+
+	// Extended records whether this session was opened with "remember me".
+	// It governs the session TTL at creation and lets a silent SSO re-auth
+	// inherit the persistent-cookie behaviour for the next session.
+	Extended bool `gorm:"default:false" json:"-"`
+	// CookieTokenHash is the SHA-256 of the opaque IdP session cookie. The
+	// raw value lives only in the browser cookie; we store the hash so the
+	// cookie is revocable and never recoverable from the database.
+	CookieTokenHash string `gorm:"type:varchar(64);index" json:"-"`
+	// CookieToken is the raw cookie value, populated only by Create at
+	// issuance time and never persisted (gorm:"-"). Handlers read it to set
+	// the cookie; it is empty on any session loaded from the database.
+	CookieToken string `gorm:"-" json:"-"`
 }
 
 func (Session) TableName() string {

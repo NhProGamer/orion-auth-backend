@@ -37,6 +37,20 @@ func (r *Repository) FindByID(id uuid.UUID) (*model.Session, error) {
 	return &session, err
 }
 
+// FindActiveByCookieHash resolves an IdP session cookie (by its SHA-256) to
+// a live session — not revoked and not expired. Returns (nil, nil) when no
+// such session exists so the caller falls back to the login screen.
+func (r *Repository) FindActiveByCookieHash(hash string) (*model.Session, error) {
+	var session model.Session
+	err := r.db.
+		Where("cookie_token_hash = ? AND revoked = FALSE AND expires_at > ?", hash, time.Now()).
+		First(&session).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &session, err
+}
+
 func (r *Repository) FindActiveByUser(userID uuid.UUID) ([]model.Session, error) {
 	var sessions []model.Session
 	err := r.db.

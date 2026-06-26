@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
+	"orion-auth-backend/crypto"
 	"orion-auth-backend/model"
 	"orion-auth-backend/pkg/clock"
 	"orion-auth-backend/testutil"
@@ -17,12 +18,13 @@ import (
 // --- Mock Repository ---
 
 type mockSessionRepo struct {
-	createFn           func(s *model.Session) error
-	findByIDFn         func(id uuid.UUID) (*model.Session, error)
-	findActiveByUserFn func(userID uuid.UUID) ([]model.Session, error)
-	revokeFn           func(id uuid.UUID) error
-	revokeAllForUserFn func(userID uuid.UUID, exceptID *uuid.UUID) (int64, error)
-	updateLastActiveFn func(id uuid.UUID) error
+	createFn                 func(s *model.Session) error
+	findByIDFn               func(id uuid.UUID) (*model.Session, error)
+	findActiveByCookieHashFn func(hash string) (*model.Session, error)
+	findActiveByUserFn       func(userID uuid.UUID) ([]model.Session, error)
+	revokeFn                 func(id uuid.UUID) error
+	revokeAllForUserFn       func(userID uuid.UUID, exceptID *uuid.UUID) (int64, error)
+	updateLastActiveFn       func(id uuid.UUID) error
 }
 
 func (m *mockSessionRepo) WithTx(_ *gorm.DB) RepositoryInterface { return m }
@@ -37,6 +39,13 @@ func (m *mockSessionRepo) Create(s *model.Session) error {
 func (m *mockSessionRepo) FindByID(id uuid.UUID) (*model.Session, error) {
 	if m.findByIDFn != nil {
 		return m.findByIDFn(id)
+	}
+	return nil, nil
+}
+
+func (m *mockSessionRepo) FindActiveByCookieHash(hash string) (*model.Session, error) {
+	if m.findActiveByCookieHashFn != nil {
+		return m.findActiveByCookieHashFn(hash)
 	}
 	return nil, nil
 }
@@ -116,6 +125,59 @@ func TestCreate_Success(t *testing.T) {
 	assert.NotNil(t, created.IPAddress)
 	assert.Equal(t, "10.0.0.1", *created.IPAddress)
 	assert.False(t, created.ExpiresAt.IsZero())
+}
+
+// TestCreate_GeneratesCookieToken pins that Create mints an opaque SSO cookie:
+// the raw value is returned to the caller, only its SHA-256 is persisted, and
+// the Extended flag is carried onto the row.
+func TestCreate_GeneratesCookieToken(t *testing.T) {
+	var created *model.Session
+	var rawAtPersist string
+	repo := &mockSessionRepo{
+		createFn: func(s *model.Session) error {
+			created = s
+			rawAtPersist = s.CookieToken // capture before Create populates it
+			return nil
+		},
+	}
+	svc := newTestService(repo)
+
+	userID, _ := uuid.NewV7()
+	sess, err := svc.Create(CreateInput{UserID: userID, Extended: true})
+	require.NoError(t, err)
+
+	assert.NotEmpty(t, sess.CookieToken, "raw cookie token returned to caller")
+	assert.Empty(t, rawAtPersist, "raw token is only the transient gorm:\"-\" field, never written")
+	assert.Equal(t, crypto.HashToken(sess.CookieToken), created.CookieTokenHash)
+	assert.True(t, created.Extended)
+}
+
+// TestFindByCookieToken covers the silent-SSO lookup: an empty cookie resolves
+// to nil without touching the repo, and a valid cookie is looked up by hash.
+func TestFindByCookieToken(t *testing.T) {
+	userID, _ := uuid.NewV7()
+	target := makeSession(userID)
+
+	var gotHash string
+	repo := &mockSessionRepo{
+		findActiveByCookieHashFn: func(hash string) (*model.Session, error) {
+			gotHash = hash
+			return target, nil
+		},
+	}
+	svc := newTestService(repo)
+
+	// Empty cookie short-circuits to (nil, nil) — no repo call.
+	sess, err := svc.FindByCookieToken("")
+	require.NoError(t, err)
+	assert.Nil(t, sess)
+	assert.Empty(t, gotHash)
+
+	// Valid cookie is resolved by its SHA-256.
+	sess, err = svc.FindByCookieToken("raw-cookie-value")
+	require.NoError(t, err)
+	assert.Equal(t, target, sess)
+	assert.Equal(t, crypto.HashToken("raw-cookie-value"), gotHash)
 }
 
 func TestCreate_DefaultTTL(t *testing.T) {

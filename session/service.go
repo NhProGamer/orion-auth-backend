@@ -8,6 +8,7 @@ import (
 	"gorm.io/gorm"
 
 	"orion-auth-backend/config"
+	"orion-auth-backend/crypto"
 	"orion-auth-backend/model"
 	"orion-auth-backend/pkg"
 	"orion-auth-backend/pkg/clock"
@@ -85,6 +86,13 @@ func (s *Service) Create(input CreateInput) (*model.Session, error) {
 		ua = nil
 	}
 
+	// Opaque IdP session cookie: the raw value goes to the browser, only its
+	// hash is persisted so the cookie stays revocable and unrecoverable.
+	rawCookie, cookieHash, err := crypto.GenerateOpaqueToken()
+	if err != nil {
+		return nil, pkg.ErrInternal("failed to generate session cookie token")
+	}
+
 	session := &model.Session{
 		ID:              id,
 		UserID:          input.UserID,
@@ -93,6 +101,8 @@ func (s *Service) Create(input CreateInput) (*model.Session, error) {
 		LastActiveAt:    now,
 		AuthenticatedAt: now,
 		ExpiresAt:       now.Add(s.resolveTTL(input.Extended)),
+		Extended:        input.Extended,
+		CookieTokenHash: cookieHash,
 	}
 
 	if err := s.repo.Create(session); err != nil {
@@ -100,8 +110,23 @@ func (s *Service) Create(input CreateInput) (*model.Session, error) {
 		return nil, pkg.ErrInternal("failed to create session")
 	}
 
+	session.CookieToken = rawCookie
 	slog.Info("session created", "session_id", session.ID, "user_id", session.UserID)
 	return session, nil
+}
+
+// FindByCookieToken resolves the raw IdP session cookie to its active session,
+// or (nil, nil) when no live session matches — callers then fall back to the
+// interactive login. Powers the silent-SSO path in the authorize flow.
+func (s *Service) FindByCookieToken(raw string) (*model.Session, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	sess, err := s.repo.FindActiveByCookieHash(crypto.HashToken(raw))
+	if err != nil {
+		return nil, pkg.ErrInternal("failed to look up session")
+	}
+	return sess, nil
 }
 
 // IsActive returns true when the session exists, is not revoked, and has
