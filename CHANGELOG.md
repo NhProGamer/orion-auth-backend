@@ -7,6 +7,10 @@ adheres to [Semantic Versioning](https://semver.org) — see
 
 ## [Unreleased]
 
+—
+
+## [v0.25.0] — 2026-06-26
+
 ### Added
 
 - **Silent SSO via an IdP session cookie.** `/authorize` now issues an
