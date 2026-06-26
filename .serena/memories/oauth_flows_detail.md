@@ -8,6 +8,7 @@
 - Validates client, redirect URI, response type, scopes
 - Creates AuthorizationRequest in DB (expires per AuthCodeTTL)
 - Returns: RequestID, ClientName, ClientID, ScopesRequested, RequiresLogin, RequiresConsent
+- **Silent SSO (trySilentSSO)**: handler injects the HttpOnly `orionauth_sid` cookie into params.SessionCookie. If it resolves to a live session (session.Service.FindByCookieToken) and prompt != login and max_age not exceeded, InitAuthorize skips login: reuses session.UserID, preserves AuthTime=session.AuthenticatedAt, inherits RememberMe=session.Extended. First-party/pre-consented → completeAuthorize → returns Redirect (fully silent). Third-party without consent → RequiresLogin=false + RequiresConsent=true (consent screen, no login). AuthUI needs no change (already follows redirect / requires_consent).
 
 ### Step 2: AuthorizeLogin (POST /authorize/login)
 - Input: RequestID, Email, Password
@@ -115,6 +116,7 @@
 - Consent caching (skip if already granted same scopes)
 - MFA integration in authorization flow
 - First-party client auto-consent
+- IdP SSO session cookie `orionauth_sid`: HttpOnly, Secure, SameSite=Lax, opaque 32-byte secret (only SHA-256 stored in sessions.cookie_token_hash). remember_me → persistent cookie (Max-Age = session lifetime); else browser-session cookie. Enables cross-service silent re-login; cleared on /end_session.
 - ID token validation for prompt=none and end_session flows
 - acr/amr claims tracking auth methods through the flow (pwd, otp)
 - Authorization response includes iss parameter (RFC 9207)
@@ -133,5 +135,6 @@
 ## RP-Initiated Logout (GET /end_session)
 - Parameters: id_token_hint, post_logout_redirect_uri, state, client_id
 - Validates id_token_hint, revokes all user sessions
+- Clears the orionauth_sid (SSO) and orionauth_session_state cookies so logout ends single sign-on
 - Validates post_logout_redirect_uri against client's PostLogoutRedirectURIs
 - Returns redirect_uri with state if valid, otherwise shows logout confirmation

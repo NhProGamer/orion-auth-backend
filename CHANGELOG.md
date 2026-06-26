@@ -7,7 +7,29 @@ adheres to [Semantic Versioning](https://semver.org) — see
 
 ## [Unreleased]
 
-—
+### Added
+
+- **Silent SSO via an IdP session cookie.** `/authorize` now issues an
+  HttpOnly, SameSite=Lax `orionauth_sid` cookie when a session is created and
+  reads it back on the next authorization request: an already-authenticated
+  user is silently re-authorized across services without re-entering
+  credentials. `prompt=login` still forces re-auth, `max_age` is honoured, and
+  the consent rules are unchanged (first-party auto-consents; third-party still
+  shows the consent screen, now without a login step). Cleared on
+  `/end_session`.
+- **`sessions.cookie_token_hash` / `sessions.extended`** (migration `053`). The
+  cookie carries an opaque 32-byte secret; only its SHA-256 is stored, so the
+  cookie stays revocable and unrecoverable. `extended` records the remember_me
+  choice so a silent re-auth inherits the persistent-cookie behaviour.
+- **`session.Service.FindByCookieToken`** + `Repository.FindActiveByCookieHash`
+  — resolve a raw cookie to its live (non-revoked, non-expired) session.
+
+### Changed
+
+- `remember_me` now drives cookie persistence: a remembered session gets a
+  persistent `orionauth_sid` cookie sized to the session lifetime; otherwise a
+  browser-session cookie that dies when the browser closes. Session TTL
+  resolution (`SessionExtendedTTL`) is unchanged.
 
 ## [v0.24.0] — 2026-06-06
 
