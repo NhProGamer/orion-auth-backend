@@ -743,6 +743,13 @@ func seedAdminUser(db *gorm.DB, userService *user.Service, rbacService *rbac.Ser
 		return
 	}
 
+	// The bootstrap admin has no mailbox to confirm — mark it verified so the
+	// login gate doesn't lock the operator out when email verification is on.
+	if err := db.Model(&model.User{}).Where("id = ?", admin.ID).Update("email_verified", true).Error; err != nil {
+		slog.Error("failed to mark admin email verified", "error", err)
+		return
+	}
+
 	// Operator-supplied password: never echo it, the operator already knows it.
 	if passwordFromEnv {
 		slog.Warn("========================================")
