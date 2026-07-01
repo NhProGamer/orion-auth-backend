@@ -9,6 +9,19 @@ adheres to [Semantic Versioning](https://semver.org) — see
 
 —
 
+## [v0.25.1] — 2026-07-01
+
+### Fixed
+
+- **Bootstrap admin email is now verified.** The seeded admin
+  (`admin@orionauth.local`) is created through the normal `Register` path,
+  which leaves `email_verified` false — so with email verification enabled the
+  operator was locked out by the login gate. `seedAdminUser` now marks the
+  bootstrap admin verified right after the role assignment.
+- **Existing admins verified** (migration `054`). Any user holding the admin
+  role is marked `email_verified = TRUE`, unlocking operators provisioned
+  before this fix. The down migration is intentionally a no-op.
+
 ## [v0.25.0] — 2026-06-26
 
 ### Added
@@ -124,5 +137,7 @@ high-level summary of the lines:
 - **`v0.22.0..v0.23.x`** — admin-overridable session TTLs + email-verification
   toggle; final action-token-key fix + email-template CRUD coverage.
 
-[Unreleased]: https://git.nhsoul.fr/nhpro/orion-auth-backend/compare/v0.24.0...HEAD
+[Unreleased]: https://git.nhsoul.fr/nhpro/orion-auth-backend/compare/v0.25.1...HEAD
+[v0.25.1]: https://git.nhsoul.fr/nhpro/orion-auth-backend/releases/tag/v0.25.1
+[v0.25.0]: https://git.nhsoul.fr/nhpro/orion-auth-backend/releases/tag/v0.25.0
 [v0.24.0]: https://git.nhsoul.fr/nhpro/orion-auth-backend/releases/tag/v0.24.0
