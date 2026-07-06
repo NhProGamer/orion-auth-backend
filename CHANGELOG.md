@@ -9,6 +9,15 @@ adheres to [Semantic Versioning](https://semver.org) — see
 
 —
 
+## [v0.25.2] — 2026-07-06
+
+### Changed
+
+- **Dependencies updated.** `go-oidc` v3.19.0, `lestrrat-go/jwx` v3.1.1,
+  `open-policy-agent/opa` v1.18.2, `pressly/goose` v3.27.2, `wneessen/go-mail`
+  v0.8.0, `golang.org/x/crypto` v0.53.0, `gorm` v1.31.2, `go-webauthn` v0.17.4
+  and their transitive deps. All within-major bumps; build, vet and tests pass.
+
 ## [v0.25.1] — 2026-07-01
 
 ### Fixed
@@ -137,7 +146,8 @@ high-level summary of the lines:
 - **`v0.22.0..v0.23.x`** — admin-overridable session TTLs + email-verification
   toggle; final action-token-key fix + email-template CRUD coverage.
 
-[Unreleased]: https://git.nhsoul.fr/nhpro/orion-auth-backend/compare/v0.25.1...HEAD
+[Unreleased]: https://git.nhsoul.fr/nhpro/orion-auth-backend/compare/v0.25.2...HEAD
+[v0.25.2]: https://git.nhsoul.fr/nhpro/orion-auth-backend/releases/tag/v0.25.2
 [v0.25.1]: https://git.nhsoul.fr/nhpro/orion-auth-backend/releases/tag/v0.25.1
 [v0.25.0]: https://git.nhsoul.fr/nhpro/orion-auth-backend/releases/tag/v0.25.0
 [v0.24.0]: https://git.nhsoul.fr/nhpro/orion-auth-backend/releases/tag/v0.24.0
