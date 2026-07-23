@@ -1,0 +1,12 @@
+{
+  "providers": {
+    "discord": "discord"
+  },
+  "roles": {
+    "admin": "admin",
+    "user": "user"
+  },
+  "assume_verified_email": true,
+  "default_role": "user",
+  "on_unsupported_password": "reset"
+}

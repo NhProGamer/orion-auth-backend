@@ -58,6 +58,7 @@ architectural notes.
 - [Configuration reference](#configuration-reference)
 - [Integrating an OAuth / OIDC client](#integrating-an-oauth--oidc-client)
 - [Federation (social login)](#federation-social-login)
+- [Migrating from another IAM](MIGRATION.md)
 - [Operating in production](#operating-in-production)
   - [Health and readiness](#health-and-readiness)
   - [Metrics and dashboards](#metrics-and-dashboards)
