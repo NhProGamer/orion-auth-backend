@@ -85,7 +85,7 @@ func (s *Source) Users(ctx context.Context) ([]importer.CanonicalUser, error) {
 		cu := importer.CanonicalUser{
 			ExternalID:          id,
 			Email:               strings.TrimSpace(email.String),
-			DisplayName:         nullToPtr(name),
+			DisplayName:         displayName(name, username),
 			AvatarURL:           nullToPtr(avatar),
 			Phone:               nullToPtr(phone),
 			Username:            nullToPtr(username),
@@ -229,6 +229,15 @@ func decodeIdentities(raw []byte) []importer.CanonicalIdentity {
 		})
 	}
 	return out
+}
+
+// displayName prefers Logto's name, falling back to username so display_name is
+// populated for accounts that only set a login handle.
+func displayName(name, username sql.NullString) *string {
+	if p := nullToPtr(name); p != nil {
+		return p
+	}
+	return nullToPtr(username)
 }
 
 func nullToPtr(ns sql.NullString) *string {
