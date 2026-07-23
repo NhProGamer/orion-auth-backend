@@ -9,6 +9,29 @@ adheres to [Semantic Versioning](https://semver.org) — see
 
 —
 
+## [v0.26.0] — 2026-07-23
+
+### Added
+
+- **IAM migration — import users from an external IAM (Logto first).** New
+  offline subcommand `orion-auth import logto --source-dsn … --mapping …
+  [--tenant … --dry-run]` reads a Logto Postgres database (read-only) and imports
+  users, their social identities (→ `federation_links`) and roles (→ `user_roles`)
+  into OrionAuth. Built on an IAM-agnostic core (`importer` package: a `Source`
+  feeds a canonical model into a shared engine) so another IAM is just a new
+  `Source`. Idempotent by email (never clobbers an existing account), with a
+  `--dry-run` report and an operator-supplied mapping file (provider/role name
+  mapping + policy). See [MIGRATION.md](MIGRATION.md) and
+  [`examples/logto-mapping.json`](examples/logto-mapping.json).
+- **Transparent password migration.** Password verification is now multi-scheme
+  (`crypto.VerifyIdentify`): an imported `argon2i` (Logto default), `bcrypt`, or
+  `sha256/sha1/md5` digest is verified on the user's next login and then
+  transparently re-hashed to the native `argon2id` scheme — no forced reset for
+  users whose hash can be verified. The scheme is encoded in the stored hash
+  string, so no schema migration is required. Unsupported hashes (Logto
+  `Legacy`) fall back to `must_set_password` per the mapping policy. The strict
+  `argon2id`-only `Verify` path used for client/MFA secrets is unchanged.
+
 ## [v0.25.2] — 2026-07-06
 
 ### Changed
@@ -146,7 +169,8 @@ high-level summary of the lines:
 - **`v0.22.0..v0.23.x`** — admin-overridable session TTLs + email-verification
   toggle; final action-token-key fix + email-template CRUD coverage.
 
-[Unreleased]: https://git.nhsoul.fr/nhpro/orion-auth-backend/compare/v0.25.2...HEAD
+[Unreleased]: https://git.nhsoul.fr/nhpro/orion-auth-backend/compare/v0.26.0...HEAD
+[v0.26.0]: https://git.nhsoul.fr/nhpro/orion-auth-backend/releases/tag/v0.26.0
 [v0.25.2]: https://git.nhsoul.fr/nhpro/orion-auth-backend/releases/tag/v0.25.2
 [v0.25.1]: https://git.nhsoul.fr/nhpro/orion-auth-backend/releases/tag/v0.25.1
 [v0.25.0]: https://git.nhsoul.fr/nhpro/orion-auth-backend/releases/tag/v0.25.0
