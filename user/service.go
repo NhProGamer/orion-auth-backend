@@ -188,6 +188,11 @@ type RegisterInput struct {
 	Password    string         `json:"password" binding:"required"`
 	DisplayName *string        `json:"display_name"`
 	ExtraFields map[string]any `json:"extra_fields,omitempty"`
+	// SkipVerificationEmail suppresses the built-in verify-email enqueue.
+	// Internal only (json:"-"): the OAuth authorize-register flow sets it so
+	// it can send a single email carrying the authorization request id,
+	// instead of Register sending a context-less one that gets overwritten.
+	SkipVerificationEmail bool `json:"-"`
 }
 
 // RegFormProvider exposes the registration-fields schema lookup so
@@ -261,8 +266,10 @@ func (s *Service) Register(input RegisterInput) (*model.User, error) {
 				return pkg.ErrInternal("failed to assign default role: " + err.Error())
 			}
 		}
-		if err := s.enqueueVerifyEmailInTx(tx, repo, user, nil); err != nil {
-			return err
+		if !input.SkipVerificationEmail {
+			if err := s.enqueueVerifyEmailInTx(tx, repo, user, nil); err != nil {
+				return err
+			}
 		}
 		return nil
 	})

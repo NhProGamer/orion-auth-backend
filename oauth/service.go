@@ -915,6 +915,10 @@ func (s *Service) AuthorizeRegister(input AuthorizeRegisterInput, ipAddress, use
 		Password:    input.Password,
 		DisplayName: input.DisplayName,
 		ExtraFields: input.ExtraFields,
+		// Suppress Register's context-less verify email; we send one below
+		// carrying req.ID so the click resumes this flow (audience, PKCE,
+		// scopes, redirect_uri all preserved).
+		SkipVerificationEmail: true,
 	})
 	if err != nil {
 		return nil, err
