@@ -352,11 +352,16 @@ func (s *Service) Authenticate(input LoginInput) (*model.User, error) {
 		return nil, pkg.ErrUnauthorized("invalid email or password")
 	}
 
-	match, err := s.hasher.Verify(input.Password, *user.PasswordHash)
+	match, needsRehash, err := s.hasher.VerifyIdentify(input.Password, *user.PasswordHash)
 	if err != nil || !match {
 		s.incrementFailedAttempts(user)
 		return nil, pkg.ErrUnauthorized("invalid email or password")
 	}
+
+	// Transparently upgrade a hash imported from a foreign IAM (Logto Argon2i,
+	// bcrypt, or a legacy digest) to the native argon2id scheme now that we
+	// hold the plaintext and know it is correct. Best-effort: never blocks login.
+	s.maybeRehash(user, input.Password, needsRehash)
 
 	// Email verification gate: check AFTER the password match so an
 	// attacker probing existence cannot tell verified from unverified
@@ -767,7 +772,34 @@ func (s *Service) VerifyPassword(id uuid.UUID, password string) (bool, error) {
 	if user == nil || user.PasswordHash == nil {
 		return false, nil
 	}
-	return s.hasher.Verify(password, *user.PasswordHash)
+	match, needsRehash, err := s.hasher.VerifyIdentify(password, *user.PasswordHash)
+	if err != nil {
+		return false, err
+	}
+	if match {
+		s.maybeRehash(user, password, needsRehash)
+	}
+	return match, nil
+}
+
+// maybeRehash transparently upgrades a foreign or legacy password hash to the
+// native argon2id scheme after a successful verification. Best-effort: a
+// failure here must never block an otherwise-valid authentication, so errors
+// are logged and swallowed.
+func (s *Service) maybeRehash(u *model.User, plaintext string, needsRehash bool) {
+	if !needsRehash {
+		return
+	}
+	hash, err := s.hasher.Hash(plaintext)
+	if err != nil {
+		slog.Warn("failed to rehash imported password", "user_id", u.ID, "error", err)
+		return
+	}
+	if err := s.repo.UpdateFields(u.ID, map[string]any{"password_hash": hash}); err != nil {
+		slog.Warn("failed to persist rehashed password", "user_id", u.ID, "error", err)
+		return
+	}
+	u.PasswordHash = &hash
 }
 
 // UpdateFields is a thin pass-through used by the account package to apply
@@ -817,7 +849,10 @@ func (s *Service) ChangePassword(id uuid.UUID, input ChangePasswordInput) error 
 		return pkg.ErrBadRequest("account has no password set yet; use the set-password endpoint instead")
 	}
 
-	match, err := s.hasher.Verify(input.CurrentPassword, *user.PasswordHash)
+	// VerifyIdentify (not Verify) so a user imported from a foreign IAM can
+	// change their password before ever doing a fresh login. The new hash
+	// written below is always native argon2id, so no rehash step is needed here.
+	match, _, err := s.hasher.VerifyIdentify(input.CurrentPassword, *user.PasswordHash)
 	if err != nil || !match {
 		return pkg.ErrUnauthorized("current password is incorrect")
 	}
