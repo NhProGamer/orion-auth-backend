@@ -9,6 +9,22 @@ adheres to [Semantic Versioning](https://semver.org) — see
 
 —
 
+## [v0.26.1] — 2026-07-23
+
+### Fixed
+
+- **Double verification email on OAuth signup.** `AuthorizeRegister` called
+  `Register` (which enqueued a context-less verify email) and then sent a second
+  one carrying the authorization request id. The first token overwrote the
+  second on the user row, so one of the two emails always had an invalid link —
+  and, lacking the request id, dropped the `audience` (and PKCE/scopes) on click.
+  `Register` now skips its built-in enqueue when the OAuth flow drives it
+  (`RegisterInput.SkipVerificationEmail`); exactly one email is sent, carrying
+  the request id, so the verify click resumes the original flow intact.
+- **Imported `display_name`.** The Logto source now falls back to `username`
+  when Logto's `name` is empty, so migrated accounts that only set a login
+  handle still get a populated display name.
+
 ## [v0.26.0] — 2026-07-23
 
 ### Added
@@ -169,7 +185,8 @@ high-level summary of the lines:
 - **`v0.22.0..v0.23.x`** — admin-overridable session TTLs + email-verification
   toggle; final action-token-key fix + email-template CRUD coverage.
 
-[Unreleased]: https://git.nhsoul.fr/nhpro/orion-auth-backend/compare/v0.26.0...HEAD
+[Unreleased]: https://git.nhsoul.fr/nhpro/orion-auth-backend/compare/v0.26.1...HEAD
+[v0.26.1]: https://git.nhsoul.fr/nhpro/orion-auth-backend/releases/tag/v0.26.1
 [v0.26.0]: https://git.nhsoul.fr/nhpro/orion-auth-backend/releases/tag/v0.26.0
 [v0.25.2]: https://git.nhsoul.fr/nhpro/orion-auth-backend/releases/tag/v0.25.2
 [v0.25.1]: https://git.nhsoul.fr/nhpro/orion-auth-backend/releases/tag/v0.25.1
