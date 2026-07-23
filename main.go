@@ -57,6 +57,12 @@ import (
 // @in header
 // @name Authorization
 func main() {
+	// Subcommand dispatch: `orion-auth import …` runs an offline IAM migration
+	// instead of booting the HTTP server.
+	if len(os.Args) > 1 && os.Args[1] == "import" {
+		os.Exit(runImport(os.Args[2:]))
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		slog.Error("failed to load config", "error", err)
